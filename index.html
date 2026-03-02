@@ -297,7 +297,7 @@
           <div class="weather-grid">
             <div>
               <div class="weather-label">Wind</div>
-              <div class="weather-val"><span id="w-speed">--</span> <span style="font-size:13px">kn</span></div>
+              <div class="weather-val"><span id="w-speed">--</span> <span style="font-size:13px">km/h</span></div>
               <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
                 <span id="wind-arrow">↑</span>
                 <span id="w-dir-label" style="color:var(--sec);font-size:12px">--</span>
@@ -305,7 +305,7 @@
             </div>
             <div>
               <div class="weather-label">Gusts</div>
-              <div class="weather-val"><span id="w-gust">--</span> <span style="font-size:13px">kn</span></div>
+              <div class="weather-val"><span id="w-gust">--</span> <span style="font-size:13px">km/h</span></div>
               <div class="weather-label" style="margin-top:4px">Temp: <span id="w-temp">--</span>°C</div>
             </div>
             <div>
@@ -785,8 +785,8 @@ function animateWind() {
   ctx.clearRect(0, 0, W, H);
 
   if (wParticleSpeed >= 1) {
-    // Step per frame: calibrated so 20kn particles cross ~30% of screen per life cycle
-    const baseStep = Math.min(wParticleSpeed, 55) * 0.00019;
+    // Step per frame: calibrated so 37km/h particles cross ~30% of screen per life cycle
+    const baseStep = Math.min(wParticleSpeed, 100) * 0.00010;
     windParticles.forEach(p => {
       const px = p.x, py = p.y;
       const step = baseStep * p.speed;
@@ -812,7 +812,7 @@ function animateWind() {
         ctx.moveTo(px * W, py * H);
         ctx.lineTo(p.x * W, p.y * H);
         ctx.strokeStyle = `rgba(255,255,255,${(alpha * 0.55).toFixed(2)})`;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 3;
         ctx.stroke();
       }
     });
@@ -843,7 +843,7 @@ async function fetchWeather() {
   document.getElementById('weather-content').style.display = 'none';
   document.getElementById('forecast-strip').innerHTML = '<span style="color:var(--sec);font-size:12px">Loading…</span>';
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation_probability,cloudcover,windspeed_10m,windgusts_10m,winddirection_10m,visibility&current_weather=true&forecast_days=2&windspeed_unit=kn&timezone=auto`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation_probability,cloudcover,windspeed_10m,windgusts_10m,winddirection_10m,visibility&current_weather=true&forecast_days=2&windspeed_unit=kmh&timezone=auto`;
     const res = await fetch(url);
     const data = await res.json();
     weatherData = data;
@@ -904,11 +904,11 @@ function renderWeather(data) {
   // Fly status
   const spd = parseFloat(speed);
   let status = 'FLY', statusBg = '#3fb950', statusColor = '#000';
-  if (spd >= 25) { status = 'NO-FLY'; statusBg = '#f85149'; statusColor = '#fff'; }
-  else if (spd >= 15) { status = 'CAUTION'; statusBg = '#d29922'; statusColor = '#000'; }
+  if (spd >= 46) { status = 'NO-FLY'; statusBg = '#f85149'; statusColor = '#fff'; }
+  else if (spd >= 28) { status = 'CAUTION'; statusBg = '#d29922'; statusColor = '#000'; }
   const badge = document.getElementById('fly-status');
   badge.textContent = status; badge.style.background = statusBg; badge.style.color = statusColor;
-  document.getElementById('weather-summary').textContent = `${speed}kn ${bearingToCompass(dir)} | ${cw.temperature.toFixed(0)}°C | ${getWMODescription(cw.weathercode)}`;
+  document.getElementById('weather-summary').textContent = `${speed}km/h ${bearingToCompass(dir)} | ${cw.temperature.toFixed(0)}°C | ${getWMODescription(cw.weathercode)}`;
   setWindParticles(parseFloat(speed), dir);
 
   // Forecast strip - next 24 hours
@@ -922,11 +922,11 @@ function renderWeather(data) {
     const fcWind = (data.hourly.windspeed_10m[i] || 0).toFixed(0);
     const fcPrec = data.hourly.precipitation_probability[i] || 0;
     let windCol = 'var(--green)';
-    if (fcWind >= 25) windCol = 'var(--red)';
-    else if (fcWind >= 15) windCol = 'var(--yellow)';
+    if (fcWind >= 46) windCol = 'var(--red)';
+    else if (fcWind >= 28) windCol = 'var(--yellow)';
     const card = document.createElement('div');
     card.className = 'fc-card';
-    card.innerHTML = `<div class="fc-time">${hLabel}</div><div class="fc-icon">${fcPrec > 50 ? '🌧️' : fcWind >= 20 ? '💨' : '🌤️'}</div><div class="fc-wind" style="color:${windCol}">${fcWind}kn</div><div style="color:var(--sec)">${fcPrec}%</div>`;
+    card.innerHTML = `<div class="fc-time">${hLabel}</div><div class="fc-icon">${fcPrec > 50 ? '🌧️' : fcWind >= 37 ? '💨' : '🌤️'}</div><div class="fc-wind" style="color:${windCol}">${fcWind}km/h</div><div style="color:var(--sec)">${fcPrec}%</div>`;
     strip.appendChild(card);
   }
 }
