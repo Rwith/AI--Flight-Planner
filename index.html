@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Waypoint Mission Builder</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d1117; --panel: #161b22; --card: #21262d; --border: #30363d;
+    --text: #e6edf3; --sec: #8b949e;
+    --blue: #58a6ff; --green: #3fb950; --yellow: #d29922;
+    --red: #f85149; --orange: #db6d28; --purple: #a29bfe; --teal: #00cec9; --pink: #fd79a8;
+  }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; overflow: hidden; }
+  /* TOP BAR */
+  #topbar {
+    height: 48px; background: var(--panel); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px; padding: 0 12px; z-index: 1000; position: relative;
+    flex-shrink: 0;
+  }
+  #topbar .title { font-weight: 700; font-size: 14px; color: var(--blue); white-space: nowrap; margin-right: 4px; }
+  #api-key {
+    width: 220px; background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 4px 8px; font-size: 12px; outline: none;
+  }
+  #api-key:focus { border-color: var(--blue); }
+  #fly-status {
+    padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700;
+    background: var(--green); color: #000; white-space: nowrap;
+  }
+  #weather-summary { color: var(--sec); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+  .topbtn {
+    padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--card); color: var(--text); cursor: pointer; font-size: 12px; white-space: nowrap;
+    transition: background .15s;
+  }
+  .topbtn:hover { background: var(--border); }
+  .topbtn.danger { border-color: var(--red); color: var(--red); }
+  .topbtn.primary { border-color: var(--blue); color: var(--blue); }
+  .spacer { flex: 1; }
+  /* MAIN LAYOUT */
+  #main {
+    display: flex; flex-direction: row; height: calc(100vh - 48px); overflow: hidden;
+  }
+  /* MAP AREA */
+  #map-area { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+  #map { flex: 1; min-height: 0; }
+  #map-hint {
+    position: absolute; bottom: 168px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,.65); color: var(--sec); padding: 4px 12px; border-radius: 12px;
+    font-size: 11px; pointer-events: none; z-index: 500; white-space: nowrap;
+  }
+  /* PROFILE */
+  #profile-wrap {
+    background: var(--panel); border-top: 1px solid var(--border);
+    flex-shrink: 0; transition: height .2s;
+  }
+  #profile-wrap.collapsed { height: 28px !important; }
+  #profile-header {
+    height: 28px; display: flex; align-items: center; padding: 0 10px; gap: 8px;
+    cursor: pointer; user-select: none; border-bottom: 1px solid var(--border);
+  }
+  #profile-header span { font-size: 12px; color: var(--sec); }
+  #profile-toggle { margin-left: auto; font-size: 11px; color: var(--blue); }
+  #profile-canvas-wrap { height: 132px; padding: 4px 8px 4px; }
+  /* SIDEBAR */
+  #sidebar {
+    width: 360px; flex-shrink: 0; background: var(--panel);
+    border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden;
+  }
+  #tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .tab {
+    flex: 1; padding: 10px 4px; text-align: center; cursor: pointer; font-size: 12px;
+    color: var(--sec); border-bottom: 2px solid transparent; transition: color .15s;
+  }
+  .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+  .tab-content { display: none; flex: 1; overflow-y: auto; padding: 10px; }
+  .tab-content.active { display: flex; flex-direction: column; gap: 8px; }
+  /* CARDS */
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+  .card-title { font-size: 12px; font-weight: 600; color: var(--sec); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .5px; }
+  /* WAYPOINT LIST */
+  #wp-list { display: flex; flex-direction: column; gap: 4px; }
+  .wp-item {
+    background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+    padding: 7px 10px; cursor: pointer; display: flex; align-items: center; gap: 8px;
+    transition: border-color .15s;
+  }
+  .wp-item:hover { border-color: var(--blue); }
+  .wp-item.selected { border-color: var(--blue); background: rgba(88,166,255,.08); }
+  .wp-dot { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; }
+  .wp-info { flex: 1; }
+  .wp-info .wp-num { font-weight: 600; font-size: 12px; }
+  .wp-info .wp-details { color: var(--sec); font-size: 11px; }
+  .wp-del { color: var(--red); cursor: pointer; font-size: 14px; padding: 2px 4px; }
+  /* EDITOR */
+  #wp-editor { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: none; }
+  #wp-editor.visible { display: block; }
+  .form-row { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+  .form-row label { font-size: 11px; color: var(--sec); }
+  .form-row input, .form-row select, .form-row textarea {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+    color: var(--text); padding: 5px 8px; font-size: 12px; outline: none; width: 100%;
+  }
+  .form-row input:focus, .form-row select:focus, .form-row textarea:focus { border-color: var(--blue); }
+  .form-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .btn { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer; font-size: 12px; transition: background .15s; }
+  .btn:hover { background: var(--border); }
+  .btn.primary { background: var(--blue); color: #000; border-color: var(--blue); font-weight: 600; }
+  .btn.primary:hover { background: #79b8ff; }
+  .btn.success { background: var(--green); color: #000; border-color: var(--green); font-weight: 600; }
+  .btn.success:hover { background: #56d364; }
+  .btn.warning { background: var(--yellow); color: #000; border-color: var(--yellow); }
+  .btn.danger { background: var(--red); color: #fff; border-color: var(--red); }
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  /* WEATHER */
+  .weather-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .weather-val { font-size: 20px; font-weight: 700; }
+  .weather-label { font-size: 11px; color: var(--sec); }
+  #wind-arrow { display: inline-block; font-size: 18px; }
+  #forecast-strip { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+  #forecast-strip::-webkit-scrollbar { height: 4px; }
+  #forecast-strip::-webkit-scrollbar-track { background: var(--bg); }
+  #forecast-strip::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .fc-card {
+    flex-shrink: 0; width: 56px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 3px; text-align: center; font-size: 10px;
+  }
+  .fc-time { color: var(--sec); margin-bottom: 2px; }
+  .fc-icon { font-size: 14px; margin: 2px 0; }
+  .fc-wind { font-weight: 600; }
+  /* AI ROUTE */
+  #ai-prompt { width: 100%; height: 80px; resize: vertical; }
+  /* SURVEY */
+  .survey-result { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+  .survey-result .res-row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid var(--border); }
+  .survey-result .res-row:last-child { border-bottom: none; }
+  .survey-result .res-label { color: var(--sec); }
+  .survey-result .res-val { font-weight: 600; color: var(--blue); }
+  .survey-explanation { font-size: 11px; color: var(--sec); line-height: 1.5; margin-top: 6px; }
+  /* LOGBOOK */
+  #logbook-panel {
+    position: fixed; top: 0; right: -420px; width: 420px; height: 100vh;
+    background: var(--panel); border-left: 1px solid var(--border); z-index: 2000;
+    display: flex; flex-direction: column; transition: right .3s ease; overflow: hidden;
+  }
+  #logbook-panel.open { right: 0; }
+  #logbook-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  #logbook-header h3 { font-size: 14px; font-weight: 700; flex: 1; }
+  #logbook-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  #logbook-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 1999; }
+  #logbook-overlay.open { display: block; }
+  /* MODAL */
+  #modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 3000; align-items: center; justify-content: center; }
+  #modal-overlay.open { display: flex; }
+  #modal {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    width: 560px; max-width: 95vw; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  #modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+  #modal-header h3 { flex: 1; font-size: 15px; font-weight: 700; }
+  #modal-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
+  #modal-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+  .finding { border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+  .finding.red { background: rgba(248,81,73,.12); border: 1px solid rgba(248,81,73,.4); }
+  .finding.yellow { background: rgba(210,153,34,.12); border: 1px solid rgba(210,153,34,.4); }
+  .finding.green { background: rgba(63,185,80,.12); border: 1px solid rgba(63,185,80,.4); }
+  .finding-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .finding-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .finding-dot.red { background: var(--red); }
+  .finding-dot.yellow { background: var(--yellow); }
+  .finding-dot.green { background: var(--green); }
+  .finding-issue { font-weight: 600; font-size: 13px; }
+  .finding-rec { color: var(--sec); font-size: 12px; }
+  .overall-badge { display: inline-block; padding: 4px 14px; border-radius: 12px; font-weight: 700; font-size: 13px; }
+  .overall-badge.red { background: var(--red); color: #fff; }
+  .overall-badge.yellow { background: var(--yellow); color: #000; }
+  .overall-badge.green { background: var(--green); color: #000; }
+  /* SPINNER */
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* MISC */
+  .section-title { font-size: 11px; font-weight: 600; color: var(--sec); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .stat-card { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; text-align: center; }
+  .stat-val { font-size: 18px; font-weight: 700; color: var(--blue); }
+  .stat-label { font-size: 10px; color: var(--sec); }
+  .divider { height: 1px; background: var(--border); margin: 4px 0; }
+  #no-wp { color: var(--sec); font-size: 12px; text-align: center; padding: 20px; }
+  .log-entry { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+  .log-entry-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .log-entry-title { font-weight: 600; font-size: 13px; }
+  .outcome-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+  .outcome-badge.Successful { background: rgba(63,185,80,.2); color: var(--green); }
+  .outcome-badge.Partial { background: rgba(210,153,34,.2); color: var(--yellow); }
+  .outcome-badge.Aborted { background: rgba(248,81,73,.2); color: var(--red); }
+  /* Leaflet overrides */
+  .leaflet-popup-content-wrapper { background: var(--panel); border: 1px solid var(--border); color: var(--text); box-shadow: 0 4px 16px rgba(0,0,0,.5); }
+  .leaflet-popup-tip { background: var(--panel); }
+  .wp-popup-del { color: var(--red); cursor: pointer; font-size: 12px; padding: 3px 0; display: block; }
+  .wp-popup-del:hover { text-decoration: underline; }
+  /* mobile */
+  @media (max-width: 767px) {
+    #main { flex-direction: column; }
+    #sidebar { width: 100%; height: 300px; border-left: none; border-top: 1px solid var(--border); }
+    #map-hint { bottom: 320px; }
+    #logbook-panel { width: 100%; right: -100%; }
+    #logbook-panel.open { right: 0; }
+  }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <div class="title">✈ Mission Builder</div>
+  <input id="api-key" type="password" placeholder="Anthropic API Key…">
+  <span id="fly-status">LOADING</span>
+  <span id="weather-summary">Fetching weather…</span>
+  <div class="spacer"></div>
+  <button class="topbtn primary" onclick="openSafetyAnalyser()">Safety Analyse</button>
+  <button class="topbtn" onclick="exportWaypoints()">Export .waypoints</button>
+  <label class="topbtn" style="cursor:pointer">Import <input type="file" id="import-file" accept=".waypoints,.txt" style="display:none" onchange="importWaypoints(event)"></label>
+  <button class="topbtn" onclick="openLogbook()">Logbook</button>
+  <button class="topbtn danger" onclick="clearMission()">Clear</button>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+  <!-- MAP AREA -->
+  <div id="map-area">
+    <div id="map"></div>
+    <div id="map-hint">Click to place waypoints • Drag to reposition</div>
+    <div id="profile-wrap" style="height:160px">
+      <div id="profile-header" onclick="toggleProfile()">
+        <span>Altitude Profile</span>
+        <span id="profile-dist"></span>
+        <span id="profile-toggle">▼ Collapse</span>
+      </div>
+      <div id="profile-canvas-wrap">
+        <canvas id="profile-chart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div id="tabs">
+      <div class="tab active" onclick="switchTab('waypoints')">Waypoints</div>
+      <div class="tab" onclick="switchTab('weather')">Weather</div>
+      <div class="tab" onclick="switchTab('ai-route')">AI Route</div>
+      <div class="tab" onclick="switchTab('survey')">Survey</div>
+    </div>
+
+    <!-- WAYPOINTS TAB -->
+    <div id="tab-waypoints" class="tab-content active">
+      <div id="wp-editor" class="card">
+        <div class="card-title" id="editor-title">Edit Waypoint</div>
+        <div class="form-2col">
+          <div class="form-row">
+            <label>Altitude (m AGL)</label>
+            <input type="number" id="ed-alt" value="50" min="0" max="500" onchange="updateSelectedWP()">
+          </div>
+          <div class="form-row">
+            <label>Action</label>
+            <select id="ed-action" onchange="updateSelectedWP()">
+              <option value="waypoint">Waypoint</option>
+              <option value="loiter">Loiter</option>
+              <option value="photo">Photo Trigger</option>
+              <option value="land">Land</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row" id="loiter-row" style="display:none">
+          <label>Loiter Radius (m)</label>
+          <input type="number" id="ed-loiter-r" value="20" min="5" max="500" onchange="updateSelectedWP()">
+        </div>
+        <div class="btn-row">
+          <button class="btn danger" onclick="deleteSelectedWP()" style="flex:1">Delete</button>
+          <button class="btn" onclick="deselectWP()" style="flex:1">Deselect</button>
+        </div>
+      </div>
+      <div id="no-wp">No waypoints yet.<br>Click the map to place them.</div>
+      <div id="wp-list"></div>
+    </div>
+
+    <!-- WEATHER TAB -->
+    <div id="tab-weather" class="tab-content">
+      <div class="card" id="weather-card">
+        <div class="card-title">Current Conditions</div>
+        <div id="weather-loading" style="color:var(--sec);font-size:12px">Fetching…</div>
+        <div id="weather-content" style="display:none">
+          <div class="weather-grid">
+            <div>
+              <div class="weather-label">Wind</div>
+              <div class="weather-val"><span id="w-speed">--</span> <span style="font-size:13px">kn</span></div>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+                <span id="wind-arrow">↑</span>
+                <span id="w-dir-label" style="color:var(--sec);font-size:12px">--</span>
+              </div>
+            </div>
+            <div>
+              <div class="weather-label">Gusts</div>
+              <div class="weather-val"><span id="w-gust">--</span> <span style="font-size:13px">kn</span></div>
+              <div class="weather-label" style="margin-top:4px">Temp: <span id="w-temp">--</span>°C</div>
+            </div>
+            <div>
+              <div class="weather-label">Cloud Cover</div>
+              <div class="weather-val"><span id="w-cloud">--</span><span style="font-size:13px">%</span></div>
+            </div>
+            <div>
+              <div class="weather-label">Precip Chance</div>
+              <div class="weather-val"><span id="w-precip">--</span><span style="font-size:13px">%</span></div>
+            </div>
+            <div>
+              <div class="weather-label">Visibility</div>
+              <div class="weather-val" style="font-size:15px"><span id="w-vis">--</span></div>
+            </div>
+            <div>
+              <div class="weather-label">Condition</div>
+              <div id="w-cond" style="font-size:12px;color:var(--sec)">--</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">24-Hour Forecast</div>
+        <div id="forecast-strip"></div>
+      </div>
+      <button class="btn primary" onclick="fetchWeather()" style="width:100%">Refresh Weather</button>
+    </div>
+
+    <!-- AI ROUTE TAB -->
+    <div id="tab-ai-route" class="tab-content">
+      <div class="card">
+        <div class="card-title">AI Route Planner</div>
+        <div class="form-row">
+          <label>Describe your mission</label>
+          <textarea id="ai-prompt" class="ai-prompt" placeholder="e.g. Survey the field to the north-east, then return to home. Cover an area roughly 300m × 200m."></textarea>
+        </div>
+        <div class="form-row" style="flex-direction:row;align-items:center;gap:8px">
+          <input type="checkbox" id="ai-append" style="width:auto">
+          <label for="ai-append" style="color:var(--sec)">Append to existing waypoints</label>
+        </div>
+        <button class="btn primary" onclick="runAIRoute()" style="width:100%" id="ai-route-btn">Generate Route</button>
+      </div>
+      <div id="ai-route-result" style="display:none" class="card">
+        <div class="card-title">Generated Waypoints</div>
+        <div id="ai-route-text" style="font-size:12px;color:var(--sec)"></div>
+      </div>
+    </div>
+
+    <!-- SURVEY TAB -->
+    <div id="tab-survey" class="tab-content">
+      <div class="card">
+        <div class="card-title">Camera Preset</div>
+        <div class="form-row">
+          <label>Camera</label>
+          <select id="cam-preset" onchange="applyCameraPreset()">
+            <option value="gopro_hero12">GoPro Hero 12</option>
+            <option value="iphone_15">iPhone 15</option>
+            <option value="sony_zv1">Sony ZV-1</option>
+            <option value="generic_123">Generic 1/2.3"</option>
+            <option value="manual">Manual</option>
+          </select>
+        </div>
+        <div class="form-2col">
+          <div class="form-row">
+            <label>Focal Length (mm)</label>
+            <input type="number" id="cam-focal" value="4.0" step="0.1">
+          </div>
+          <div class="form-row">
+            <label>GSD (cm/px)</label>
+            <input type="number" id="cam-gsd" value="3.0" step="0.1">
+          </div>
+        </div>
+        <div class="form-2col">
+          <div class="form-row">
+            <label>Sensor W (mm)</label>
+            <input type="number" id="cam-sw" value="6.17" step="0.01">
+          </div>
+          <div class="form-row">
+            <label>Sensor H (mm)</label>
+            <input type="number" id="cam-sh" value="4.55" step="0.01">
+          </div>
+        </div>
+        <div class="form-2col">
+          <div class="form-row">
+            <label>Image W (px)</label>
+            <input type="number" id="cam-iw" value="5312">
+          </div>
+          <div class="form-row">
+            <label>Image H (px)</label>
+            <input type="number" id="cam-ih" value="3984">
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Front/Side Overlap (%)</label>
+          <input type="number" id="cam-overlap" value="75" min="0" max="95">
+        </div>
+        <button class="btn primary" onclick="runSurveyAdvisor()" style="width:100%" id="survey-btn">Calculate with AI</button>
+      </div>
+      <div id="survey-result-wrap" style="display:none" class="card">
+        <div class="card-title">Recommendations</div>
+        <div class="survey-result" id="survey-result-data"></div>
+        <div class="survey-explanation" id="survey-explanation"></div>
+        <button class="btn success" onclick="applyAltToAll()" style="width:100%;margin-top:8px" id="apply-alt-btn">Apply Altitude to All Waypoints</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LOGBOOK PANEL -->
+<div id="logbook-overlay" onclick="closeLogbook()"></div>
+<div id="logbook-panel">
+  <div id="logbook-header">
+    <h3>Flight Logbook</h3>
+    <button class="btn" onclick="exportLogCSV()" style="font-size:11px;padding:4px 8px">CSV</button>
+    <button class="btn" onclick="exportLogJSON()" style="font-size:11px;padding:4px 8px">JSON</button>
+    <button class="btn danger" onclick="closeLogbook()" style="font-size:11px;padding:4px 8px">✕</button>
+  </div>
+  <div id="logbook-body">
+    <div class="card">
+      <div class="card-title">Stats</div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val" id="log-total">0</div><div class="stat-label">Total Flights</div></div>
+        <div class="stat-card"><div class="stat-val" id="log-time">0</div><div class="stat-label">Total Mins</div></div>
+        <div class="stat-card"><div class="stat-val" id="log-success">0</div><div class="stat-label">Successful</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Log New Entry</div>
+      <div class="form-2col">
+        <div class="form-row">
+          <label>Date</label>
+          <input type="date" id="log-date">
+        </div>
+        <div class="form-row">
+          <label>Duration (min)</label>
+          <input type="number" id="log-duration" value="15" min="1">
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Aircraft</label>
+        <input type="text" id="log-aircraft" placeholder="DJI Mini 4 Pro">
+      </div>
+      <div class="form-row">
+        <label>Location</label>
+        <input type="text" id="log-location" placeholder="Lat, Lon">
+      </div>
+      <div class="form-row">
+        <label>Notes</label>
+        <textarea id="log-notes" style="height:60px;resize:vertical"></textarea>
+      </div>
+      <div class="form-row">
+        <label>Outcome</label>
+        <select id="log-outcome">
+          <option>Successful</option>
+          <option>Partial</option>
+          <option>Aborted</option>
+        </select>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" onclick="prefillLog()" style="flex:1">Pre-fill Mission</button>
+        <button class="btn success" onclick="addLogEntry()" style="flex:1">Save Entry</button>
+      </div>
+    </div>
+    <div id="log-entries"></div>
+  </div>
+</div>
+
+<!-- SAFETY MODAL -->
+<div id="modal-overlay">
+  <div id="modal">
+    <div id="modal-header">
+      <h3>Mission Safety Analysis</h3>
+      <div id="modal-overall"></div>
+    </div>
+    <div id="modal-body"></div>
+    <div id="modal-footer">
+      <button class="btn" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ====================== STATE ======================
+let waypoints = []; // {lat,lon,alt,action,loiterR,marker,id}
+let selectedIdx = -1;
+let homeMarker = null;
+let homeLat = -26.65, homeLon = 153.06;
+let missionPolyline = null;
+let profileChart = null;
+let profileCollapsed = false;
+let weatherData = null;
+let surveyRecommendedAlt = null;
+let logbookEntries = [];
+let wpIdCounter = 0;
+
+const ACTION_COLORS = { waypoint: '#58a6ff', loiter: '#a29bfe', photo: '#00cec9', land: '#fd79a8' };
+
+// ====================== MAP INIT ======================
+const map = L.map('map', { center: [-26.65, 153.06], zoom: 14, zoomControl: true });
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO',
+  subdomains: 'abcd', maxZoom: 20
+}).addTo(map);
+
+// Home marker
+function createHomeIcon() {
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:28px;height:28px;background:#db6d28;border:2px solid #fff;border-radius:4px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.6)">H</div>`,
+    iconSize: [28, 28], iconAnchor: [14, 14]
+  });
+}
+
+homeMarker = L.marker([homeLat, homeLon], { icon: createHomeIcon(), draggable: true, zIndexOffset: 1000 }).addTo(map);
+homeMarker.on('dragend', e => { const p = e.target.getLatLng(); homeLat = p.lat; homeLon = p.lng; });
+homeMarker.on('click', e => { L.DomEvent.stopPropagation(e); });
+
+// Map click => add waypoint
+map.on('click', e => {
+  addWaypoint(e.latlng.lat, e.latlng.lng, 50, 'waypoint');
+});
+
+// ====================== WAYPOINT ICON ======================
+function makeWPIcon(idx, action, selected) {
+  const col = ACTION_COLORS[action] || '#58a6ff';
+  const bg = selected ? '#fff' : col;
+  const fg = selected ? col : '#000';
+  const border = selected ? col : 'rgba(0,0,0,.4)';
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:24px;height:24px;border-radius:50%;background:${bg};border:2px solid ${border};display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;color:${fg};box-shadow:0 2px 8px rgba(0,0,0,.6)">${idx + 1}</div>`,
+    iconSize: [24, 24], iconAnchor: [12, 12]
+  });
+}
+
+// ====================== ADD WAYPOINT ======================
+function addWaypoint(lat, lon, alt, action) {
+  const id = wpIdCounter++;
+  const idx = waypoints.length;
+  const marker = L.marker([lat, lon], {
+    icon: makeWPIcon(idx, action, false),
+    draggable: true,
+    zIndexOffset: 500
+  }).addTo(map);
+
+  const wp = { lat, lon, alt, action, loiterR: 20, marker, id };
+  waypoints.push(wp);
+
+  marker.on('click', e => { L.DomEvent.stopPropagation(e); selectWP(waypoints.indexOf(wp)); });
+  marker.on('contextmenu', e => {
+    L.DomEvent.stopPropagation(e);
+    const i = waypoints.indexOf(wp);
+    L.popup({ className: 'dark-popup' })
+      .setLatLng(e.latlng)
+      .setContent(`<a class="wp-popup-del" onclick="deleteWPByIdx(${i});map.closePopup()">🗑 Delete Waypoint ${i + 1}</a>`)
+      .openOn(map);
+  });
+  marker.on('dragend', e => {
+    const p = e.target.getLatLng();
+    wp.lat = p.lat; wp.lon = p.lng;
+    updatePolyline(); updateProfile();
+    if (selectedIdx === waypoints.indexOf(wp)) updateEditorFields();
+  });
+  marker.on('drag', () => { updatePolyline(); });
+
+  selectWP(idx);
+  updatePolyline();
+  updateProfile();
+  renderWPList();
+}
+
+// ====================== POLYLINE ======================
+function updatePolyline() {
+  if (missionPolyline) map.removeLayer(missionPolyline);
+  if (waypoints.length < 2) return;
+  const lls = waypoints.map(w => [w.lat, w.lon]);
+  missionPolyline = L.polyline(lls, { color: '#58a6ff', weight: 2, dashArray: '6,4', opacity: .8 }).addTo(map);
+}
+
+// ====================== WP LIST RENDER ======================
+function renderWPList() {
+  const list = document.getElementById('wp-list');
+  const noWP = document.getElementById('no-wp');
+  if (waypoints.length === 0) { list.innerHTML = ''; noWP.style.display = 'block'; return; }
+  noWP.style.display = 'none';
+  list.innerHTML = waypoints.map((wp, i) => {
+    const col = ACTION_COLORS[wp.action] || '#58a6ff';
+    return `<div class="wp-item${selectedIdx === i ? ' selected' : ''}" onclick="selectWP(${i})">
+      <div class="wp-dot" style="background:${col};color:#000">${i + 1}</div>
+      <div class="wp-info">
+        <div class="wp-num">WP${i + 1} — ${wp.action}</div>
+        <div class="wp-details">${wp.alt}m AGL &nbsp;|&nbsp; ${wp.lat.toFixed(5)}, ${wp.lon.toFixed(5)}</div>
+      </div>
+      <span class="wp-del" onclick="event.stopPropagation();deleteWPByIdx(${i})">✕</span>
+    </div>`;
+  }).join('');
+}
+
+// ====================== SELECT / DESELECT ======================
+function selectWP(idx) {
+  if (selectedIdx >= 0 && selectedIdx < waypoints.length) {
+    const prev = waypoints[selectedIdx];
+    prev.marker.setIcon(makeWPIcon(selectedIdx, prev.action, false));
+  }
+  selectedIdx = idx;
+  if (idx >= 0 && idx < waypoints.length) {
+    const wp = waypoints[idx];
+    wp.marker.setIcon(makeWPIcon(idx, wp.action, true));
+    showEditor(wp, idx);
+    map.panTo([wp.lat, wp.lon]);
+    highlightProfilePoint(idx);
+  }
+  renderWPList();
+}
+
+function deselectWP() {
+  if (selectedIdx >= 0 && selectedIdx < waypoints.length) {
+    const prev = waypoints[selectedIdx];
+    prev.marker.setIcon(makeWPIcon(selectedIdx, prev.action, false));
+  }
+  selectedIdx = -1;
+  document.getElementById('wp-editor').classList.remove('visible');
+  renderWPList();
+}
+
+function showEditor(wp, idx) {
+  const ed = document.getElementById('wp-editor');
+  ed.classList.add('visible');
+  document.getElementById('editor-title').textContent = `Edit Waypoint ${idx + 1}`;
+  document.getElementById('ed-alt').value = wp.alt;
+  document.getElementById('ed-action').value = wp.action;
+  document.getElementById('ed-loiter-r').value = wp.loiterR || 20;
+  document.getElementById('loiter-row').style.display = wp.action === 'loiter' ? 'flex' : 'none';
+}
+
+function updateEditorFields() {
+  if (selectedIdx < 0 || selectedIdx >= waypoints.length) return;
+  showEditor(waypoints[selectedIdx], selectedIdx);
+}
+
+function updateSelectedWP() {
+  if (selectedIdx < 0 || selectedIdx >= waypoints.length) return;
+  const wp = waypoints[selectedIdx];
+  wp.alt = parseFloat(document.getElementById('ed-alt').value) || 50;
+  wp.action = document.getElementById('ed-action').value;
+  wp.loiterR = parseFloat(document.getElementById('ed-loiter-r').value) || 20;
+  document.getElementById('loiter-row').style.display = wp.action === 'loiter' ? 'flex' : 'none';
+  wp.marker.setIcon(makeWPIcon(selectedIdx, wp.action, true));
+  renderWPList();
+  updateProfile();
+}
+
+function deleteSelectedWP() { if (selectedIdx >= 0) deleteWPByIdx(selectedIdx); }
+
+function deleteWPByIdx(idx) {
+  if (idx < 0 || idx >= waypoints.length) return;
+  map.removeLayer(waypoints[idx].marker);
+  waypoints.splice(idx, 1);
+  if (selectedIdx === idx) { selectedIdx = -1; document.getElementById('wp-editor').classList.remove('visible'); }
+  else if (selectedIdx > idx) selectedIdx--;
+  // Re-index icons
+  waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, i === selectedIdx)));
+  updatePolyline(); updateProfile(); renderWPList();
+}
+
+function clearMission() {
+  if (!confirm('Clear all waypoints?')) return;
+  waypoints.forEach(wp => map.removeLayer(wp.marker));
+  waypoints = []; selectedIdx = -1;
+  document.getElementById('wp-editor').classList.remove('visible');
+  if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
+  updateProfile(); renderWPList();
+}
+
+// ====================== EXPORT/IMPORT ======================
+function exportWaypoints() {
+  const lines = ['QGC WPL 110'];
+  // Home
+  lines.push(`0\t1\t0\t16\t0\t0\t0\t0\t${homeLat.toFixed(7)}\t${homeLon.toFixed(7)}\t${10}\t1`);
+  let idx = 1;
+  waypoints.forEach(wp => {
+    const cmd = wp.action === 'loiter' ? 17 : wp.action === 'land' ? 21 : 16;
+    const p3 = wp.action === 'loiter' ? wp.loiterR : 0;
+    lines.push(`${idx}\t0\t3\t${cmd}\t0\t0\t${p3}\t0\t${wp.lat.toFixed(7)}\t${wp.lon.toFixed(7)}\t${wp.alt}\t1`);
+    idx++;
+    if (wp.action === 'photo') {
+      lines.push(`${idx}\t0\t3\t203\t0\t0\t0\t1\t0\t0\t0\t1`);
+      idx++;
+    }
+  });
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'mission.waypoints'; a.click();
+}
+
+function importWaypoints(event) {
+  const file = event.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const lines = e.target.result.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines[0].startsWith('QGC WPL')) { alert('Not a valid QGC waypoints file'); return; }
+    waypoints.forEach(wp => map.removeLayer(wp.marker));
+    waypoints = []; selectedIdx = -1;
+    document.getElementById('wp-editor').classList.remove('visible');
+    if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
+    lines.slice(1).forEach(line => {
+      const p = line.split('\t');
+      if (p.length < 12) return;
+      const idx = parseInt(p[0]), cmd = parseInt(p[3]);
+      const lat = parseFloat(p[8]), lon = parseFloat(p[9]), alt = parseFloat(p[10]);
+      if (idx === 0) { homeLat = lat; homeLon = lon; homeMarker.setLatLng([lat, lon]); return; }
+      if (cmd === 203) return; // skip digicam, handled by photo
+      let action = 'waypoint';
+      if (cmd === 17) action = 'loiter';
+      else if (cmd === 21) action = 'land';
+      const loiterR = parseFloat(p[6]) || 20;
+      addWaypointSilent(lat, lon, alt, action, loiterR);
+    });
+    deselectWP(); updatePolyline(); updateProfile(); renderWPList();
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function addWaypointSilent(lat, lon, alt, action, loiterR) {
+  const id = wpIdCounter++;
+  const idx = waypoints.length;
+  const marker = L.marker([lat, lon], { icon: makeWPIcon(idx, action, false), draggable: true, zIndexOffset: 500 }).addTo(map);
+  const wp = { lat, lon, alt, action, loiterR: loiterR || 20, marker, id };
+  waypoints.push(wp);
+  marker.on('click', e => { L.DomEvent.stopPropagation(e); selectWP(waypoints.indexOf(wp)); });
+  marker.on('contextmenu', e => {
+    L.DomEvent.stopPropagation(e);
+    const i = waypoints.indexOf(wp);
+    L.popup().setLatLng(e.latlng).setContent(`<a class="wp-popup-del" onclick="deleteWPByIdx(${i});map.closePopup()">🗑 Delete WP${i + 1}</a>`).openOn(map);
+  });
+  marker.on('dragend', e => {
+    const p = e.target.getLatLng(); wp.lat = p.lat; wp.lon = p.lng;
+    updatePolyline(); updateProfile();
+  });
+  marker.on('drag', () => updatePolyline());
+}
+
+// ====================== TABS ======================
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const names = ['waypoints','weather','ai-route','survey'];
+    t.classList.toggle('active', names[i] === name);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+}
+
+// ====================== WEATHER ======================
+async function fetchWeather() {
+  const lat = map.getCenter().lat, lon = map.getCenter().lng;
+  document.getElementById('weather-loading').style.display = 'block';
+  document.getElementById('weather-content').style.display = 'none';
+  document.getElementById('forecast-strip').innerHTML = '<span style="color:var(--sec);font-size:12px">Loading…</span>';
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation_probability,cloudcover,windspeed_10m,windgusts_10m,winddirection_10m,visibility&current_weather=true&forecast_days=2&windspeed_unit=kn&timezone=auto`;
+    const res = await fetch(url);
+    const data = await res.json();
+    weatherData = data;
+    renderWeather(data);
+  } catch(err) {
+    document.getElementById('weather-loading').textContent = 'Failed to fetch weather: ' + err.message;
+  }
+}
+
+function bearingToCompass(deg) {
+  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+
+function getWMODescription(code) {
+  const m = {0:'Clear sky',1:'Mainly clear',2:'Partly cloudy',3:'Overcast',45:'Fog',48:'Icy fog',51:'Light drizzle',53:'Moderate drizzle',55:'Dense drizzle',61:'Slight rain',63:'Moderate rain',65:'Heavy rain',71:'Slight snow',73:'Moderate snow',75:'Heavy snow',80:'Slight showers',81:'Moderate showers',82:'Violent showers',95:'Thunderstorm',96:'Thunderstorm+hail',99:'Heavy thunderstorm+hail'};
+  return m[code] || `Code ${code}`;
+}
+
+function getWMOIcon(code) {
+  if (code === 0) return '☀️';
+  if (code <= 2) return '🌤️';
+  if (code === 3) return '☁️';
+  if (code <= 48) return '🌫️';
+  if (code <= 55) return '🌦️';
+  if (code <= 65) return '🌧️';
+  if (code <= 75) return '🌨️';
+  if (code <= 82) return '🌧️';
+  return '⛈️';
+}
+
+function renderWeather(data) {
+  document.getElementById('weather-loading').style.display = 'none';
+  document.getElementById('weather-content').style.display = 'block';
+  const cw = data.current_weather;
+  const speed = cw.windspeed.toFixed(1);
+  const dir = cw.winddirection;
+  document.getElementById('w-speed').textContent = speed;
+  document.getElementById('w-dir-label').textContent = bearingToCompass(dir);
+  document.getElementById('wind-arrow').style.transform = `rotate(${dir + 180}deg)`;
+
+  // Find closest hour index
+  const now = new Date();
+  const hours = data.hourly.time;
+  let bestIdx = 0;
+  let bestDiff = Infinity;
+  hours.forEach((t, i) => { const d = Math.abs(new Date(t) - now); if (d < bestDiff) { bestDiff = d; bestIdx = i; } });
+
+  document.getElementById('w-gust').textContent = (data.hourly.windgusts_10m[bestIdx] || '--');
+  document.getElementById('w-temp').textContent = cw.temperature.toFixed(1);
+  document.getElementById('w-cloud').textContent = data.hourly.cloudcover[bestIdx] || '--';
+  document.getElementById('w-precip').textContent = data.hourly.precipitation_probability[bestIdx] || '0';
+  const vis = data.hourly.visibility[bestIdx];
+  document.getElementById('w-vis').textContent = vis >= 1000 ? (vis / 1000).toFixed(1) + ' km' : vis + ' m';
+  document.getElementById('w-cond').textContent = getWMODescription(cw.weathercode);
+
+  // Fly status
+  const spd = parseFloat(speed);
+  let status = 'FLY', statusBg = '#3fb950', statusColor = '#000';
+  if (spd >= 25) { status = 'NO-FLY'; statusBg = '#f85149'; statusColor = '#fff'; }
+  else if (spd >= 15) { status = 'CAUTION'; statusBg = '#d29922'; statusColor = '#000'; }
+  const badge = document.getElementById('fly-status');
+  badge.textContent = status; badge.style.background = statusBg; badge.style.color = statusColor;
+  document.getElementById('weather-summary').textContent = `${speed}kn ${bearingToCompass(dir)} | ${cw.temperature.toFixed(0)}°C | ${getWMODescription(cw.weathercode)}`;
+
+  // Forecast strip - next 24 hours
+  const strip = document.getElementById('forecast-strip');
+  strip.innerHTML = '';
+  const startHour = bestIdx;
+  for (let i = startHour; i < Math.min(startHour + 24, hours.length); i++) {
+    const t = new Date(hours[i]);
+    const hLabel = t.getHours().toString().padStart(2, '0') + ':00';
+    const wCode = data.current_weather.weathercode; // use current code as proxy
+    const fcWind = (data.hourly.windspeed_10m[i] || 0).toFixed(0);
+    const fcPrec = data.hourly.precipitation_probability[i] || 0;
+    let windCol = 'var(--green)';
+    if (fcWind >= 25) windCol = 'var(--red)';
+    else if (fcWind >= 15) windCol = 'var(--yellow)';
+    const card = document.createElement('div');
+    card.className = 'fc-card';
+    card.innerHTML = `<div class="fc-time">${hLabel}</div><div class="fc-icon">${fcPrec > 50 ? '🌧️' : fcWind >= 20 ? '💨' : '🌤️'}</div><div class="fc-wind" style="color:${windCol}">${fcWind}kn</div><div style="color:var(--sec)">${fcPrec}%</div>`;
+    strip.appendChild(card);
+  }
+}
+
+// ====================== ALTITUDE PROFILE ======================
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000, dLat = (lat2 - lat1) * Math.PI / 180, dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function updateProfile() {
+  const canvas = document.getElementById('profile-chart');
+  if (profileCollapsed) return;
+
+  if (waypoints.length === 0) {
+    if (profileChart) { profileChart.destroy(); profileChart = null; }
+    document.getElementById('profile-dist').textContent = '';
+    return;
+  }
+
+  // Build cumulative distances
+  let cumDist = [0];
+  for (let i = 1; i < waypoints.length; i++) {
+    const d = haversine(waypoints[i-1].lat, waypoints[i-1].lon, waypoints[i].lat, waypoints[i].lon);
+    cumDist.push(cumDist[i-1] + d);
+  }
+  const totalDist = cumDist[cumDist.length - 1];
+  const unit = totalDist >= 1000 ? 'km' : 'm';
+  const scale = totalDist >= 1000 ? 1000 : 1;
+  document.getElementById('profile-dist').textContent = `Total: ${(totalDist / scale).toFixed(2)} ${unit}`;
+
+  const labels = waypoints.map((_, i) => `WP${i + 1}`);
+  const xData = cumDist.map(d => parseFloat((d / scale).toFixed(3)));
+  const yData = waypoints.map(w => w.alt);
+  const pointColors = waypoints.map((w, i) => i === selectedIdx ? '#fff' : (ACTION_COLORS[w.action] || '#58a6ff'));
+
+  if (profileChart) { profileChart.destroy(); profileChart = null; }
+
+  profileChart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: yData,
+        borderColor: '#58a6ff',
+        backgroundColor: 'rgba(88,166,255,.12)',
+        pointBackgroundColor: pointColors,
+        pointBorderColor: '#fff',
+        pointBorderWidth: 1.5,
+        pointRadius: 6,
+        pointHoverRadius: 8,
+        fill: true,
+        tension: 0.3
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => `Alt: ${ctx.parsed.y}m AGL | ${(xData[ctx.dataIndex])} ${unit}`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#8b949e', font: { size: 10 } }, grid: { color: 'rgba(48,54,61,.6)' } },
+        y: { ticks: { color: '#8b949e', font: { size: 10 }, callback: v => v + 'm' }, grid: { color: 'rgba(48,54,61,.6)' } }
+      },
+      onClick: (e, elements) => {
+        if (elements.length > 0) {
+          selectWP(elements[0].index);
+          switchTab('waypoints');
+        }
+      }
+    }
+  });
+}
+
+function highlightProfilePoint(idx) {
+  if (!profileChart || idx < 0) return;
+  const ds = profileChart.data.datasets[0];
+  ds.pointBackgroundColor = waypoints.map((w, i) => i === idx ? '#fff' : (ACTION_COLORS[w.action] || '#58a6ff'));
+  profileChart.update();
+}
+
+function toggleProfile() {
+  profileCollapsed = !profileCollapsed;
+  const wrap = document.getElementById('profile-wrap');
+  const toggle = document.getElementById('profile-toggle');
+  if (profileCollapsed) {
+    wrap.classList.add('collapsed');
+    toggle.textContent = '▶ Expand';
+    document.getElementById('map-hint').style.bottom = '36px';
+  } else {
+    wrap.classList.remove('collapsed');
+    toggle.textContent = '▼ Collapse';
+    document.getElementById('map-hint').style.bottom = '168px';
+    setTimeout(() => updateProfile(), 210);
+  }
+}
+
+// ====================== AI ROUTE PLANNER ======================
+async function callClaude(systemPrompt, userContent) {
+  const apiKey = document.getElementById('api-key').value.trim();
+  if (!apiKey) { alert('Enter your Anthropic API key in the top bar'); return null; }
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userContent }]
+    })
+  });
+  if (!resp.ok) { const e = await resp.json(); throw new Error(e.error?.message || resp.statusText); }
+  const data = await resp.json();
+  return data.content[0].text;
+}
+
+function extractJSON(text) {
+  const m = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (m) return m[1].trim();
+  const start = text.indexOf('['); const end = text.lastIndexOf(']');
+  if (start !== -1 && end !== -1) return text.slice(start, end + 1);
+  const start2 = text.indexOf('{'); const end2 = text.lastIndexOf('}');
+  if (start2 !== -1 && end2 !== -1) return text.slice(start2, end2 + 1);
+  return text;
+}
+
+async function runAIRoute() {
+  const prompt = document.getElementById('ai-prompt').value.trim();
+  if (!prompt) { alert('Enter a mission description'); return; }
+  const btn = document.getElementById('ai-route-btn');
+  btn.innerHTML = '<span class="spinner"></span>Generating…';
+  btn.disabled = true;
+  const center = map.getCenter();
+  const sys = `You are a drone mission planning AI. Return ONLY a JSON array of waypoints: [{"lat":number,"lon":number,"alt":number,"action":"waypoint"|"loiter"|"photo"|"land"}]. Generate sensible waypoints relative to the map center. Typical altitude 30-120m AGL.`;
+  const user = `Map center: ${center.lat.toFixed(5)}, ${center.lng.toFixed(5)}\nMission: ${prompt}`;
+  try {
+    const result = await callClaude(sys, user);
+    if (!result) return;
+    const json = extractJSON(result);
+    const wps = JSON.parse(json);
+    const append = document.getElementById('ai-append').checked;
+    if (!append) {
+      waypoints.forEach(wp => map.removeLayer(wp.marker));
+      waypoints = []; selectedIdx = -1;
+      document.getElementById('wp-editor').classList.remove('visible');
+      if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
+    }
+    wps.forEach(wp => addWaypointSilent(wp.lat, wp.lon, wp.alt || 50, wp.action || 'waypoint', 20));
+    waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, false)));
+    updatePolyline(); updateProfile(); renderWPList();
+    document.getElementById('ai-route-result').style.display = 'block';
+    document.getElementById('ai-route-text').textContent = `Generated ${wps.length} waypoints. Mission: ${prompt}`;
+    if (waypoints.length > 0) map.fitBounds(waypoints.map(w => [w.lat, w.lon]));
+  } catch(err) {
+    alert('AI Route error: ' + err.message);
+  } finally {
+    btn.innerHTML = 'Generate Route'; btn.disabled = false;
+  }
+}
+
+// ====================== SURVEY ADVISOR ======================
+const cameraPresets = {
+  gopro_hero12: { focal: 4.0, sw: 6.17, sh: 4.55, iw: 5312, ih: 3984 },
+  iphone_15: { focal: 5.7, sw: 7.7, sh: 5.78, iw: 4032, ih: 3024 },
+  sony_zv1: { focal: 8.8, sw: 13.2, sh: 8.8, iw: 5472, ih: 3648 },
+  generic_123: { focal: 3.6, sw: 6.2, sh: 4.65, iw: 4000, ih: 3000 }
+};
+
+function applyCameraPreset() {
+  const val = document.getElementById('cam-preset').value;
+  if (val === 'manual') return;
+  const p = cameraPresets[val];
+  if (!p) return;
+  document.getElementById('cam-focal').value = p.focal;
+  document.getElementById('cam-sw').value = p.sw;
+  document.getElementById('cam-sh').value = p.sh;
+  document.getElementById('cam-iw').value = p.iw;
+  document.getElementById('cam-ih').value = p.ih;
+}
+
+async function runSurveyAdvisor() {
+  const btn = document.getElementById('survey-btn');
+  btn.innerHTML = '<span class="spinner"></span>Calculating…';
+  btn.disabled = true;
+  const params = {
+    camera: document.getElementById('cam-preset').options[document.getElementById('cam-preset').selectedIndex].text,
+    focal: document.getElementById('cam-focal').value,
+    sensorW: document.getElementById('cam-sw').value,
+    sensorH: document.getElementById('cam-sh').value,
+    imageW: document.getElementById('cam-iw').value,
+    imageH: document.getElementById('cam-ih').value,
+    gsd: document.getElementById('cam-gsd').value,
+    overlap: document.getElementById('cam-overlap').value
+  };
+  const sys = `You are a photogrammetry and drone survey expert. Calculate optimal survey altitude and parameters. Return ONLY JSON: {"recommended_alt_m":number,"footprint_width_m":number,"footprint_height_m":number,"estimated_passes":number,"explanation":"string"}`;
+  const user = `Camera: ${params.camera}, Focal length: ${params.focal}mm, Sensor: ${params.sensorW}×${params.sensorH}mm, Resolution: ${params.imageW}×${params.imageH}px, Desired GSD: ${params.gsd} cm/px, Overlap: ${params.overlap}%`;
+  try {
+    const result = await callClaude(sys, user);
+    if (!result) return;
+    const json = extractJSON(result);
+    const res = JSON.parse(json);
+    surveyRecommendedAlt = res.recommended_alt_m;
+    document.getElementById('survey-result-wrap').style.display = 'block';
+    document.getElementById('survey-result-data').innerHTML = `
+      <div class="res-row"><span class="res-label">Recommended Altitude</span><span class="res-val">${res.recommended_alt_m} m AGL</span></div>
+      <div class="res-row"><span class="res-label">Footprint Width</span><span class="res-val">${res.footprint_width_m} m</span></div>
+      <div class="res-row"><span class="res-label">Footprint Height</span><span class="res-val">${res.footprint_height_m} m</span></div>
+      <div class="res-row"><span class="res-label">Estimated Passes</span><span class="res-val">${res.estimated_passes}</span></div>
+    `;
+    document.getElementById('survey-explanation').textContent = res.explanation;
+  } catch(err) {
+    alert('Survey Advisor error: ' + err.message);
+  } finally {
+    btn.innerHTML = 'Calculate with AI'; btn.disabled = false;
+  }
+}
+
+function applyAltToAll() {
+  if (surveyRecommendedAlt === null) return;
+  waypoints.forEach(wp => { wp.alt = surveyRecommendedAlt; });
+  if (selectedIdx >= 0) { document.getElementById('ed-alt').value = surveyRecommendedAlt; }
+  renderWPList(); updateProfile();
+  alert(`Applied ${surveyRecommendedAlt}m AGL to all ${waypoints.length} waypoints`);
+}
+
+// ====================== SAFETY ANALYSER ======================
+async function openSafetyAnalyser() {
+  if (waypoints.length === 0) { alert('Add some waypoints first'); return; }
+  document.getElementById('modal-body').innerHTML = '<div style="text-align:center;padding:20px"><span class="spinner"></span> Analysing mission…</div>';
+  document.getElementById('modal-overall').innerHTML = '';
+  document.getElementById('modal-overlay').classList.add('open');
+  const center = map.getCenter();
+  const wpData = waypoints.map((w, i) => ({ index: i + 1, lat: w.lat, lon: w.lon, alt: w.alt, action: w.action }));
+  const weather = weatherData ? {
+    windspeed: weatherData.current_weather.windspeed,
+    winddir: weatherData.current_weather.winddirection,
+    temp: weatherData.current_weather.temperature,
+    code: weatherData.current_weather.weathercode
+  } : null;
+  const sys = `You are a drone safety expert. Analyse this mission data. Return ONLY JSON: {"findings":[{"severity":"red"|"yellow"|"green","issue":"string","recommendation":"string"}],"overall":"red"|"yellow"|"green","summary":"string"}`;
+  const user = `Home: ${homeLat.toFixed(5)}, ${homeLon.toFixed(5)}\nWaypoints: ${JSON.stringify(wpData)}\nWeather: ${JSON.stringify(weather)}\nMap center: ${center.lat.toFixed(5)}, ${center.lng.toFixed(5)}`;
+  try {
+    const result = await callClaude(sys, user);
+    if (!result) { closeModal(); return; }
+    const json = extractJSON(result);
+    const res = JSON.parse(json);
+    document.getElementById('modal-overall').innerHTML = `<span class="overall-badge ${res.overall}">${res.overall.toUpperCase()}</span>`;
+    let html = `<p style="color:var(--sec);font-size:13px;margin-bottom:12px">${res.summary}</p>`;
+    res.findings.forEach(f => {
+      html += `<div class="finding ${f.severity}">
+        <div class="finding-header"><div class="finding-dot ${f.severity}"></div><div class="finding-issue">${f.issue}</div></div>
+        <div class="finding-rec">${f.recommendation}</div>
+      </div>`;
+    });
+    document.getElementById('modal-body').innerHTML = html;
+  } catch(err) {
+    document.getElementById('modal-body').innerHTML = `<p style="color:var(--red)">Error: ${err.message}</p>`;
+  }
+}
+
+function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
+
+// ====================== LOGBOOK ======================
+function openLogbook() {
+  document.getElementById('logbook-panel').classList.add('open');
+  document.getElementById('logbook-overlay').classList.add('open');
+  document.getElementById('log-date').value = new Date().toISOString().split('T')[0];
+}
+function closeLogbook() {
+  document.getElementById('logbook-panel').classList.remove('open');
+  document.getElementById('logbook-overlay').classList.remove('open');
+}
+
+function prefillLog() {
+  const center = map.getCenter();
+  document.getElementById('log-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('log-location').value = `${center.lat.toFixed(4)}, ${center.lng.toFixed(4)}`;
+  const actions = [...new Set(waypoints.map(w => w.action))];
+  document.getElementById('log-notes').value = `Mission: ${waypoints.length} waypoints, actions: ${actions.join(', ')}. Max alt: ${waypoints.length > 0 ? Math.max(...waypoints.map(w => w.alt)) : 0}m AGL.`;
+}
+
+function addLogEntry() {
+  const entry = {
+    id: Date.now(),
+    date: document.getElementById('log-date').value,
+    aircraft: document.getElementById('log-aircraft').value || 'Unknown',
+    location: document.getElementById('log-location').value,
+    duration: parseInt(document.getElementById('log-duration').value) || 0,
+    notes: document.getElementById('log-notes').value,
+    outcome: document.getElementById('log-outcome').value
+  };
+  logbookEntries.unshift(entry);
+  renderLogbook();
+}
+
+function deleteLogEntry(id) {
+  logbookEntries = logbookEntries.filter(e => e.id !== id);
+  renderLogbook();
+}
+
+function renderLogbook() {
+  const total = logbookEntries.length;
+  const time = logbookEntries.reduce((s, e) => s + e.duration, 0);
+  const success = logbookEntries.filter(e => e.outcome === 'Successful').length;
+  document.getElementById('log-total').textContent = total;
+  document.getElementById('log-time').textContent = time;
+  document.getElementById('log-success').textContent = success;
+  const container = document.getElementById('log-entries');
+  container.innerHTML = logbookEntries.map(e => `
+    <div class="log-entry">
+      <div class="log-entry-header">
+        <span class="log-entry-title">${e.date} — ${e.aircraft}</span>
+        <span class="outcome-badge ${e.outcome}">${e.outcome}</span>
+      </div>
+      <div style="color:var(--sec);font-size:11px;margin-bottom:4px">${e.location} | ${e.duration} min</div>
+      <div style="font-size:12px">${e.notes}</div>
+      <button class="btn danger" onclick="deleteLogEntry(${e.id})" style="margin-top:6px;padding:3px 8px;font-size:11px">Delete</button>
+    </div>
+  `).join('');
+}
+
+function exportLogCSV() {
+  const header = 'Date,Aircraft,Location,Duration,Outcome,Notes';
+  const rows = logbookEntries.map(e => `"${e.date}","${e.aircraft}","${e.location}","${e.duration}","${e.outcome}","${e.notes.replace(/"/g,'""')}"`);
+  const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'flight_log.csv'; a.click();
+}
+
+function exportLogJSON() {
+  const blob = new Blob([JSON.stringify(logbookEntries, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'flight_log.json'; a.click();
+}
+
+// ====================== INIT ======================
+fetchWeather();
+applyCameraPreset();
+renderWPList();
+updateProfile();
+</script>
+</body>
+</html>
