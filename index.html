@@ -510,6 +510,13 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
   subdomains: 'abcd', maxZoom: 20
 }).addTo(map);
 
+// Wind particle canvas — appended directly into Leaflet's container so it
+// inherits the map dimensions and z-index stacking naturally.
+const windCanvas = document.createElement('canvas');
+windCanvas.id = 'wind-canvas';
+windCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:400';
+map.getContainer().appendChild(windCanvas);
+
 // Home marker
 function createHomeIcon() {
   return L.divIcon({
@@ -749,6 +756,76 @@ function addWaypointSilent(lat, lon, alt, action, loiterR) {
   marker.on('drag', () => updatePolyline());
 }
 
+// ====================== WIND PARTICLES ======================
+const PARTICLE_COUNT = 110;
+let windParticles = [];
+let windAnimFrame = null;
+let wParticleSpeed = 0;   // knots
+let wParticleAngle = 0;   // radians, direction particles travel (toward)
+
+function initWindParticles() {
+  windParticles = Array.from({ length: PARTICLE_COUNT }, () => ({
+    x: Math.random(), y: Math.random(),
+    age: Math.floor(Math.random() * 110),
+    life: 90 + Math.random() * 90,
+    speed: 0.4 + Math.random() * 0.8
+  }));
+  if (windAnimFrame) cancelAnimationFrame(windAnimFrame);
+  animateWind();
+}
+
+function animateWind() {
+  const canvas = document.getElementById('wind-canvas');
+  if (!canvas) { windAnimFrame = requestAnimationFrame(animateWind); return; }
+  const container = map.getContainer();
+  const W = container.offsetWidth, H = container.offsetHeight;
+  if (canvas.width !== W) canvas.width = W;
+  if (canvas.height !== H) canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  if (wParticleSpeed >= 1) {
+    // Step per frame: calibrated so 20kn particles cross ~30% of screen per life cycle
+    const baseStep = Math.min(wParticleSpeed, 55) * 0.00019;
+    windParticles.forEach(p => {
+      const px = p.x, py = p.y;
+      const step = baseStep * p.speed;
+      // In screen coords y increases downward, so subtract cos for North-up movement
+      p.x += Math.sin(wParticleAngle) * step;
+      p.y -= Math.cos(wParticleAngle) * step;
+      p.age++;
+
+      let wrapped = false;
+      if (p.x < 0) { p.x += 1; wrapped = true; }
+      else if (p.x > 1) { p.x -= 1; wrapped = true; }
+      if (p.y < 0) { p.y += 1; wrapped = true; }
+      else if (p.y > 1) { p.y -= 1; wrapped = true; }
+      if (p.age > p.life) {
+        p.x = Math.random(); p.y = Math.random();
+        p.age = 0; p.life = 90 + Math.random() * 90; wrapped = true;
+      }
+
+      if (!wrapped) {
+        const t = p.age / p.life;
+        const alpha = t < 0.15 ? t / 0.15 : t > 0.72 ? (1 - t) / 0.28 : 1;
+        ctx.beginPath();
+        ctx.moveTo(px * W, py * H);
+        ctx.lineTo(p.x * W, p.y * H);
+        ctx.strokeStyle = `rgba(88,166,255,${(alpha * 0.52).toFixed(2)})`;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    });
+  }
+  windAnimFrame = requestAnimationFrame(animateWind);
+}
+
+function setWindParticles(speedKn, dirDeg) {
+  wParticleSpeed = speedKn;
+  // dirDeg is meteorological FROM direction → particles travel in FROM+180
+  wParticleAngle = ((dirDeg + 180) % 360) * Math.PI / 180;
+}
+
 // ====================== TABS ======================
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t, i) => {
@@ -815,7 +892,8 @@ function renderWeather(data) {
   let bestDiff = Infinity;
   hours.forEach((t, i) => { const d = Math.abs(new Date(t) - now); if (d < bestDiff) { bestDiff = d; bestIdx = i; } });
 
-  document.getElementById('w-gust').textContent = (data.hourly.windgusts_10m[bestIdx] || '--');
+  const gustVal = data.hourly.windgusts_10m[bestIdx];
+  document.getElementById('w-gust').textContent = gustVal != null ? parseFloat(gustVal).toFixed(1) : '--';
   document.getElementById('w-temp').textContent = cw.temperature.toFixed(1);
   document.getElementById('w-cloud').textContent = data.hourly.cloudcover[bestIdx] || '--';
   document.getElementById('w-precip').textContent = data.hourly.precipitation_probability[bestIdx] || '0';
@@ -831,6 +909,7 @@ function renderWeather(data) {
   const badge = document.getElementById('fly-status');
   badge.textContent = status; badge.style.background = statusBg; badge.style.color = statusColor;
   document.getElementById('weather-summary').textContent = `${speed}kn ${bearingToCompass(dir)} | ${cw.temperature.toFixed(0)}°C | ${getWMODescription(cw.weathercode)}`;
+  setWindParticles(parseFloat(speed), dir);
 
   // Forecast strip - next 24 hours
   const strip = document.getElementById('forecast-strip');
@@ -955,6 +1034,18 @@ function toggleProfile() {
 
 // ====================== AI ROUTE PLANNER ======================
 async function callClaude(systemPrompt, userContent) {
+  // AI Artifacts mode: Claude.ai injects window.claude when "AI Artifacts" is enabled,
+  // so no API key is needed — Claude is already running inside the artifact.
+  if (typeof window.claude !== 'undefined') {
+    const response = await window.claude.complete({
+      messages: [{ role: 'user', content: userContent }],
+      system: systemPrompt
+    });
+    // window.claude.complete may return a string or a response object
+    return typeof response === 'string' ? response
+      : (response?.content?.[0]?.text ?? response?.text ?? JSON.stringify(response));
+  }
+
   const apiKey = document.getElementById('api-key').value.trim();
   if (!apiKey) { alert('Enter your Anthropic API key in the top bar'); return null; }
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
@@ -1199,6 +1290,21 @@ fetchWeather();
 applyCameraPreset();
 renderWPList();
 updateProfile();
+initWindParticles();
+
+// Check for AI Artifacts injection after a short delay (Claude.ai injects
+// window.claude asynchronously once the artifact environment is ready).
+setTimeout(() => {
+  if (typeof window.claude !== 'undefined') {
+    const keyEl = document.getElementById('api-key');
+    keyEl.style.display = 'none';
+    // Replace with an indicator so the user knows AI is built in
+    const badge = document.createElement('span');
+    badge.style.cssText = 'font-size:11px;color:var(--green);white-space:nowrap;padding:0 4px';
+    badge.textContent = '⚡ AI Ready';
+    keyEl.parentNode.insertBefore(badge, keyEl);
+  }
+}, 200);
 </script>
 </body>
 </html>
