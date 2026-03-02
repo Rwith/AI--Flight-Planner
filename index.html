@@ -214,6 +214,21 @@
   /* NFZ */
   .topbtn.nfz-on { border-color: var(--red); color: var(--red); }
   .leaflet-tooltip.nfz-tip { background: #161b22; border: 1px solid #f85149; color: #e6edf3; font-size: 11px; }
+  /* MARCHING ANTS */
+  @keyframes marchingAnts { to { stroke-dashoffset: -16; } }
+  .mission-path { animation: marchingAnts .45s linear infinite; }
+  .home-path    { animation: marchingAnts .7s  linear infinite; }
+  /* INSERT WAYPOINT BUTTON */
+  .insert-btn {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: #161b22; border: 2px solid #58a6ff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700; line-height: 1; color: #58a6ff;
+    cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.75);
+    transition: transform .1s, background .1s, color .1s;
+    pointer-events: all;
+  }
+  .insert-btn:hover { transform: scale(1.25); background: #58a6ff; color: #000; }
   /* mobile */
   @media (max-width: 767px) {
     #main { flex-direction: column; }
@@ -541,6 +556,10 @@ const ACTION_COLORS = { waypoint: '#58a6ff', loiter: '#a29bfe', photo: '#00cec9'
 let terrainElevations = null;
 let nfzEnabled = false;
 let nfzLayers = [];
+let insertMarker = null;
+let homeToFirstLine = null;
+let hoverSegIdx = -1;
+let insertHideTimer = null;
 
 // ====================== MAP INIT ======================
 const map = L.map('map', { center: [-26.65, 153.06], zoom: 14, zoomControl: true });
@@ -556,6 +575,12 @@ windCanvas.id = 'wind-canvas';
 windCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:400';
 map.getContainer().appendChild(windCanvas);
 
+// Sky/day-night ambient overlay — sits between tiles and overlay pane
+const skyOverlay = document.createElement('div');
+skyOverlay.id = 'sky-overlay';
+skyOverlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:250;transition:background 25s linear';
+map.getContainer().appendChild(skyOverlay);
+
 // Home marker
 function createHomeIcon() {
   return L.divIcon({
@@ -566,7 +591,8 @@ function createHomeIcon() {
 }
 
 homeMarker = L.marker([homeLat, homeLon], { icon: createHomeIcon(), draggable: true, zIndexOffset: 1000 }).addTo(map);
-homeMarker.on('dragend', e => { const p = e.target.getLatLng(); homeLat = p.lat; homeLon = p.lng; });
+homeMarker.on('dragend', e => { const p = e.target.getLatLng(); homeLat = p.lat; homeLon = p.lng; updatePolyline(); });
+homeMarker.on('drag', e => { const p = e.target.getLatLng(); if (homeToFirstLine && waypoints.length >= 1) homeToFirstLine.setLatLngs([[p.lat, p.lng], [waypoints[0].lat, waypoints[0].lon]]); });
 homeMarker.on('click', e => { L.DomEvent.stopPropagation(e); });
 
 // Map click => add waypoint
@@ -625,10 +651,28 @@ function addWaypoint(lat, lon, alt, action) {
 
 // ====================== POLYLINE ======================
 function updatePolyline() {
-  if (missionPolyline) map.removeLayer(missionPolyline);
+  if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
+  if (homeToFirstLine) { map.removeLayer(homeToFirstLine); homeToFirstLine = null; }
+  clearInsertMarker();
+
+  if (waypoints.length >= 1) {
+    homeToFirstLine = L.polyline(
+      [[homeLat, homeLon], [waypoints[0].lat, waypoints[0].lon]],
+      { color: '#db6d28', weight: 2, dashArray: '4,5', opacity: 0.75, className: 'home-path' }
+    ).addTo(map);
+  }
+
   if (waypoints.length < 2) return;
   const lls = waypoints.map(w => [w.lat, w.lon]);
-  missionPolyline = L.polyline(lls, { color: '#58a6ff', weight: 2, dashArray: '6,4', opacity: .8 }).addTo(map);
+  missionPolyline = L.polyline(lls, {
+    color: '#58a6ff', weight: 2.5, dashArray: '10,6', opacity: 0.9, className: 'mission-path'
+  }).addTo(map);
+
+  missionPolyline.on('mousemove', onSegmentMousemove);
+  missionPolyline.on('mouseout', () => {
+    clearTimeout(insertHideTimer);
+    insertHideTimer = setTimeout(clearInsertMarker, 120);
+  });
 }
 
 // ====================== WP LIST RENDER ======================
@@ -1323,6 +1367,83 @@ function exportLogJSON() {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'flight_log.json'; a.click();
 }
 
+// ====================== SEGMENT HOVER / INSERT ======================
+function clearInsertMarker() {
+  clearTimeout(insertHideTimer); insertHideTimer = null;
+  if (insertMarker) { map.removeLayer(insertMarker); insertMarker = null; }
+  hoverSegIdx = -1;
+}
+
+function ptSegDist2d(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+function nearestSegIdx(latlng) {
+  let best = 0, bestD = Infinity;
+  const pt = map.latLngToLayerPoint(latlng);
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const a = map.latLngToLayerPoint([waypoints[i].lat,     waypoints[i].lon]);
+    const b = map.latLngToLayerPoint([waypoints[i + 1].lat, waypoints[i + 1].lon]);
+    const d = ptSegDist2d(pt, a, b);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+function onSegmentMousemove(e) {
+  L.DomEvent.stopPropagation(e);
+  clearTimeout(insertHideTimer); insertHideTimer = null;
+  const seg = nearestSegIdx(e.latlng);
+  if (seg === hoverSegIdx) return;
+  if (insertMarker) { map.removeLayer(insertMarker); insertMarker = null; }
+  hoverSegIdx = seg;
+  showInsertMarker(seg);
+}
+
+function showInsertMarker(segIdx) {
+  const a = waypoints[segIdx], b = waypoints[segIdx + 1];
+  const midLat = (a.lat + b.lat) / 2;
+  const midLon = (a.lon + b.lon) / 2;
+  insertMarker = L.marker([midLat, midLon], {
+    icon: L.divIcon({ className: '', html: '<div class="insert-btn">+</div>', iconSize: [24, 24], iconAnchor: [12, 12] }),
+    zIndexOffset: 300, interactive: true
+  }).addTo(map);
+  insertMarker.on('mouseover', () => { clearTimeout(insertHideTimer); insertHideTimer = null; });
+  insertMarker.on('mouseout',  () => { insertHideTimer = setTimeout(clearInsertMarker, 120); });
+  insertMarker.on('click', e => { L.DomEvent.stopPropagation(e); insertWaypointAt(segIdx, midLat, midLon); });
+}
+
+function insertWaypointAt(segIdx, lat, lon) {
+  clearInsertMarker();
+  const alt = Math.round((waypoints[segIdx].alt + waypoints[segIdx + 1].alt) / 2);
+  const id  = wpIdCounter++;
+  const marker = L.marker([lat, lon], { icon: makeWPIcon(segIdx + 1, 'waypoint', false), draggable: true, zIndexOffset: 500 }).addTo(map);
+  const wp = { lat, lon, alt, action: 'waypoint', loiterR: 20, marker, id };
+  waypoints.splice(segIdx + 1, 0, wp);
+
+  marker.on('click', e => { L.DomEvent.stopPropagation(e); selectWP(waypoints.indexOf(wp)); });
+  marker.on('contextmenu', e => {
+    L.DomEvent.stopPropagation(e);
+    const i = waypoints.indexOf(wp);
+    L.popup().setLatLng(e.latlng).setContent(`<a class="wp-popup-del" onclick="deleteWPByIdx(${i});map.closePopup()">🗑 Delete WP${i + 1}</a>`).openOn(map);
+  });
+  marker.on('dragend', e => {
+    const p = e.target.getLatLng(); wp.lat = p.lat; wp.lon = p.lng;
+    updatePolyline(); updateProfile();
+    if (selectedIdx === waypoints.indexOf(wp)) updateEditorFields();
+  });
+  marker.on('drag', () => updatePolyline());
+
+  waypoints.forEach((w, i) => w.marker.setIcon(makeWPIcon(i, w.action, i === selectedIdx)));
+  terrainElevations = null;
+  updatePolyline(); updateProfile(); renderWPList();
+  selectWP(segIdx + 1);
+}
+
 // ====================== WIND ROSE ======================
 function renderWindRose(data) {
   const canvas = document.getElementById('wind-rose-canvas');
@@ -1453,6 +1574,47 @@ function renderSunCard(lat, lon) {
     row('Evening Golden Hour', goldenEve ? `${formatLocalTime(goldenEve.start)} – ${formatLocalTime(goldenEve.end)}` : '--',  isNow(goldenEve?.start, goldenEve?.end)),
     row('Civil Dusk',         t.civil  ? formatLocalTime(t.civil.set)  : '--'),
   ].join('');
+  updateSkyOverlay(t, now);
+}
+
+// ====================== SKY / DAY-NIGHT OVERLAY ======================
+function updateSkyOverlay(cachedTimes, cachedNow) {
+  const el = document.getElementById('sky-overlay');
+  if (!el) return;
+  const now   = cachedNow  || new Date();
+  const mc    = map.getCenter();
+  const t     = cachedTimes || sunTimes(mc.lat, mc.lng);
+  if (!t.civil || !t.sun) { el.style.background = 'none'; return; }
+
+  const midday = new Date((t.sun.rise.getTime() + t.sun.set.getTime()) / 2);
+  const isMorn = now < midday;
+  // Horizontal side of the sky glow: east (left ≈ 0%) for morning, west (right ≈ 100%) for evening
+  const hSide  = isMorn ? '0% 50%' : '100% 50%';
+
+  const goldenMornEnd  = t.golden?.rise;
+  const goldenEveStart = t.golden?.set;
+
+  let bg = 'none';
+
+  if (now < t.civil.rise || now > t.civil.set) {
+    // ── Night ── deep navy radial from top centre
+    bg = `radial-gradient(ellipse at 50% 0%,
+            rgba(10,15,55,.70) 0%, rgba(4,7,28,.60) 60%, rgba(2,4,16,.75) 100%)`;
+
+  } else if (now < t.sun.rise || now > t.sun.set) {
+    // ── Blue hour / civil twilight ── purple-blue glow on sun side + indigo horizon
+    bg = `linear-gradient(to top, rgba(60,30,110,.30) 0%, transparent 35%),
+          radial-gradient(ellipse at ${hSide}, rgba(90,50,180,.28) 0%, rgba(25,50,160,.18) 45%, rgba(8,15,65,.30) 100%)`;
+
+  } else if ((goldenMornEnd && now < goldenMornEnd) || (goldenEveStart && now > goldenEveStart)) {
+    // ── Golden hour ── warm amber/orange glow on sun side + horizon blush
+    bg = `linear-gradient(to top, rgba(255,110,10,.18) 0%, rgba(255,180,40,.08) 25%, transparent 50%),
+          radial-gradient(ellipse at ${hSide}, rgba(255,140,0,.20) 0%, rgba(220,75,10,.11) 55%, transparent 80%)`;
+
+  }
+  // else: full daytime → no overlay
+
+  el.style.background = bg;
 }
 
 // ====================== TERRAIN FOLLOW ======================
@@ -1557,6 +1719,7 @@ async function loadNFZLayers(lat, lon) {
 }
 
 // ====================== INIT ======================
+setInterval(updateSkyOverlay, 60000); // refresh sky colour every minute
 fetchWeather();
 applyCameraPreset();
 renderWPList();
