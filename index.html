@@ -203,6 +203,17 @@
   .leaflet-popup-tip { background: var(--panel); }
   .wp-popup-del { color: var(--red); cursor: pointer; font-size: 12px; padding: 3px 0; display: block; }
   .wp-popup-del:hover { text-decoration: underline; }
+  /* WIND ROSE */
+  #wind-rose-canvas { display: none; width: 200px; height: 200px; margin: 4px auto 0; }
+  .rose-legend { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 10px; color: var(--sec); justify-content: center; }
+  /* SUN CARD */
+  .sun-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .sun-row:last-child { border-bottom: none; }
+  .sun-time-val { font-weight: 600; }
+  .sun-now { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: rgba(210,153,34,.25); color: var(--yellow); }
+  /* NFZ */
+  .topbtn.nfz-on { border-color: var(--red); color: var(--red); }
+  .leaflet-tooltip.nfz-tip { background: #161b22; border: 1px solid #f85149; color: #e6edf3; font-size: 11px; }
   /* mobile */
   @media (max-width: 767px) {
     #main { flex-direction: column; }
@@ -226,6 +237,7 @@
   <button class="topbtn" onclick="exportWaypoints()">Export .waypoints</button>
   <label class="topbtn" style="cursor:pointer">Import <input type="file" id="import-file" accept=".waypoints,.txt" style="display:none" onchange="importWaypoints(event)"></label>
   <button class="topbtn" onclick="openLogbook()">Logbook</button>
+  <button class="topbtn" id="nfz-btn" onclick="toggleNFZ()">NFZ Off</button>
   <button class="topbtn danger" onclick="clearMission()">Clear</button>
 </div>
 
@@ -284,6 +296,15 @@
           <button class="btn" onclick="deselectWP()" style="flex:1">Deselect</button>
         </div>
       </div>
+      <div class="card" style="padding:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1">
+            <div style="font-size:11px;font-weight:600;color:var(--sec);text-transform:uppercase;letter-spacing:.5px">Terrain Follow</div>
+            <div id="terrain-status" style="font-size:11px;color:var(--sec)">Adjust altitudes to clear terrain</div>
+          </div>
+          <button class="btn" onclick="runTerrainFollow()" id="terrain-btn" style="font-size:11px;white-space:nowrap">Apply</button>
+        </div>
+      </div>
       <div id="no-wp">No waypoints yet.<br>Click the map to place them.</div>
       <div id="wp-list"></div>
     </div>
@@ -330,6 +351,21 @@
       <div class="card">
         <div class="card-title">24-Hour Forecast</div>
         <div id="forecast-strip"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Wind Rose — 24h Forecast</div>
+        <div id="wind-rose-loading" style="color:var(--sec);font-size:11px;text-align:center;padding:8px">Awaiting weather data…</div>
+        <canvas id="wind-rose-canvas"></canvas>
+        <div class="rose-legend">
+          <span style="color:#3fb950">■ Calm</span>
+          <span style="color:#58a6ff">■ Breeze</span>
+          <span style="color:#d29922">■ Strong</span>
+          <span style="color:#f85149">■ High</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Sun &amp; Golden Hour</div>
+        <div id="sun-content" style="color:var(--sec);font-size:12px;text-align:center">Awaiting weather data…</div>
       </div>
       <button class="btn primary" onclick="fetchWeather()" style="width:100%">Refresh Weather</button>
     </div>
@@ -502,6 +538,9 @@ let logbookEntries = [];
 let wpIdCounter = 0;
 
 const ACTION_COLORS = { waypoint: '#58a6ff', loiter: '#a29bfe', photo: '#00cec9', land: '#fd79a8' };
+let terrainElevations = null;
+let nfzEnabled = false;
+let nfzLayers = [];
 
 // ====================== MAP INIT ======================
 const map = L.map('map', { center: [-26.65, 153.06], zoom: 14, zoomControl: true });
@@ -669,6 +708,7 @@ function deleteSelectedWP() { if (selectedIdx >= 0) deleteWPByIdx(selectedIdx); 
 
 function deleteWPByIdx(idx) {
   if (idx < 0 || idx >= waypoints.length) return;
+  terrainElevations = null;
   map.removeLayer(waypoints[idx].marker);
   waypoints.splice(idx, 1);
   if (selectedIdx === idx) { selectedIdx = -1; document.getElementById('wp-editor').classList.remove('visible'); }
@@ -680,6 +720,7 @@ function deleteWPByIdx(idx) {
 
 function clearMission() {
   if (!confirm('Clear all waypoints?')) return;
+  terrainElevations = null;
   waypoints.forEach(wp => map.removeLayer(wp.marker));
   waypoints = []; selectedIdx = -1;
   document.getElementById('wp-editor').classList.remove('visible');
@@ -910,6 +951,8 @@ function renderWeather(data) {
   badge.textContent = status; badge.style.background = statusBg; badge.style.color = statusColor;
   document.getElementById('weather-summary').textContent = `${speed}km/h ${bearingToCompass(dir)} | ${cw.temperature.toFixed(0)}°C | ${getWMODescription(cw.weathercode)}`;
   setWindParticles(parseFloat(speed), dir);
+  renderWindRose(data);
+  const mc = map.getCenter(); renderSunCard(mc.lat, mc.lng);
 
   // Forecast strip - next 24 hours
   const strip = document.getElementById('forecast-strip');
@@ -966,22 +1009,17 @@ function updateProfile() {
 
   if (profileChart) { profileChart.destroy(); profileChart = null; }
 
+  const chartDatasets = [];
+  if (terrainElevations && terrainElevations.length === waypoints.length) {
+    chartDatasets.push({ data: terrainElevations, borderColor: '#db6d28', backgroundColor: 'rgba(219,109,40,.25)', pointRadius: 0, fill: true, tension: 0.4, borderWidth: 1.5, order: 1 });
+  }
+  chartDatasets.push({ data: yData, borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,.12)', pointBackgroundColor: pointColors, pointBorderColor: '#fff', pointBorderWidth: 1.5, pointRadius: 6, pointHoverRadius: 8, fill: true, tension: 0.3, order: 0 });
+
   profileChart = new Chart(canvas, {
     type: 'line',
     data: {
       labels: labels,
-      datasets: [{
-        data: yData,
-        borderColor: '#58a6ff',
-        backgroundColor: 'rgba(88,166,255,.12)',
-        pointBackgroundColor: pointColors,
-        pointBorderColor: '#fff',
-        pointBorderWidth: 1.5,
-        pointRadius: 6,
-        pointHoverRadius: 8,
-        fill: true,
-        tension: 0.3
-      }]
+      datasets: chartDatasets
     },
     options: {
       responsive: true,
@@ -1283,6 +1321,239 @@ function exportLogCSV() {
 function exportLogJSON() {
   const blob = new Blob([JSON.stringify(logbookEntries, null, 2)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'flight_log.json'; a.click();
+}
+
+// ====================== WIND ROSE ======================
+function renderWindRose(data) {
+  const canvas = document.getElementById('wind-rose-canvas');
+  const loading = document.getElementById('wind-rose-loading');
+
+  const now = new Date();
+  const hours = data.hourly.time;
+  let startIdx = 0, minDiff = Infinity;
+  hours.forEach((t, i) => { const d = Math.abs(new Date(t) - now); if (d < minDiff) { minDiff = d; startIdx = i; } });
+
+  const speeds = data.hourly.windspeed_10m.slice(startIdx, startIdx + 24);
+  const dirs   = data.hourly.winddirection_10m.slice(startIdx, startIdx + 24);
+
+  const N = 8;
+  const bins = Array.from({length: N}, () => ({count: 0, total: 0}));
+  speeds.forEach((spd, i) => {
+    if (spd == null || dirs[i] == null) return;
+    const bin = Math.round(dirs[i] / (360 / N)) % N;
+    bins[bin].count++;
+    bins[bin].total += spd;
+  });
+
+  const size = 200;
+  canvas.width = size; canvas.height = size;
+  canvas.style.display = 'block';
+  loading.style.display = 'none';
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, size, size);
+  const cx = size / 2, cy = size / 2, maxR = size * 0.38;
+  const maxCount = Math.max(...bins.map(b => b.count), 1);
+
+  // Grid rings
+  [0.33, 0.66, 1.0].forEach(r => {
+    ctx.beginPath(); ctx.arc(cx, cy, maxR * r, 0, 2 * Math.PI);
+    ctx.strokeStyle = 'rgba(48,54,61,0.9)'; ctx.lineWidth = 1; ctx.stroke();
+  });
+  // Spokes
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * 2 * Math.PI - Math.PI / 2;
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(a) * maxR, cy + Math.sin(a) * maxR);
+    ctx.strokeStyle = 'rgba(48,54,61,0.7)'; ctx.lineWidth = 1; ctx.stroke();
+  }
+  // Sector bars
+  bins.forEach((bin, i) => {
+    if (bin.count === 0) return;
+    const a = (i / N) * 2 * Math.PI - Math.PI / 2;
+    const r = (bin.count / maxCount) * maxR;
+    const hw = (Math.PI / N) * 0.75;
+    const avg = bin.total / bin.count;
+    const color = avg >= 46 ? 'rgba(248,81,73,0.85)' : avg >= 28 ? 'rgba(210,153,34,0.85)' : avg >= 15 ? 'rgba(88,166,255,0.85)' : 'rgba(63,185,80,0.85)';
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, a - hw, a + hw); ctx.closePath();
+    ctx.fillStyle = color; ctx.fill();
+  });
+  // Labels
+  ['N','NE','E','SE','S','SW','W','NW'].forEach((lbl, i) => {
+    const a = (i / N) * 2 * Math.PI - Math.PI / 2;
+    ctx.fillStyle = '#8b949e';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(lbl, cx + Math.cos(a) * (maxR + 13), cy + Math.sin(a) * (maxR + 13));
+  });
+  ctx.beginPath(); ctx.arc(cx, cy, 3, 0, 2 * Math.PI);
+  ctx.fillStyle = '#8b949e'; ctx.fill();
+}
+
+// ====================== SUN & GOLDEN HOUR ======================
+function sunTimes(lat, lon) {
+  const now = new Date();
+  const dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000);
+  const B = 2 * Math.PI * (dayOfYear - 1) / 365;
+  // Equation of Time (minutes)
+  const EoT = 229.18 * (0.000075 + 0.001868*Math.cos(B) - 0.032077*Math.sin(B) - 0.014615*Math.cos(2*B) - 0.04089*Math.sin(2*B));
+  // Solar declination (radians)
+  const decl = 0.006918 - 0.399912*Math.cos(B) + 0.070257*Math.sin(B) - 0.006758*Math.cos(2*B) + 0.000907*Math.sin(2*B) - 0.002697*Math.cos(3*B) + 0.00148*Math.sin(3*B);
+  const latR = lat * Math.PI / 180;
+
+  function riseSet(zenithDeg) {
+    const cosHA = (Math.cos(zenithDeg * Math.PI / 180) - Math.sin(latR) * Math.sin(decl)) / (Math.cos(latR) * Math.cos(decl));
+    if (Math.abs(cosHA) > 1) return null;
+    const HA = Math.acos(cosHA) * 180 / Math.PI;
+    const noon = 720 - 4 * lon - EoT;
+    const base = new Date(); base.setUTCHours(0, 0, 0, 0);
+    const rise = new Date(base.getTime() + (noon - 4 * HA) * 60000);
+    const set  = new Date(base.getTime() + (noon + 4 * HA) * 60000);
+    return { rise, set };
+  }
+
+  return {
+    civil:  riseSet(96),     // sun 6° below horizon
+    sun:    riseSet(90.833), // sunrise/sunset
+    golden: riseSet(84)      // sun at 6° elevation (golden hour boundary)
+  };
+}
+
+function formatLocalTime(date) {
+  if (!date) return '--';
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderSunCard(lat, lon) {
+  const el = document.getElementById('sun-content');
+  const t = sunTimes(lat, lon);
+  const now = new Date();
+
+  const goldenMorn = t.civil && t.golden ? { start: t.civil.rise, end: t.golden.rise } : null;
+  const goldenEve  = t.golden && t.civil ? { start: t.golden.set, end: t.civil.set }  : null;
+
+  function isNow(a, b) { return a && b && now >= a && now <= b; }
+
+  function row(label, display, active) {
+    return `<div class="sun-row">
+      <span>${label}</span>
+      <span style="display:flex;align-items:center;gap:6px">
+        ${active ? '<span class="sun-now">NOW</span>' : ''}
+        <span class="sun-time-val" style="color:${active ? '#d29922' : '#e6edf3'}">${display}</span>
+      </span>
+    </div>`;
+  }
+
+  el.innerHTML = [
+    row('Civil Dawn',         t.civil  ? formatLocalTime(t.civil.rise)  : '--'),
+    row('Morning Golden Hour', goldenMorn ? `${formatLocalTime(goldenMorn.start)} – ${formatLocalTime(goldenMorn.end)}` : '--', isNow(goldenMorn?.start, goldenMorn?.end)),
+    row('Sunrise',            t.sun    ? formatLocalTime(t.sun.rise)   : '--'),
+    row('Sunset',             t.sun    ? formatLocalTime(t.sun.set)    : '--'),
+    row('Evening Golden Hour', goldenEve ? `${formatLocalTime(goldenEve.start)} – ${formatLocalTime(goldenEve.end)}` : '--',  isNow(goldenEve?.start, goldenEve?.end)),
+    row('Civil Dusk',         t.civil  ? formatLocalTime(t.civil.set)  : '--'),
+  ].join('');
+}
+
+// ====================== TERRAIN FOLLOW ======================
+async function runTerrainFollow() {
+  if (waypoints.length === 0) { alert('Add waypoints first'); return; }
+  const btn = document.getElementById('terrain-btn');
+  const status = document.getElementById('terrain-status');
+  btn.disabled = true; btn.textContent = 'Fetching…';
+  status.textContent = 'Fetching terrain elevations…';
+
+  const allLats = [homeLat, ...waypoints.map(w => w.lat)].join(',');
+  const allLons = [homeLon, ...waypoints.map(w => w.lon)].join(',');
+  try {
+    const res  = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${allLats}&longitude=${allLons}`);
+    const data = await res.json();
+    const elev = data.elevation; // [homeElev, wp1Elev, ...]
+    const homeElev = elev[0];
+
+    // Terrain elevation at each WP, relative to home (clamped to 0)
+    terrainElevations = elev.slice(1).map(e => Math.max(0, e - homeElev));
+
+    // Adjust each WP alt so it clears 20 m above terrain
+    const MIN_CLEAR = 20;
+    let adjusted = 0;
+    waypoints.forEach((wp, i) => {
+      const needed = terrainElevations[i] + MIN_CLEAR;
+      if (wp.alt < needed) { wp.alt = Math.round(needed); adjusted++; }
+    });
+
+    updateProfile(); renderWPList();
+    if (selectedIdx >= 0) document.getElementById('ed-alt').value = waypoints[selectedIdx].alt;
+    status.textContent = adjusted > 0 ? `Adjusted ${adjusted} WP(s) for terrain (+20 m clearance)` : `All ${waypoints.length} WPs clear of terrain`;
+  } catch (err) {
+    status.textContent = 'Failed: ' + err.message;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Apply';
+  }
+}
+
+// ====================== NFZ OVERLAY ======================
+async function toggleNFZ() {
+  const btn = document.getElementById('nfz-btn');
+  if (nfzEnabled) {
+    nfzLayers.forEach(l => map.removeLayer(l));
+    nfzLayers = [];
+    nfzEnabled = false;
+    btn.textContent = 'NFZ Off';
+    btn.classList.remove('nfz-on');
+    return;
+  }
+  btn.textContent = 'Loading…';
+  const c = map.getCenter();
+  try {
+    await loadNFZLayers(c.lat, c.lng);
+    nfzEnabled = true;
+    btn.textContent = `NFZ (${nfzLayers.filter(l => l instanceof L.Circle).length})`;
+    btn.classList.add('nfz-on');
+  } catch (err) {
+    btn.textContent = 'NFZ Off';
+    alert('NFZ load failed: ' + err.message);
+  }
+}
+
+async function loadNFZLayers(lat, lon) {
+  const query = `[out:json][timeout:15];(
+    node["aeroway"="aerodrome"](around:60000,${lat},${lon});
+    way["aeroway"="aerodrome"](around:60000,${lat},${lon});
+    node["aeroway"="airstrip"](around:60000,${lat},${lon});
+    node["aeroway"="helipad"](around:30000,${lat},${lon});
+  );out center;`;
+  const res  = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`);
+  const data = await res.json();
+
+  data.elements.forEach(el => {
+    const eLat = el.lat ?? el.center?.lat;
+    const eLon = el.lon ?? el.center?.lon;
+    if (!eLat || !eLon) return;
+
+    const type = el.tags?.aeroway;
+    const isHelipad   = type === 'helipad';
+    const isAirstrip  = type === 'airstrip';
+    const radius = isHelipad ? 1000 : isAirstrip ? 3000 : 5500;
+    const name   = el.tags?.name || el.tags?.icao || el.tags?.iata || (isHelipad ? 'Helipad' : 'Aerodrome');
+    const icon   = isHelipad ? '🚁' : '✈';
+
+    const circle = L.circle([eLat, eLon], {
+      radius, color: '#f85149', fillColor: '#f85149',
+      fillOpacity: 0.07, weight: 1.5, dashArray: '6 4', opacity: 0.8
+    }).addTo(map);
+    circle.bindTooltip(`${icon} ${name} — ${radius / 1000} km advisory`, { sticky: true, className: 'nfz-tip' });
+    nfzLayers.push(circle);
+
+    const label = L.marker([eLat, eLon], {
+      icon: L.divIcon({
+        className: '',
+        html: `<div style="color:#f85149;font-size:10px;font-weight:700;white-space:nowrap;text-shadow:0 1px 3px #000">${icon} ${name}</div>`,
+        iconAnchor: [0, 8]
+      })
+    }).addTo(map);
+    nfzLayers.push(label);
+  });
 }
 
 // ====================== INIT ======================
