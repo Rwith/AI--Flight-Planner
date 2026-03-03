@@ -250,7 +250,14 @@
   <div class="spacer"></div>
   <button class="topbtn primary" onclick="openSafetyAnalyser()">Safety Analyse</button>
   <button class="topbtn" onclick="exportWaypoints()">Export .waypoints</button>
+  <button class="topbtn" onclick="exportKML()">Export KML</button>
   <label class="topbtn" style="cursor:pointer">Import <input type="file" id="import-file" accept=".waypoints,.txt" style="display:none" onchange="importWaypoints(event)"></label>
+  <button class="topbtn" onclick="reverseMission()">↩ Reverse</button>
+  <select class="topbtn" id="map-tile-select" onchange="switchMapTile(this.value)" style="cursor:pointer;padding:4px 8px">
+    <option value="dark">Dark</option>
+    <option value="satellite">Satellite</option>
+    <option value="topo">Topo</option>
+  </select>
   <button class="topbtn" onclick="openLogbook()">Logbook</button>
   <button class="topbtn" id="nfz-btn" onclick="toggleNFZ()">NFZ Off</button>
   <button class="topbtn danger" onclick="clearMission()">Clear</button>
@@ -306,6 +313,16 @@
           <label>Loiter Radius (m)</label>
           <input type="number" id="ed-loiter-r" value="20" min="5" max="500" onchange="updateSelectedWP()">
         </div>
+        <div class="form-2col">
+          <div class="form-row">
+            <label>Speed (m/s)</label>
+            <input type="number" id="ed-speed" value="5" min="1" max="30" step="0.5" onchange="updateSelectedWP()">
+          </div>
+          <div class="form-row">
+            <label>Yaw (° / -1=auto)</label>
+            <input type="number" id="ed-yaw" value="-1" min="-1" max="359" onchange="updateSelectedWP()">
+          </div>
+        </div>
         <div class="btn-row">
           <button class="btn danger" onclick="deleteSelectedWP()" style="flex:1">Delete</button>
           <button class="btn" onclick="deselectWP()" style="flex:1">Deselect</button>
@@ -318,6 +335,14 @@
             <div id="terrain-status" style="font-size:11px;color:var(--sec)">Adjust altitudes to clear terrain</div>
           </div>
           <button class="btn" onclick="runTerrainFollow()" id="terrain-btn" style="font-size:11px;white-space:nowrap">Apply</button>
+        </div>
+      </div>
+      <div class="card" id="mission-stats-card" style="display:none;padding:8px">
+        <div class="card-title">Mission Summary</div>
+        <div class="stat-grid">
+          <div class="stat-card"><div class="stat-val" id="ms-dist">0 m</div><div class="stat-label">Distance</div></div>
+          <div class="stat-card"><div class="stat-val" id="ms-time">0 s</div><div class="stat-label">Est. Time</div></div>
+          <div class="stat-card"><div class="stat-val" id="ms-alt">0 m</div><div class="stat-label">Max Alt</div></div>
         </div>
       </div>
       <div id="no-wp">No waypoints yet.<br>Click the map to place them.</div>
@@ -560,10 +585,11 @@ let insertMarker = null;
 let homeToFirstLine = null;
 let hoverSegIdx = -1;
 let insertHideTimer = null;
+let currentTileLayer = null;
 
 // ====================== MAP INIT ======================
 const map = L.map('map', { center: [-26.65, 153.06], zoom: 14, zoomControl: true });
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+currentTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; OpenStreetMap &copy; CARTO',
   subdomains: 'abcd', maxZoom: 20
 }).addTo(map);
@@ -623,7 +649,7 @@ function addWaypoint(lat, lon, alt, action) {
     zIndexOffset: 500
   }).addTo(map);
 
-  const wp = { lat, lon, alt, action, loiterR: 20, marker, id };
+  const wp = { lat, lon, alt, action, loiterR: 20, speed: 5, yaw: -1, marker, id };
   waypoints.push(wp);
 
   marker.on('click', e => { L.DomEvent.stopPropagation(e); selectWP(waypoints.indexOf(wp)); });
@@ -677,6 +703,7 @@ function updatePolyline() {
 
 // ====================== WP LIST RENDER ======================
 function renderWPList() {
+  updateMissionStats();
   const list = document.getElementById('wp-list');
   const noWP = document.getElementById('no-wp');
   if (waypoints.length === 0) { list.innerHTML = ''; noWP.style.display = 'block'; return; }
@@ -687,7 +714,7 @@ function renderWPList() {
       <div class="wp-dot" style="background:${col};color:#000">${i + 1}</div>
       <div class="wp-info">
         <div class="wp-num">WP${i + 1} — ${wp.action}</div>
-        <div class="wp-details">${wp.alt}m AGL &nbsp;|&nbsp; ${wp.lat.toFixed(5)}, ${wp.lon.toFixed(5)}</div>
+        <div class="wp-details">${wp.alt}m AGL · ${wp.speed || 5}m/s &nbsp;|&nbsp; ${wp.lat.toFixed(5)}, ${wp.lon.toFixed(5)}</div>
       </div>
       <span class="wp-del" onclick="event.stopPropagation();deleteWPByIdx(${i})">✕</span>
     </div>`;
@@ -728,6 +755,8 @@ function showEditor(wp, idx) {
   document.getElementById('ed-alt').value = wp.alt;
   document.getElementById('ed-action').value = wp.action;
   document.getElementById('ed-loiter-r').value = wp.loiterR || 20;
+  document.getElementById('ed-speed').value = wp.speed != null ? wp.speed : 5;
+  document.getElementById('ed-yaw').value = wp.yaw != null ? wp.yaw : -1;
   document.getElementById('loiter-row').style.display = wp.action === 'loiter' ? 'flex' : 'none';
 }
 
@@ -742,6 +771,8 @@ function updateSelectedWP() {
   wp.alt = parseFloat(document.getElementById('ed-alt').value) || 50;
   wp.action = document.getElementById('ed-action').value;
   wp.loiterR = parseFloat(document.getElementById('ed-loiter-r').value) || 20;
+  wp.speed = parseFloat(document.getElementById('ed-speed').value) || 5;
+  wp.yaw = parseFloat(document.getElementById('ed-yaw').value);
   document.getElementById('loiter-row').style.display = wp.action === 'loiter' ? 'flex' : 'none';
   wp.marker.setIcon(makeWPIcon(selectedIdx, wp.action, true));
   renderWPList();
@@ -781,7 +812,8 @@ function exportWaypoints() {
   waypoints.forEach(wp => {
     const cmd = wp.action === 'loiter' ? 17 : wp.action === 'land' ? 21 : 16;
     const p3 = wp.action === 'loiter' ? wp.loiterR : 0;
-    lines.push(`${idx}\t0\t3\t${cmd}\t0\t0\t${p3}\t0\t${wp.lat.toFixed(7)}\t${wp.lon.toFixed(7)}\t${wp.alt}\t1`);
+    const yawOut = (wp.yaw != null && wp.yaw >= 0) ? wp.yaw : 0;
+    lines.push(`${idx}\t0\t3\t${cmd}\t${wp.speed || 5}\t0\t${p3}\t${yawOut}\t${wp.lat.toFixed(7)}\t${wp.lon.toFixed(7)}\t${wp.alt}\t1`);
     idx++;
     if (wp.action === 'photo') {
       lines.push(`${idx}\t0\t3\t203\t0\t0\t0\t1\t0\t0\t0\t1`);
@@ -826,7 +858,7 @@ function addWaypointSilent(lat, lon, alt, action, loiterR) {
   const id = wpIdCounter++;
   const idx = waypoints.length;
   const marker = L.marker([lat, lon], { icon: makeWPIcon(idx, action, false), draggable: true, zIndexOffset: 500 }).addTo(map);
-  const wp = { lat, lon, alt, action, loiterR: loiterR || 20, marker, id };
+  const wp = { lat, lon, alt, action, loiterR: loiterR || 20, speed: 5, yaw: -1, marker, id };
   waypoints.push(wp);
   marker.on('click', e => { L.DomEvent.stopPropagation(e); selectWP(waypoints.indexOf(wp)); });
   marker.on('contextmenu', e => {
@@ -1016,6 +1048,30 @@ function renderWeather(data) {
     card.innerHTML = `<div class="fc-time">${hLabel}</div><div class="fc-icon">${fcPrec > 50 ? '🌧️' : fcWind >= 37 ? '💨' : '🌤️'}</div><div class="fc-wind" style="color:${windCol}">${fcWind}km/h</div><div style="color:var(--sec)">${fcPrec}%</div>`;
     strip.appendChild(card);
   }
+}
+
+// ====================== MISSION STATS ======================
+function updateMissionStats() {
+  const card = document.getElementById('mission-stats-card');
+  const noWP = document.getElementById('no-wp');
+  if (waypoints.length < 1) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  noWP.style.display = waypoints.length === 0 ? 'block' : 'none';
+
+  let totalDist = 0;
+  let totalTime = 0;
+  for (let i = 1; i < waypoints.length; i++) {
+    const d = haversine(waypoints[i-1].lat, waypoints[i-1].lon, waypoints[i].lat, waypoints[i].lon);
+    totalDist += d;
+    const speed = waypoints[i].speed || 5;
+    totalTime += d / speed;
+  }
+  const maxAlt = Math.max(...waypoints.map(w => w.alt));
+  const distStr = totalDist >= 1000 ? (totalDist / 1000).toFixed(2) + ' km' : Math.round(totalDist) + ' m';
+  const timeStr = totalTime >= 60 ? (totalTime / 60).toFixed(1) + ' min' : Math.round(totalTime) + ' s';
+  document.getElementById('ms-dist').textContent = distStr;
+  document.getElementById('ms-time').textContent = timeStr;
+  document.getElementById('ms-alt').textContent = maxAlt + ' m';
 }
 
 // ====================== ALTITUDE PROFILE ======================
@@ -1420,9 +1476,10 @@ function showInsertMarker(segIdx) {
 function insertWaypointAt(segIdx, lat, lon) {
   clearInsertMarker();
   const alt = Math.round((waypoints[segIdx].alt + waypoints[segIdx + 1].alt) / 2);
+  const speed = ((waypoints[segIdx].speed || 5) + (waypoints[segIdx + 1].speed || 5)) / 2;
   const id  = wpIdCounter++;
   const marker = L.marker([lat, lon], { icon: makeWPIcon(segIdx + 1, 'waypoint', false), draggable: true, zIndexOffset: 500 }).addTo(map);
-  const wp = { lat, lon, alt, action: 'waypoint', loiterR: 20, marker, id };
+  const wp = { lat, lon, alt, action: 'waypoint', loiterR: 20, speed, yaw: -1, marker, id };
   waypoints.splice(segIdx + 1, 0, wp);
 
   marker.on('click', e => { L.DomEvent.stopPropagation(e); selectWP(waypoints.indexOf(wp)); });
@@ -1716,6 +1773,66 @@ async function loadNFZLayers(lat, lon) {
     }).addTo(map);
     nfzLayers.push(label);
   });
+}
+
+// ====================== MAP TILE SWITCHER ======================
+const TILE_LAYERS = {
+  dark: { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', attr: '&copy; OpenStreetMap &copy; CARTO' },
+  satellite: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri' },
+  topo: { url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', attr: '&copy; OpenTopoMap' }
+};
+
+function switchMapTile(type) {
+  if (currentTileLayer) map.removeLayer(currentTileLayer);
+  const cfg = TILE_LAYERS[type] || TILE_LAYERS.dark;
+  currentTileLayer = L.tileLayer(cfg.url, { attribution: cfg.attr, subdomains: 'abcd', maxZoom: 20 }).addTo(map);
+  currentTileLayer.bringToBack();
+}
+
+// ====================== REVERSE MISSION ======================
+function reverseMission() {
+  if (waypoints.length < 2) return;
+  waypoints.reverse();
+  waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, i === selectedIdx)));
+  if (selectedIdx >= 0) selectedIdx = waypoints.length - 1 - selectedIdx;
+  terrainElevations = null;
+  updatePolyline(); updateProfile(); renderWPList();
+}
+
+// ====================== KML EXPORT ======================
+function exportKML() {
+  if (waypoints.length === 0) { alert('No waypoints to export'); return; }
+  const coords = wps => wps.map(w => `${w.lon.toFixed(7)},${w.lat.toFixed(7)},${w.alt}`).join(' ');
+  let placemarks = waypoints.map((w, i) => `
+  <Placemark>
+    <name>WP${i + 1}</name>
+    <description>${w.action} | ${w.alt}m AGL | ${w.speed || 5}m/s</description>
+    <Point><coordinates>${w.lon.toFixed(7)},${w.lat.toFixed(7)},${w.alt}</coordinates></Point>
+  </Placemark>`).join('');
+
+  const lineCoords = [{ lat: homeLat, lon: homeLon, alt: 0 }, ...waypoints]
+    .map(w => `${w.lon.toFixed(7)},${w.lat.toFixed(7)},${w.alt}`).join(' ');
+
+  const kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+  <name>Mission</name>
+  <Placemark>
+    <name>Home</name>
+    <Point><coordinates>${homeLon.toFixed(7)},${homeLat.toFixed(7)},0</coordinates></Point>
+  </Placemark>${placemarks}
+  <Placemark>
+    <name>Mission Path</name>
+    <LineString>
+      <altitudeMode>relativeToGround</altitudeMode>
+      <coordinates>${lineCoords}</coordinates>
+    </LineString>
+  </Placemark>
+</Document>
+</kml>`;
+  const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'mission.kml'; a.click();
 }
 
 // ====================== INIT ======================
