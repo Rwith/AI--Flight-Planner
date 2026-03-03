@@ -6,6 +6,8 @@
 <title>Waypoint Mission Builder</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -194,14 +196,8 @@
     pointer-events: all;
   }
   .insert-btn:hover { transform: scale(1.25); background: #58a6ff; color: #000; }
-  /* 3D MAP TILT */
-  #map-area.in-3d { perspective: 900px; perspective-origin: 50% 15%; }
-  #map {
-    transform-origin: 50% 58%;
-    transition: transform 1s cubic-bezier(.4,0,.2,1);
-  }
-  #map.tilt-3d { transform: rotateX(52deg) scale(1.12); }
   .topbtn.view3d-on { border-color: var(--blue); color: var(--blue); background: rgba(88,166,255,.12); }
+  #ml3d { position: absolute; inset: 0; z-index: 500; }
   /* mobile */
   @media (max-width: 767px) {
     #main { flex-direction: column; }
@@ -1536,17 +1532,105 @@ function animatePlane() {
   planeAnimFrame = requestAnimationFrame(animatePlane);
 }
 
-// ====================== 3D VIEW ======================
+// ====================== 3D VIEW (MapLibre GL JS) ======================
 let view3dOpen = false;
+let maplibreMap = null;
+
+function getMLStyle() {
+  const t = document.getElementById('tile-select')?.value || 'dark';
+  if (t === 'dark') return 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+  if (t === 'satellite') return {
+    version: 8, sources: { sat: { type: 'raster', tileSize: 256, attribution: '© Esri',
+      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'] } },
+    layers: [{ id: 'sat', type: 'raster', source: 'sat' }]
+  };
+  return {
+    version: 8, sources: { topo: { type: 'raster', tileSize: 256, attribution: '© OpenTopoMap',
+      tiles: ['https://a.tile.opentopomap.org/{z}/{x}/{y}.png'] } },
+    layers: [{ id: 'topo', type: 'raster', source: 'topo' }]
+  };
+}
 
 function toggle3DView() {
   view3dOpen = !view3dOpen;
-  document.getElementById('map-area').classList.toggle('in-3d', view3dOpen);
-  document.getElementById('map').classList.toggle('tilt-3d', view3dOpen);
   const btn = document.getElementById('view3d-btn');
   btn.classList.toggle('view3d-on', view3dOpen);
   btn.textContent = view3dOpen ? '3D ▼' : '3D View';
-  setTimeout(() => map.invalidateSize(), 1000);
+
+  if (view3dOpen) {
+    const center = map.getCenter();
+    const zoom   = map.getZoom();
+    document.getElementById('map').style.visibility = 'hidden';
+
+    const mlDiv = document.createElement('div');
+    mlDiv.id = 'ml3d';
+    document.getElementById('map-area').appendChild(mlDiv);
+
+    maplibreMap = new maplibregl.Map({
+      container: 'ml3d',
+      style: getMLStyle(),
+      center: [center.lng, center.lat],
+      zoom: zoom,
+      pitch: 60,
+      bearing: -20,
+      antialias: true
+    });
+
+    maplibreMap.on('load', () => {
+      // Home marker
+      new maplibregl.Marker({ color: '#db6d28' }).setLngLat([homeLon, homeLat]).addTo(maplibreMap);
+
+      if (waypoints.length < 2) return;
+
+      // Ground shadow line
+      maplibreMap.addSource('shadow', { type: 'geojson', data: {
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: waypoints.map(w => [w.lon, w.lat]) }
+      }});
+      maplibreMap.addLayer({ id: 'shadow', type: 'line', source: 'shadow',
+        paint: { 'line-color': 'rgba(88,166,255,0.30)', 'line-width': 2, 'line-dasharray': [4, 4] }
+      });
+
+      // Altitude pillars (fill-extrusion) — one square pillar per waypoint
+      const pillars = waypoints.map(w => ({
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [[
+          [w.lon - 0.00004, w.lat - 0.00004],
+          [w.lon + 0.00004, w.lat - 0.00004],
+          [w.lon + 0.00004, w.lat + 0.00004],
+          [w.lon - 0.00004, w.lat + 0.00004],
+          [w.lon - 0.00004, w.lat - 0.00004]
+        ]]},
+        properties: { height: Math.max(w.alt, 1) }
+      }));
+      maplibreMap.addSource('pillars', { type: 'geojson',
+        data: { type: 'FeatureCollection', features: pillars }
+      });
+      maplibreMap.addLayer({ id: 'pillars', type: 'fill-extrusion', source: 'pillars',
+        paint: {
+          'fill-extrusion-color': '#58a6ff',
+          'fill-extrusion-height': ['get', 'height'],
+          'fill-extrusion-opacity': 0.75
+        }
+      });
+
+      // Numbered WP markers
+      waypoints.forEach((w, i) => {
+        const el = Object.assign(document.createElement('div'), {
+          textContent: i + 1,
+          style: 'width:20px;height:20px;border-radius:50%;background:#58a6ff;color:#000;display:flex;align-items:center;justify-content:center;font:700 10px sans-serif;border:2px solid rgba(0,0,0,.5);pointer-events:none'
+        });
+        new maplibregl.Marker({ element: el }).setLngLat([w.lon, w.lat]).addTo(maplibreMap);
+      });
+    });
+
+  } else {
+    if (maplibreMap) { maplibreMap.remove(); maplibreMap = null; }
+    const mlDiv = document.getElementById('ml3d');
+    if (mlDiv) mlDiv.remove();
+    document.getElementById('map').style.visibility = '';
+    map.invalidateSize();
+  }
 }
 
 // ====================== MAP TILE SWITCHER ======================
