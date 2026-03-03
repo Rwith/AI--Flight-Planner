@@ -194,12 +194,13 @@
     pointer-events: all;
   }
   .insert-btn:hover { transform: scale(1.25); background: #58a6ff; color: #000; }
-  /* 3D MAP OVERLAY */
-  #view3d-canvas {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    pointer-events: none; z-index: 450; display: none;
-    background: rgba(8,12,26,0.88);
+  /* 3D MAP TILT */
+  #map-area.in-3d { perspective: 900px; perspective-origin: 50% 15%; }
+  #map {
+    transform-origin: 50% 58%;
+    transition: transform 1s cubic-bezier(.4,0,.2,1);
   }
+  #map.tilt-3d { transform: rotateX(52deg) scale(1.12); }
   .topbtn.view3d-on { border-color: var(--blue); color: var(--blue); background: rgba(88,166,255,.12); }
   /* mobile */
   @media (max-width: 767px) {
@@ -472,11 +473,6 @@ const windCanvas = document.createElement('canvas');
 windCanvas.id = 'wind-canvas';
 windCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:400';
 map.getContainer().appendChild(windCanvas);
-
-// 3D view overlay canvas — shown on toggle, sits above everything
-const view3dCanvas = document.createElement('canvas');
-view3dCanvas.id = 'view3d-canvas';
-map.getContainer().appendChild(view3dCanvas);
 
 // Sky/day-night ambient overlay — sits between tiles and overlay pane
 const skyOverlay = document.createElement('div');
@@ -1542,167 +1538,15 @@ function animatePlane() {
 
 // ====================== 3D VIEW ======================
 let view3dOpen = false;
-let view3dAnimFrame = null;
 
 function toggle3DView() {
   view3dOpen = !view3dOpen;
-  const canvas = document.getElementById('view3d-canvas');
-  const btn    = document.getElementById('view3d-btn');
-  canvas.style.display = view3dOpen ? 'block' : 'none';
+  document.getElementById('map-area').classList.toggle('in-3d', view3dOpen);
+  document.getElementById('map').classList.toggle('tilt-3d', view3dOpen);
+  const btn = document.getElementById('view3d-btn');
   btn.classList.toggle('view3d-on', view3dOpen);
   btn.textContent = view3dOpen ? '3D ▼' : '3D View';
-  if (view3dOpen) requestAnimationFrame(render3D);
-  else if (view3dAnimFrame) { cancelAnimationFrame(view3dAnimFrame); view3dAnimFrame = null; }
-}
-
-function render3D() {
-  const canvas = document.getElementById('view3d-canvas');
-  const W = canvas.offsetWidth, H = canvas.offsetHeight;
-  if (canvas.width !== W) canvas.width = W;
-  if (canvas.height !== H) canvas.height = H;
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, W, H);
-
-  // No waypoints — draw help text
-  if (waypoints.length === 0) {
-    ctx.fillStyle = '#30363d'; ctx.font = '14px sans-serif';
-    ctx.textAlign = 'center'; ctx.fillText('Add waypoints to see 3D view', W / 2, H / 2);
-    if (view3dOpen) view3dAnimFrame = requestAnimationFrame(render3D);
-    return;
-  }
-
-  // Project lat/lon onto a flat 2D plane centred on mission centroid
-  const minLat = Math.min(...waypoints.map(w => w.lat));
-  const maxLat = Math.max(...waypoints.map(w => w.lat));
-  const minLon = Math.min(...waypoints.map(w => w.lon));
-  const maxLon = Math.max(...waypoints.map(w => w.lon));
-  const cLat = (minLat + maxLat) / 2;
-  const cLon = (minLon + maxLon) / 2;
-  const metersPerDegLat = 111320;
-  const metersPerDegLon = 111320 * Math.cos(cLat * Math.PI / 180);
-
-  const pts = waypoints.map(w => ({
-    x: (w.lon - cLon) * metersPerDegLon,
-    y: (w.lat - cLat) * metersPerDegLat,
-    z: w.alt
-  }));
-
-  const maxAlt = Math.max(...waypoints.map(w => w.alt), 1);
-  const terrain = (terrainElevations && terrainElevations.length === waypoints.length)
-    ? terrainElevations : null;
-
-  // Perspective parameters
-  const fov = 0.7; // radians
-  const camDist = Math.max(...pts.map(p => Math.hypot(p.x, p.y))) * 2.2 + 100;
-  const camH  = camDist * 0.55;
-  const camAngle = (Date.now() / 12000) % (2 * Math.PI); // slow rotation
-  const camX = Math.cos(camAngle) * camDist;
-  const camY = Math.sin(camAngle) * camDist;
-
-  // Project world (x,y,z) → screen (sx, sy)
-  function project(wx, wy, wz) {
-    const dx = wx - camX, dy = wy - camY, dz = wz - camH;
-    // Simple camera transform: rotate into camera space
-    const sinA = Math.sin(-camAngle), cosA = Math.cos(-camAngle);
-    const cx =  dx * cosA + dy * sinA;
-    const cy = -dx * sinA + dy * cosA;
-    const cz = dz;
-    if (cy < 1) return null; // behind camera
-    const scale = (W * 0.38) / (cy * Math.tan(fov / 2) * 2);
-    return {
-      sx: W / 2 + cx * scale,
-      sy: H / 2 - (cz + camH * 0.5) * scale,
-      scale
-    };
-  }
-
-  const projPts = pts.map(p => project(p.x, p.y, p.z));
-  const groundPts = pts.map(p => project(p.x, p.y, 0));
-
-  // Draw grid floor
-  const gridSteps = 6, gridSize = camDist * 0.9;
-  ctx.strokeStyle = 'rgba(30,50,80,0.5)'; ctx.lineWidth = 0.8;
-  for (let i = -gridSteps; i <= gridSteps; i++) {
-    const t = (i / gridSteps) * gridSize;
-    const a = project( t, -gridSize, 0);
-    const b = project( t,  gridSize, 0);
-    const c = project(-gridSize, t, 0);
-    const d = project( gridSize, t, 0);
-    if (a && b) { ctx.beginPath(); ctx.moveTo(a.sx, a.sy); ctx.lineTo(b.sx, b.sy); ctx.stroke(); }
-    if (c && d) { ctx.beginPath(); ctx.moveTo(c.sx, c.sy); ctx.lineTo(d.sx, d.sy); ctx.stroke(); }
-  }
-
-  // Draw terrain surface between waypoints (if available)
-  if (terrain && groundPts.every(Boolean)) {
-    for (let i = 0; i < waypoints.length; i++) {
-      const gp = groundPts[i];
-      const terrainZ = terrain[i];
-      const tp = project(pts[i].x, pts[i].y, terrainZ);
-      if (gp && tp) {
-        const grad = ctx.createLinearGradient(tp.sx, tp.sy, gp.sx, gp.sy);
-        grad.addColorStop(0, 'rgba(219,109,40,0.55)');
-        grad.addColorStop(1, 'rgba(219,109,40,0.0)');
-        ctx.beginPath();
-        ctx.moveTo(tp.sx, tp.sy);
-        ctx.lineTo(gp.sx, gp.sy);
-        ctx.strokeStyle = grad; ctx.lineWidth = 3; ctx.stroke();
-      }
-    }
-  }
-
-  // Draw gradient vertical drops from path to ground
-  for (let i = 0; i < waypoints.length; i++) {
-    const pp = projPts[i], gp = groundPts[i];
-    if (!pp || !gp) continue;
-    const grad = ctx.createLinearGradient(pp.sx, pp.sy, gp.sx, gp.sy);
-    grad.addColorStop(0, 'rgba(88,166,255,0.55)');
-    grad.addColorStop(1, 'rgba(88,166,255,0.0)');
-    ctx.beginPath(); ctx.moveTo(pp.sx, pp.sy); ctx.lineTo(gp.sx, gp.sy);
-    ctx.strokeStyle = grad; ctx.lineWidth = 1.5 * (pp.scale || 1) * 0.012 + 1; ctx.stroke();
-  }
-
-  // Draw ground trace (shadow)
-  if (groundPts.length >= 2 && groundPts.every(Boolean)) {
-    ctx.beginPath(); ctx.moveTo(groundPts[0].sx, groundPts[0].sy);
-    for (let i = 1; i < groundPts.length; i++) ctx.lineTo(groundPts[i].sx, groundPts[i].sy);
-    ctx.strokeStyle = 'rgba(88,166,255,0.20)'; ctx.lineWidth = 2; ctx.setLineDash([4,4]); ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  // Draw flight path
-  const validIdx = projPts.map((p,i) => p ? i : -1).filter(i => i >= 0);
-  if (validIdx.length >= 2) {
-    ctx.beginPath(); ctx.moveTo(projPts[validIdx[0]].sx, projPts[validIdx[0]].sy);
-    for (let i = 1; i < validIdx.length; i++) {
-      const pp = projPts[validIdx[i]];
-      ctx.lineTo(pp.sx, pp.sy);
-    }
-    ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2.5; ctx.stroke();
-  }
-
-  // Draw home point
-  const homeProj = project(0, 0, 0);
-  if (homeProj) {
-    ctx.beginPath(); ctx.arc(homeProj.sx, homeProj.sy, 5, 0, 2 * Math.PI);
-    ctx.fillStyle = '#db6d28'; ctx.fill();
-    ctx.fillStyle = '#e6edf3'; ctx.font = 'bold 10px sans-serif';
-    ctx.textAlign = 'center'; ctx.fillText('H', homeProj.sx, homeProj.sy + 3);
-  }
-
-  // Draw WP dots
-  projPts.forEach((pp, i) => {
-    if (!pp) return;
-    const col = ACTION_COLORS[waypoints[i].action] || '#58a6ff';
-    ctx.beginPath(); ctx.arc(pp.sx, pp.sy, 5, 0, 2 * Math.PI);
-    ctx.fillStyle = col; ctx.fill();
-    ctx.fillStyle = '#000'; ctx.font = 'bold 9px sans-serif';
-    ctx.textAlign = 'center'; ctx.fillText(i + 1, pp.sx, pp.sy + 3);
-    // Altitude label
-    ctx.fillStyle = 'rgba(230,237,243,0.75)'; ctx.font = '9px sans-serif';
-    ctx.fillText(`${waypoints[i].alt}m`, pp.sx, pp.sy - 8);
-  });
-
-  if (view3dOpen) view3dAnimFrame = requestAnimationFrame(render3D);
+  setTimeout(() => map.invalidateSize(), 1000);
 }
 
 // ====================== MAP TILE SWITCHER ======================
