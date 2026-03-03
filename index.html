@@ -194,20 +194,12 @@
     pointer-events: all;
   }
   .insert-btn:hover { transform: scale(1.25); background: #58a6ff; color: #000; }
-  /* 3D VIEW PANEL */
-  #view3d-panel {
-    position: fixed; bottom: -420px; left: 0; right: 0; height: 420px;
-    background: #0a0e1a; border-top: 2px solid var(--blue); z-index: 1500;
-    display: flex; flex-direction: column;
-    transition: bottom .35s cubic-bezier(.4,0,.2,1);
+  /* 3D MAP OVERLAY */
+  #view3d-canvas {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 450; display: none;
+    background: rgba(8,12,26,0.88);
   }
-  #view3d-panel.open { bottom: 0; }
-  #view3d-header {
-    height: 34px; background: var(--panel); border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; padding: 0 12px; gap: 10px; flex-shrink: 0;
-  }
-  #view3d-header span { font-size: 12px; font-weight: 600; color: var(--blue); flex: 1; }
-  #view3d-canvas { flex: 1; width: 100%; display: block; }
   .topbtn.view3d-on { border-color: var(--blue); color: var(--blue); background: rgba(88,166,255,.12); }
   /* mobile */
   @media (max-width: 767px) {
@@ -238,7 +230,6 @@
     <option value="satellite">Satellite</option>
     <option value="topo">Topo</option>
   </select>
-  <button class="topbtn" id="fly-btn" onclick="togglePlane()" title="Animate plane along mission path">✈ Fly</button>
   <button class="topbtn" id="view3d-btn" onclick="toggle3DView()">3D View</button>
   <button class="topbtn" onclick="openLogbook()">Logbook</button>
   <button class="topbtn" id="nfz-btn" onclick="toggleNFZ()">NFZ Off</button>
@@ -445,15 +436,6 @@
   </div>
 </div>
 
-<!-- 3D VIEW PANEL -->
-<div id="view3d-panel">
-  <div id="view3d-header">
-    <span>3D Mission View</span>
-    <button class="btn" onclick="toggle3DView()" style="font-size:11px;padding:3px 10px">✕ Close</button>
-  </div>
-  <canvas id="view3d-canvas"></canvas>
-</div>
-
 <script>
 // ====================== STATE ======================
 let waypoints = []; // {lat,lon,alt,action,loiterR,marker,id}
@@ -490,6 +472,11 @@ const windCanvas = document.createElement('canvas');
 windCanvas.id = 'wind-canvas';
 windCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:400';
 map.getContainer().appendChild(windCanvas);
+
+// 3D view overlay canvas — shown on toggle, sits above everything
+const view3dCanvas = document.createElement('canvas');
+view3dCanvas.id = 'view3d-canvas';
+map.getContainer().appendChild(view3dCanvas);
 
 // Sky/day-night ambient overlay — sits between tiles and overlay pane
 const skyOverlay = document.createElement('div');
@@ -955,7 +942,7 @@ function updateMissionStats() {
   for (let i = 1; i < waypoints.length; i++) {
     const d = haversine(waypoints[i-1].lat, waypoints[i-1].lon, waypoints[i].lat, waypoints[i].lon);
     totalDist += d;
-    totalTime += d / 10; // estimate at 10 m/s
+    totalTime += d / 20.8; // estimate at 20.8 m/s (75 km/h)
   }
   const maxAlt = Math.max(...waypoints.map(w => w.alt));
   const distStr = totalDist >= 1000 ? (totalDist / 1000).toFixed(2) + ' km' : Math.round(totalDist) + ' m';
@@ -1504,25 +1491,18 @@ let planeAnimFrame = null;
 let planeSegIdx = 0;
 let planeSegT = 0;
 
-function togglePlane() {
-  if (planeAnimRunning) stopPlane();
-  else startPlane();
-}
+const PLANE_ARROW_SVG = `<svg xmlns="http://www.w3.org/2000/svg" id="plane-icon" width="18" height="26" viewBox="0 0 18 26"
+  style="display:block;filter:drop-shadow(0 1px 5px rgba(0,0,0,.9));transform-origin:9px 13px">
+  <polygon points="9,0 18,26 9,19 0,26" fill="#58a6ff" stroke="rgba(0,0,0,0.45)" stroke-width="1.2" stroke-linejoin="round"/>
+</svg>`;
 
-function startPlane() {
-  if (waypoints.length < 2) { alert('Add at least 2 waypoints first'); return; }
+function startPlane(silent = false) {
+  if (waypoints.length < 2) { if (!silent) alert('Add at least 2 waypoints first'); return; }
   planeSegIdx = 0; planeSegT = 0;
   planeAnimRunning = true;
-  const btn = document.getElementById('fly-btn');
-  btn.textContent = '✈ Stop'; btn.classList.add('primary');
-
   if (planeMarker) map.removeLayer(planeMarker);
   planeMarker = L.marker([waypoints[0].lat, waypoints[0].lon], {
-    icon: L.divIcon({
-      className: '',
-      html: '<div id="plane-icon" style="font-size:26px;line-height:1;transform-origin:center;filter:drop-shadow(0 2px 6px rgba(0,0,0,.8));transition:transform .08s linear">✈</div>',
-      iconSize: [30, 30], iconAnchor: [15, 15]
-    }),
+    icon: L.divIcon({ className: '', html: PLANE_ARROW_SVG, iconSize: [18, 26], iconAnchor: [9, 13] }),
     zIndexOffset: 2000, interactive: false
   }).addTo(map);
   animatePlane();
@@ -1532,8 +1512,6 @@ function stopPlane() {
   planeAnimRunning = false;
   if (planeAnimFrame) { cancelAnimationFrame(planeAnimFrame); planeAnimFrame = null; }
   if (planeMarker) { map.removeLayer(planeMarker); planeMarker = null; }
-  const btn = document.getElementById('fly-btn');
-  btn.textContent = '✈ Fly'; btn.classList.remove('primary');
 }
 
 function animatePlane() {
@@ -1567,13 +1545,13 @@ let view3dOpen = false;
 let view3dAnimFrame = null;
 
 function toggle3DView() {
-  const panel = document.getElementById('view3d-panel');
-  const btn   = document.getElementById('view3d-btn');
   view3dOpen = !view3dOpen;
-  panel.classList.toggle('open', view3dOpen);
+  const canvas = document.getElementById('view3d-canvas');
+  const btn    = document.getElementById('view3d-btn');
+  canvas.style.display = view3dOpen ? 'block' : 'none';
   btn.classList.toggle('view3d-on', view3dOpen);
   btn.textContent = view3dOpen ? '3D ▼' : '3D View';
-  if (view3dOpen) { requestAnimationFrame(render3D); }
+  if (view3dOpen) requestAnimationFrame(render3D);
   else if (view3dAnimFrame) { cancelAnimationFrame(view3dAnimFrame); view3dAnimFrame = null; }
 }
 
@@ -1793,6 +1771,9 @@ fetchWeather();
 renderWPList();
 updateProfile();
 initWindParticles();
+
+// Easter egg: plane auto-flies the path after 20 s
+setTimeout(() => startPlane(true), 20000);
 </script>
 </body>
 </html>
