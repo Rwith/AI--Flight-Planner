@@ -238,6 +238,7 @@
     <option value="satellite">Satellite</option>
     <option value="topo">Topo</option>
   </select>
+  <button class="topbtn" id="fly-btn" onclick="togglePlane()" title="Animate plane along mission path">✈ Fly</button>
   <button class="topbtn" id="view3d-btn" onclick="toggle3DView()">3D View</button>
   <button class="topbtn" onclick="openLogbook()">Logbook</button>
   <button class="topbtn" id="nfz-btn" onclick="toggleNFZ()">NFZ Off</button>
@@ -291,16 +292,6 @@
         <div class="form-row" id="loiter-row" style="display:none">
           <label>Loiter Radius (m)</label>
           <input type="number" id="ed-loiter-r" value="20" min="5" max="500" onchange="updateSelectedWP()">
-        </div>
-        <div class="form-2col">
-          <div class="form-row">
-            <label>Speed (m/s)</label>
-            <input type="number" id="ed-speed" value="5" min="1" max="30" step="0.5" onchange="updateSelectedWP()">
-          </div>
-          <div class="form-row">
-            <label>Yaw (° / -1=auto)</label>
-            <input type="number" id="ed-yaw" value="-1" min="-1" max="359" onchange="updateSelectedWP()">
-          </div>
         </div>
         <div class="btn-row">
           <button class="btn danger" onclick="deleteSelectedWP()" style="flex:1">Delete</button>
@@ -553,7 +544,7 @@ function addWaypoint(lat, lon, alt, action) {
     zIndexOffset: 500
   }).addTo(map);
 
-  const wp = { lat, lon, alt, action, loiterR: 20, speed: 5, yaw: -1, marker, id };
+  const wp = { lat, lon, alt, action, loiterR: 20, marker, id };
   waypoints.push(wp);
 
   marker.on('click', e => { L.DomEvent.stopPropagation(e); selectWP(waypoints.indexOf(wp)); });
@@ -619,7 +610,7 @@ function renderWPList() {
       <div class="wp-dot" style="background:${col};color:#000">${i + 1}</div>
       <div class="wp-info">
         <div class="wp-num">WP${i + 1} — ${wp.action}</div>
-        <div class="wp-details">${wp.alt}m AGL · ${wp.speed || 5}m/s &nbsp;|&nbsp; ${wp.lat.toFixed(5)}, ${wp.lon.toFixed(5)}</div>
+        <div class="wp-details">${wp.alt}m AGL &nbsp;|&nbsp; ${wp.lat.toFixed(5)}, ${wp.lon.toFixed(5)}</div>
       </div>
       <span class="wp-del" onclick="event.stopPropagation();deleteWPByIdx(${i})">✕</span>
     </div>`;
@@ -660,8 +651,6 @@ function showEditor(wp, idx) {
   document.getElementById('ed-alt').value = wp.alt;
   document.getElementById('ed-action').value = wp.action;
   document.getElementById('ed-loiter-r').value = wp.loiterR || 20;
-  document.getElementById('ed-speed').value = wp.speed != null ? wp.speed : 5;
-  document.getElementById('ed-yaw').value = wp.yaw != null ? wp.yaw : -1;
   document.getElementById('loiter-row').style.display = wp.action === 'loiter' ? 'flex' : 'none';
 }
 
@@ -676,8 +665,6 @@ function updateSelectedWP() {
   wp.alt = parseFloat(document.getElementById('ed-alt').value) || 50;
   wp.action = document.getElementById('ed-action').value;
   wp.loiterR = parseFloat(document.getElementById('ed-loiter-r').value) || 20;
-  wp.speed = parseFloat(document.getElementById('ed-speed').value) || 5;
-  wp.yaw = parseFloat(document.getElementById('ed-yaw').value);
   document.getElementById('loiter-row').style.display = wp.action === 'loiter' ? 'flex' : 'none';
   wp.marker.setIcon(makeWPIcon(selectedIdx, wp.action, true));
   renderWPList();
@@ -700,6 +687,7 @@ function deleteWPByIdx(idx) {
 
 function clearMission() {
   if (!confirm('Clear all waypoints?')) return;
+  stopPlane();
   terrainElevations = null;
   waypoints.forEach(wp => map.removeLayer(wp.marker));
   waypoints = []; selectedIdx = -1;
@@ -717,8 +705,7 @@ function exportWaypoints() {
   waypoints.forEach(wp => {
     const cmd = wp.action === 'loiter' ? 17 : wp.action === 'land' ? 21 : 16;
     const p3 = wp.action === 'loiter' ? wp.loiterR : 0;
-    const yawOut = (wp.yaw != null && wp.yaw >= 0) ? wp.yaw : 0;
-    lines.push(`${idx}\t0\t3\t${cmd}\t${wp.speed || 5}\t0\t${p3}\t${yawOut}\t${wp.lat.toFixed(7)}\t${wp.lon.toFixed(7)}\t${wp.alt}\t1`);
+    lines.push(`${idx}\t0\t3\t${cmd}\t0\t0\t${p3}\t0\t${wp.lat.toFixed(7)}\t${wp.lon.toFixed(7)}\t${wp.alt}\t1`);
     idx++;
     if (wp.action === 'photo') {
       lines.push(`${idx}\t0\t3\t203\t0\t0\t0\t1\t0\t0\t0\t1`);
@@ -763,7 +750,7 @@ function addWaypointSilent(lat, lon, alt, action, loiterR) {
   const id = wpIdCounter++;
   const idx = waypoints.length;
   const marker = L.marker([lat, lon], { icon: makeWPIcon(idx, action, false), draggable: true, zIndexOffset: 500 }).addTo(map);
-  const wp = { lat, lon, alt, action, loiterR: loiterR || 20, speed: 5, yaw: -1, marker, id };
+  const wp = { lat, lon, alt, action, loiterR: loiterR || 20, marker, id };
   waypoints.push(wp);
   marker.on('click', e => { L.DomEvent.stopPropagation(e); selectWP(waypoints.indexOf(wp)); });
   marker.on('contextmenu', e => {
@@ -968,8 +955,7 @@ function updateMissionStats() {
   for (let i = 1; i < waypoints.length; i++) {
     const d = haversine(waypoints[i-1].lat, waypoints[i-1].lon, waypoints[i].lat, waypoints[i].lon);
     totalDist += d;
-    const speed = waypoints[i].speed || 5;
-    totalTime += d / speed;
+    totalTime += d / 10; // estimate at 10 m/s
   }
   const maxAlt = Math.max(...waypoints.map(w => w.alt));
   const distStr = totalDist >= 1000 ? (totalDist / 1000).toFixed(2) + ' km' : Math.round(totalDist) + ' m';
@@ -1199,10 +1185,9 @@ function showInsertMarker(segIdx) {
 function insertWaypointAt(segIdx, lat, lon) {
   clearInsertMarker();
   const alt = Math.round((waypoints[segIdx].alt + waypoints[segIdx + 1].alt) / 2);
-  const speed = ((waypoints[segIdx].speed || 5) + (waypoints[segIdx + 1].speed || 5)) / 2;
   const id  = wpIdCounter++;
   const marker = L.marker([lat, lon], { icon: makeWPIcon(segIdx + 1, 'waypoint', false), draggable: true, zIndexOffset: 500 }).addTo(map);
-  const wp = { lat, lon, alt, action: 'waypoint', loiterR: 20, speed, yaw: -1, marker, id };
+  const wp = { lat, lon, alt, action: 'waypoint', loiterR: 20, marker, id };
   waypoints.splice(segIdx + 1, 0, wp);
 
   marker.on('click', e => { L.DomEvent.stopPropagation(e); selectWP(waypoints.indexOf(wp)); });
@@ -1512,6 +1497,71 @@ async function loadNFZLayers(lat, lon) {
   });
 }
 
+// ====================== PLANE EASTER EGG ======================
+let planeMarker = null;
+let planeAnimRunning = false;
+let planeAnimFrame = null;
+let planeSegIdx = 0;
+let planeSegT = 0;
+
+function togglePlane() {
+  if (planeAnimRunning) stopPlane();
+  else startPlane();
+}
+
+function startPlane() {
+  if (waypoints.length < 2) { alert('Add at least 2 waypoints first'); return; }
+  planeSegIdx = 0; planeSegT = 0;
+  planeAnimRunning = true;
+  const btn = document.getElementById('fly-btn');
+  btn.textContent = '✈ Stop'; btn.classList.add('primary');
+
+  if (planeMarker) map.removeLayer(planeMarker);
+  planeMarker = L.marker([waypoints[0].lat, waypoints[0].lon], {
+    icon: L.divIcon({
+      className: '',
+      html: '<div id="plane-icon" style="font-size:26px;line-height:1;transform-origin:center;filter:drop-shadow(0 2px 6px rgba(0,0,0,.8));transition:transform .08s linear">✈</div>',
+      iconSize: [30, 30], iconAnchor: [15, 15]
+    }),
+    zIndexOffset: 2000, interactive: false
+  }).addTo(map);
+  animatePlane();
+}
+
+function stopPlane() {
+  planeAnimRunning = false;
+  if (planeAnimFrame) { cancelAnimationFrame(planeAnimFrame); planeAnimFrame = null; }
+  if (planeMarker) { map.removeLayer(planeMarker); planeMarker = null; }
+  const btn = document.getElementById('fly-btn');
+  btn.textContent = '✈ Fly'; btn.classList.remove('primary');
+}
+
+function animatePlane() {
+  if (!planeAnimRunning || waypoints.length < 2) { stopPlane(); return; }
+
+  const SPEED = 0.005; // fraction of segment per frame (~60fps → loops in ~3s per segment)
+  planeSegT += SPEED;
+  if (planeSegT >= 1) {
+    planeSegT -= 1;
+    planeSegIdx = (planeSegIdx + 1) % (waypoints.length - 1);
+  }
+
+  const a = waypoints[planeSegIdx];
+  const b = waypoints[planeSegIdx + 1];
+  const lat = a.lat + (b.lat - a.lat) * planeSegT;
+  const lon = a.lon + (b.lon - a.lon) * planeSegT;
+  planeMarker.setLatLng([lat, lon]);
+
+  // Bearing: 0° = North (up on map), rotate ✈ which points East by default
+  const dLat = b.lat - a.lat;
+  const dLon = b.lon - a.lon;
+  const bearing = Math.atan2(dLon * Math.cos(a.lat * Math.PI / 180), dLat) * 180 / Math.PI;
+  const icon = document.getElementById('plane-icon');
+  if (icon) icon.style.transform = `rotate(${bearing}deg)`;
+
+  planeAnimFrame = requestAnimationFrame(animatePlane);
+}
+
 // ====================== 3D VIEW ======================
 let view3dOpen = false;
 let view3dAnimFrame = null;
@@ -1708,7 +1758,7 @@ function exportKML() {
   let placemarks = waypoints.map((w, i) => `
   <Placemark>
     <name>WP${i + 1}</name>
-    <description>${w.action} | ${w.alt}m AGL | ${w.speed || 5}m/s</description>
+    <description>${w.action} | ${w.alt}m AGL</description>
     <Point><coordinates>${w.lon.toFixed(7)},${w.lat.toFixed(7)},${w.alt}</coordinates></Point>
   </Placemark>`).join('');
 
