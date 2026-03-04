@@ -1588,17 +1588,52 @@ function toggle3DView() {
         geometry: { type: 'LineString', coordinates: waypoints.map(w => [w.lon, w.lat]) }
       }});
       maplibreMap.addLayer({ id: 'shadow', type: 'line', source: 'shadow',
-        paint: { 'line-color': 'rgba(88,166,255,0.30)', 'line-width': 2, 'line-dasharray': [4, 4] }
+        paint: { 'line-color': 'rgba(88,166,255,0.25)', 'line-width': 2, 'line-dasharray': [4, 4] }
       });
 
-      // Altitude pillars (fill-extrusion) — one square pillar per waypoint
+      // Raised flight path — thin fill-extrusion curtain subdivided per segment
+      // Each sub-step has height = interpolated altitude at its midpoint, so the
+      // top surface of the wall traces the actual 3D flight path.
+      const curtainFeatures = [];
+      const STEPS = 40, W = 0.00007; // W ≈ 7 m half-width — looks like a ribbon
+      for (let i = 0; i < waypoints.length - 1; i++) {
+        const a = waypoints[i], b = waypoints[i + 1];
+        const dLon = b.lon - a.lon, dLat = b.lat - a.lat;
+        const len = Math.sqrt(dLon * dLon + dLat * dLat) || 1;
+        const pLon = (-dLat / len) * W, pLat = (dLon / len) * W; // perpendicular
+        for (let s = 0; s < STEPS; s++) {
+          const t1 = s / STEPS, t2 = (s + 1) / STEPS, tM = (t1 + t2) / 2;
+          const lon1 = a.lon + dLon * t1, lat1 = a.lat + dLat * t1;
+          const lon2 = a.lon + dLon * t2, lat2 = a.lat + dLat * t2;
+          const h = Math.max(a.alt + (b.alt - a.alt) * tM, 1);
+          curtainFeatures.push({
+            type: 'Feature',
+            geometry: { type: 'Polygon', coordinates: [[
+              [lon1 - pLon, lat1 - pLat], [lon1 + pLon, lat1 + pLat],
+              [lon2 + pLon, lat2 + pLat], [lon2 - pLon, lat2 - pLat],
+              [lon1 - pLon, lat1 - pLat]
+            ]]},
+            properties: { height: h }
+          });
+        }
+      }
+      maplibreMap.addSource('curtain', { type: 'geojson',
+        data: { type: 'FeatureCollection', features: curtainFeatures }
+      });
+      maplibreMap.addLayer({ id: 'curtain', type: 'fill-extrusion', source: 'curtain',
+        paint: {
+          'fill-extrusion-color': '#58a6ff',
+          'fill-extrusion-height': ['get', 'height'],
+          'fill-extrusion-opacity': 0.85
+        }
+      });
+
+      // Waypoint pillars — small square at each WP position, extruded to WP altitude
       const pillars = waypoints.map(w => ({
         type: 'Feature',
         geometry: { type: 'Polygon', coordinates: [[
-          [w.lon - 0.00004, w.lat - 0.00004],
-          [w.lon + 0.00004, w.lat - 0.00004],
-          [w.lon + 0.00004, w.lat + 0.00004],
-          [w.lon - 0.00004, w.lat + 0.00004],
+          [w.lon - 0.00004, w.lat - 0.00004], [w.lon + 0.00004, w.lat - 0.00004],
+          [w.lon + 0.00004, w.lat + 0.00004], [w.lon - 0.00004, w.lat + 0.00004],
           [w.lon - 0.00004, w.lat - 0.00004]
         ]]},
         properties: { height: Math.max(w.alt, 1) }
@@ -1608,9 +1643,47 @@ function toggle3DView() {
       });
       maplibreMap.addLayer({ id: 'pillars', type: 'fill-extrusion', source: 'pillars',
         paint: {
-          'fill-extrusion-color': '#58a6ff',
+          'fill-extrusion-color': '#ffffff',
           'fill-extrusion-height': ['get', 'height'],
-          'fill-extrusion-opacity': 0.75
+          'fill-extrusion-opacity': 0.9
+        }
+      });
+
+      // Custom WebGL layer — actual elevated line at exact waypoint altitudes
+      const elevPts = waypoints.map(w => {
+        const m = maplibregl.MercatorCoordinate.fromLngLat([w.lon, w.lat], w.alt);
+        return [m.x, m.y, m.z];
+      });
+      maplibreMap.addLayer({
+        id: 'elevated-line', type: 'custom', renderingMode: '3d',
+        onAdd(map, gl) {
+          const vs = `precision highp float;
+            attribute vec3 a_pos; uniform mat4 u_matrix;
+            void main() { gl_Position = u_matrix * vec4(a_pos, 1.0); }`;
+          const fs = `precision highp float;
+            void main() { gl_FragColor = vec4(1.0,1.0,1.0,1.0); }`;
+          const vert = gl.createShader(gl.VERTEX_SHADER);
+          gl.shaderSource(vert, vs); gl.compileShader(vert);
+          const frag = gl.createShader(gl.FRAGMENT_SHADER);
+          gl.shaderSource(frag, fs); gl.compileShader(frag);
+          this.prog = gl.createProgram();
+          gl.attachShader(this.prog, vert); gl.attachShader(this.prog, frag);
+          gl.linkProgram(this.prog);
+          const flat = elevPts.flatMap(v => v);
+          this.buf = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
+          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(flat), gl.STATIC_DRAW);
+          this.count = elevPts.length;
+        },
+        render(gl, matrix) {
+          gl.useProgram(this.prog);
+          gl.uniformMatrix4fv(gl.getUniformLocation(this.prog, 'u_matrix'), false, matrix);
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
+          const loc = gl.getAttribLocation(this.prog, 'a_pos');
+          gl.enableVertexAttribArray(loc);
+          gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+          gl.lineWidth(3);
+          gl.drawArrays(gl.LINE_STRIP, 0, this.count);
         }
       });
 
