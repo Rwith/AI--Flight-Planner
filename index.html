@@ -9,6 +9,10 @@
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<!-- Three.js import map — used by the module script that builds the 3D flight-tube layer -->
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js"}}
+</script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -1612,93 +1616,9 @@ function toggle3DView() {
         }
       });
 
-      // Shared vertex shader for the two WebGL custom layers below
-      const vs = `precision highp float;
-        attribute vec3 a_pos; uniform mat4 u_matrix;
-        void main() { gl_Position = u_matrix * vec4(a_pos, 1.0); }`;
-
-      // Smooth elevated curtain — zero-width vertical plane from ground to path altitude.
-      // Each sub-step is a trapezoid: top-left vertex gets z at t0, top-right gets z at
-      // t1 (both linearly interpolated in Mercator space). No two adjacent quads share the
-      // same flat top, so altitude changes render as a continuous slope — no staircase.
-      const STEPS = 80;
-      const curtainVerts = [];
-      for (let i = 0; i < waypoints.length - 1; i++) {
-        const a = waypoints[i], b = waypoints[i + 1];
-        const ma = maplibregl.MercatorCoordinate.fromLngLat([a.lon, a.lat], a.alt);
-        const mb = maplibregl.MercatorCoordinate.fromLngLat([b.lon, b.lat], b.alt);
-        for (let s = 0; s < STEPS; s++) {
-          const t0 = s / STEPS, t1 = (s + 1) / STEPS;
-          const x0 = ma.x + (mb.x - ma.x) * t0, y0 = ma.y + (mb.y - ma.y) * t0;
-          const x1 = ma.x + (mb.x - ma.x) * t1, y1 = ma.y + (mb.y - ma.y) * t1;
-          const z0 = ma.z + (mb.z - ma.z) * t0; // altitude at step-start
-          const z1 = ma.z + (mb.z - ma.z) * t1; // altitude at step-end (different → smooth slope)
-          // Two triangles forming a trapezoid; bottom edge on the ground, top edge at altitude
-          curtainVerts.push(
-            x0, y0, 0,   x0, y0, z0,  x1, y1, 0,
-            x0, y0, z0,  x1, y1, z1,  x1, y1, 0
-          );
-        }
-      }
-
-      maplibreMap.addLayer({
-        id: 'curtain-smooth', type: 'custom', renderingMode: '3d',
-        onAdd(map, gl) {
-          const fs = `precision highp float;
-            void main() { gl_FragColor = vec4(0.345,0.651,1.0,0.45); }`;
-          const v = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(v, vs); gl.compileShader(v);
-          const f = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(f, fs); gl.compileShader(f);
-          this.prog = gl.createProgram();
-          gl.attachShader(this.prog, v); gl.attachShader(this.prog, f); gl.linkProgram(this.prog);
-          this.buf = gl.createBuffer();
-          gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
-          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(curtainVerts), gl.STATIC_DRAW);
-          this.count = curtainVerts.length / 3;
-        },
-        render(gl, matrix) {
-          gl.useProgram(this.prog);
-          gl.uniformMatrix4fv(gl.getUniformLocation(this.prog, 'u_matrix'), false, matrix);
-          gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
-          const loc = gl.getAttribLocation(this.prog, 'a_pos');
-          gl.enableVertexAttribArray(loc);
-          gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
-          gl.enable(gl.BLEND);
-          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-          gl.drawArrays(gl.TRIANGLES, 0, this.count);
-        }
-      });
-
-      // Bright white line running along the top edge of the curtain (exact path at altitude)
-      const linePts = waypoints.map(w => {
-        const m = maplibregl.MercatorCoordinate.fromLngLat([w.lon, w.lat], w.alt);
-        return [m.x, m.y, m.z];
-      });
-      maplibreMap.addLayer({
-        id: 'elevated-line', type: 'custom', renderingMode: '3d',
-        onAdd(map, gl) {
-          const fs = `precision highp float;
-            void main() { gl_FragColor = vec4(1.0,1.0,1.0,1.0); }`;
-          const v = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(v, vs); gl.compileShader(v);
-          const f = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(f, fs); gl.compileShader(f);
-          this.prog = gl.createProgram();
-          gl.attachShader(this.prog, v); gl.attachShader(this.prog, f); gl.linkProgram(this.prog);
-          const flat = linePts.flatMap(p => p);
-          this.buf = gl.createBuffer();
-          gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
-          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(flat), gl.STATIC_DRAW);
-          this.count = linePts.length;
-        },
-        render(gl, matrix) {
-          gl.useProgram(this.prog);
-          gl.uniformMatrix4fv(gl.getUniformLocation(this.prog, 'u_matrix'), false, matrix);
-          gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
-          const loc = gl.getAttribLocation(this.prog, 'a_pos');
-          gl.enableVertexAttribArray(loc);
-          gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
-          gl.lineWidth(3);
-          gl.drawArrays(gl.LINE_STRIP, 0, this.count);
-        }
-      });
+      // Three.js TubeGeometry — smooth 3D cylinder along the flight path at exact altitudes.
+      // Built by the ES-module script at the bottom of this file via window._addTubePath.
+      if (typeof window._addTubePath === 'function') window._addTubePath(maplibreMap);
 
       // Numbered WP markers
       waypoints.forEach((w, i) => {
@@ -1788,6 +1708,89 @@ initWindParticles();
 
 // Easter egg: plane auto-flies the path after 20 s
 setTimeout(() => startPlane(true), 20000);
+</script>
+
+<!-- Three.js module: builds the TubeGeometry flight-tube custom layer.
+     Loaded as an ES module so we can import Three.js via the importmap above.
+     Sets window._addTubePath which toggle3DView() calls inside on('load'). -->
+<script type="module">
+import * as THREE from 'three';
+
+window._addTubePath = function(mlMap) {
+  const wps = window.waypoints;
+  if (!wps || wps.length < 2) return;
+
+  // Use first waypoint as the Mercator-space origin for float precision.
+  const origin = maplibregl.MercatorCoordinate.fromLngLat([wps[0].lon, wps[0].lat], 0);
+  const sc = origin.meterInMercatorCoordinateUnits(); // 1 metre in Mercator units
+
+  // Map each waypoint to Three.js local space (metres from origin).
+  // The render() method applies: translate(origin) · scale(sc,-sc,sc) · rotateX(π/2)
+  // which converts (x_t, y_t, z_t) → Mercator (origin.x + x_t·sc,
+  //                                              origin.y + z_t·sc,
+  //                                              origin.z + y_t·sc)
+  // So:  x_t = (m.x - origin.x)/sc  (east, metres)
+  //      y_t = m.z / sc              (altitude, metres)
+  //      z_t = (m.y - origin.y)/sc   (south, metres — Mercator Y grows southward)
+  const pts = wps.map(w => {
+    const m = maplibregl.MercatorCoordinate.fromLngLat([w.lon, w.lat], w.alt);
+    return new THREE.Vector3(
+      (m.x - origin.x) / sc,
+       m.z / sc,
+      (m.y - origin.y) / sc
+    );
+  });
+
+  mlMap.addLayer({
+    id: 'flight-tube', type: 'custom', renderingMode: '3d',
+
+    onAdd(map, gl) {
+      this.map = map;
+      // Share MapLibre's WebGL context so we draw into the same canvas.
+      this.renderer = new THREE.WebGLRenderer({ canvas: map.getCanvas(), context: gl, antialias: true });
+      this.renderer.autoClear = false;
+      this.camera = new THREE.Camera(); // raw camera — projection set manually in render()
+      this.scene  = new THREE.Scene();
+
+      // Catmull-Rom spline for smooth curves through waypoints (no sharp kinks at turns).
+      const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.5);
+      const segments = Math.max(wps.length * 20, 80);
+      // radius = 5 m, 12 radial sides → visually smooth circle at typical drone zoom levels.
+      const geo = new THREE.TubeGeometry(curve, segments, 5, 12, false);
+      const mat = new THREE.MeshPhongMaterial({
+        color:             0xff8c00,  // amber-orange
+        emissive:          0xff4400,  // red-orange inner glow
+        emissiveIntensity: 0.45,
+        shininess:         90,
+        transparent:       true,
+        opacity:           0.92,
+        side:              THREE.DoubleSide
+      });
+      this.scene.add(new THREE.Mesh(geo, mat));
+      this.scene.add(new THREE.AmbientLight(0xffffff, 2.0));
+      const dir = new THREE.DirectionalLight(0xffffff, 2.0);
+      dir.position.set(0.5, 1.0, 0.3).normalize();
+      this.scene.add(dir);
+      this.origin = origin;
+      this.sc = sc;
+    },
+
+    onRemove() { this.renderer.dispose(); this.scene.clear(); },
+
+    render(gl, matrix) {
+      // Build the model→Mercator matrix, then premultiply by MapLibre's projection matrix.
+      const proj = new THREE.Matrix4().fromArray(matrix);
+      const model = new THREE.Matrix4()
+        .makeTranslation(this.origin.x, this.origin.y, this.origin.z)
+        .scale(new THREE.Vector3(this.sc, -this.sc, this.sc))
+        .multiply(new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(1, 0, 0), Math.PI / 2));
+      this.camera.projectionMatrix = proj.multiply(model);
+      this.renderer.resetState();
+      this.renderer.render(this.scene, this.camera);
+      this.map.triggerRepaint();
+    }
+  });
+};
 </script>
 </body>
 </html>
