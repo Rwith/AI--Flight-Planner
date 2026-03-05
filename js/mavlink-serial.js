@@ -265,7 +265,7 @@
       }
       case 47: { // MISSION_ACK
         if (!uploadState) break;
-        const mType = payload[2]; // MAV_MISSION_RESULT
+        const mType = payload[2] ?? 0; // MAV_MISSION_RESULT (0 if trailing zero was truncated)
         if (mType === 0) {
           setUploadStatus('Upload complete ✓', 'ok');
           addLog('[upload] Mission accepted by FC');
