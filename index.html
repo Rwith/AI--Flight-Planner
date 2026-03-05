@@ -210,6 +210,58 @@
     #logbook-panel { width: 100%; right: -100%; }
     #logbook-panel.open { right: 0; }
   }
+
+  /* ── Flight Computer / Serial panel ────────────────────────────────────── */
+  .serial-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+    border: 1px solid var(--border);
+  }
+  .serial-badge[data-conn="1"] { color: var(--green); border-color: var(--green); background: rgba(63,185,80,.1); }
+  .serial-badge[data-conn="0"] { color: var(--sec); }
+
+  .tele-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px;
+  }
+  .tele-cell {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 8px;
+  }
+  .tele-cell-label {
+    font-size: 10px; color: var(--sec); text-transform: uppercase; letter-spacing: .5px;
+    margin-bottom: 2px;
+  }
+  .tele-cell-val {
+    font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text);
+  }
+  .tele-section-title {
+    font-size: 10px; font-weight: 700; color: var(--sec); text-transform: uppercase;
+    letter-spacing: .6px; margin: 8px 0 4px;
+  }
+  .arm-badge {
+    display: inline-block; padding: 2px 10px; border-radius: 4px;
+    font-size: 12px; font-weight: 700; background: var(--card);
+  }
+  #upload-status {
+    margin-top: 6px; font-size: 11px; padding: 4px 8px; border-radius: 4px;
+    background: var(--card); min-height: 22px;
+  }
+  #upload-status[data-state="ok"]   { color: var(--green); }
+  #upload-status[data-state="err"]  { color: var(--red); }
+  #upload-status[data-state="info"] { color: var(--blue); }
+  #serial-log {
+    margin-top: 8px; height: 120px; overflow-y: auto; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+    font-family: 'SFMono-Regular', Consolas, monospace; font-size: 10px;
+    color: var(--sec); line-height: 1.5;
+  }
+  #serial-log div { border-bottom: 1px solid rgba(48,54,61,.5); padding: 1px 0; }
+  .serial-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .serial-row select, .serial-row input[type=number] {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text); padding: 4px 6px; font-size: 11px; outline: none;
+  }
+  #serial-connect-btn[data-on="1"] { background: rgba(248,81,73,.15); border-color: var(--red); color: var(--red); }
 </style>
 </head>
 <body>
@@ -260,6 +312,7 @@
     <div id="tabs">
       <div class="tab active" onclick="switchTab('waypoints')">Waypoints</div>
       <div class="tab" onclick="switchTab('weather')">Weather</div>
+      <div class="tab" onclick="switchTab('serial')" style="font-size:11px">⚡ FC Link</div>
     </div>
 
     <!-- WAYPOINTS TAB -->
@@ -374,6 +427,113 @@
       </div>
       <button class="btn primary" onclick="fetchWeather()" style="width:100%">Refresh Weather</button>
     </div>
+
+    <!-- FLIGHT COMPUTER TAB -->
+    <div id="tab-serial" class="tab-content">
+
+      <!-- ── Connection ──────────────────────────────────────────────────── -->
+      <div class="card">
+        <div class="card-title" style="display:flex;align-items:center;gap:8px">
+          Flight Computer Link
+          <span id="serial-status" class="serial-badge" data-conn="0">○ Disconnected</span>
+        </div>
+        <div class="serial-row" style="margin-bottom:8px">
+          <label style="font-size:11px;color:var(--sec)">Baud</label>
+          <select id="serial-baud" style="width:90px">
+            <option value="57600">57600</option>
+            <option value="115200" selected>115200</option>
+            <option value="230400">230400</option>
+            <option value="500000">500000</option>
+            <option value="921600">921600</option>
+          </select>
+          <label style="font-size:11px;color:var(--sec)">SysID</label>
+          <input type="number" id="serial-sysid"  value="1" min="1" max="255" style="width:46px">
+          <label style="font-size:11px;color:var(--sec)">CompID</label>
+          <input type="number" id="serial-compid" value="1" min="1" max="255" style="width:46px">
+        </div>
+        <div class="btn-row">
+          <button class="btn primary" id="serial-connect-btn" data-on="0"
+                  onclick="serialConnect()" style="flex:1">Connect</button>
+        </div>
+        <div style="margin-top:6px;font-size:10px;color:var(--sec)">
+          Requires USB/serial cable (FTDI, Telemetry Radio) · Chrome / Edge 89+
+        </div>
+      </div>
+
+      <!-- ── Blackbox / Live Telemetry ──────────────────────────────────── -->
+      <div class="card">
+        <div class="card-title">Blackbox — Live Telemetry</div>
+
+        <div class="tele-section-title">Status</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="arm-badge" id="tele-armed" style="color:var(--sec)">--</span>
+        </div>
+
+        <div class="tele-section-title">Position</div>
+        <div class="tele-grid">
+          <div class="tele-cell"><div class="tele-cell-label">Latitude</div><div class="tele-cell-val" id="tele-lat">--</div></div>
+          <div class="tele-cell"><div class="tele-cell-label">Longitude</div><div class="tele-cell-val" id="tele-lon">--</div></div>
+          <div class="tele-cell"><div class="tele-cell-label">Alt AGL</div><div class="tele-cell-val" id="tele-alt-rel">--</div></div>
+          <div class="tele-cell"><div class="tele-cell-label">Alt MSL</div><div class="tele-cell-val" id="tele-alt-msl">--</div></div>
+          <div class="tele-cell"><div class="tele-cell-label">Heading</div><div class="tele-cell-val" id="tele-hdg">--</div></div>
+        </div>
+
+        <div class="tele-section-title">GPS</div>
+        <div class="tele-grid">
+          <div class="tele-cell"><div class="tele-cell-label">Fix</div><div class="tele-cell-val" id="tele-gps-fix">--</div></div>
+          <div class="tele-cell"><div class="tele-cell-label">Satellites</div><div class="tele-cell-val" id="tele-gps-sats">--</div></div>
+          <div class="tele-cell"><div class="tele-cell-label">HDOP</div><div class="tele-cell-val" id="tele-hdop">--</div></div>
+        </div>
+
+        <div class="tele-section-title">Attitude</div>
+        <div class="tele-grid">
+          <div class="tele-cell"><div class="tele-cell-label">Roll</div><div class="tele-cell-val" id="tele-roll">--</div></div>
+          <div class="tele-cell"><div class="tele-cell-label">Pitch</div><div class="tele-cell-val" id="tele-pitch">--</div></div>
+          <div class="tele-cell"><div class="tele-cell-label">Yaw</div><div class="tele-cell-val" id="tele-yaw">--</div></div>
+        </div>
+
+        <div class="tele-section-title">Speed &amp; Throttle</div>
+        <div class="tele-grid">
+          <div class="tele-cell"><div class="tele-cell-label">Airspeed</div><div class="tele-cell-val" id="tele-airspeed">--</div></div>
+          <div class="tele-cell"><div class="tele-cell-label">Gnd Speed</div><div class="tele-cell-val" id="tele-gndspeed">--</div></div>
+          <div class="tele-cell"><div class="tele-cell-label">Climb Rate</div><div class="tele-cell-val" id="tele-climbrate">--</div></div>
+          <div class="tele-cell"><div class="tele-cell-label">Throttle</div><div class="tele-cell-val" id="tele-throttle">--</div></div>
+        </div>
+
+        <div class="tele-section-title">Battery</div>
+        <div class="tele-grid">
+          <div class="tele-cell"><div class="tele-cell-label">Voltage</div><div class="tele-cell-val" id="tele-voltage">--</div></div>
+          <div class="tele-cell"><div class="tele-cell-label">Current</div><div class="tele-cell-val" id="tele-current">--</div></div>
+          <div class="tele-cell"><div class="tele-cell-label">Remaining</div><div class="tele-cell-val" id="tele-batt">--</div></div>
+        </div>
+
+        <div class="btn-row" style="margin-top:8px">
+          <button class="btn" id="tele-pause-btn" onclick="serialToggleLogPause()" style="flex:1;font-size:11px">⏸ Pause Log</button>
+          <button class="btn" onclick="serialExportCSV()" style="flex:1;font-size:11px">⬇ Export CSV</button>
+          <button class="btn danger" onclick="serialClearLog()" style="flex:1;font-size:11px">Clear</button>
+        </div>
+      </div>
+
+      <!-- ── Waypoint Upload ─────────────────────────────────────────────── -->
+      <div class="card">
+        <div class="card-title">Upload Mission to FC</div>
+        <div style="font-size:11px;color:var(--sec);margin-bottom:8px">
+          Sends current waypoints as a MAVLink mission (MISSION_ITEM_INT) using the
+          QGC waypoints format. Compatible with ArduPilot Copter / Plane / Rover.
+          Home point is automatically prepended as seq&nbsp;0.
+        </div>
+        <button class="btn primary" id="upload-btn" onclick="serialUploadWaypoints()"
+                disabled style="width:100%">Upload Waypoints to Flight Computer</button>
+        <div id="upload-status" data-state=""></div>
+      </div>
+
+      <!-- ── Serial log ──────────────────────────────────────────────────── -->
+      <div class="card">
+        <div class="card-title">Serial Log</div>
+        <div id="serial-log"></div>
+      </div>
+
+    </div><!-- end tab-serial -->
 
   </div>
 </div>
@@ -821,7 +981,7 @@ function setWindParticles(speedKn, dirDeg) {
 // ====================== TABS ======================
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t, i) => {
-    const names = ['waypoints','weather'];
+    const names = ['waypoints','weather','serial'];
     t.classList.toggle('active', names[i] === name);
   });
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -1618,7 +1778,8 @@ function toggle3DView() {
 
       // Three.js TubeGeometry — smooth 3D cylinder along the flight path at exact altitudes.
       // Built by the ES-module script at the bottom of this file via window._addTubePath.
-      if (typeof window._addTubePath === 'function') window._addTubePath(maplibreMap);
+      // waypoints is `let`-scoped — pass it directly so flight-tube.js can access it.
+      if (typeof window._addTubePath === 'function') window._addTubePath(maplibreMap, waypoints);
 
       // Numbered WP markers
       waypoints.forEach((w, i) => {
@@ -1708,89 +1869,15 @@ initWindParticles();
 
 // Easter egg: plane auto-flies the path after 20 s
 setTimeout(() => startPlane(true), 20000);
+
+// Bridge closures so external scripts can read `let`-scoped globals.
+window._serialGetWaypoints = () => waypoints;
+window._serialGetHome      = () => ({ lat: homeLat, lon: homeLon });
 </script>
 
-<!-- Three.js module: builds the TubeGeometry flight-tube custom layer.
-     Loaded as an ES module so we can import Three.js via the importmap above.
-     Sets window._addTubePath which toggle3DView() calls inside on('load'). -->
-<script type="module">
-import * as THREE from 'three';
-
-window._addTubePath = function(mlMap) {
-  const wps = window.waypoints;
-  if (!wps || wps.length < 2) return;
-
-  // Use first waypoint as the Mercator-space origin for float precision.
-  const origin = maplibregl.MercatorCoordinate.fromLngLat([wps[0].lon, wps[0].lat], 0);
-  const sc = origin.meterInMercatorCoordinateUnits(); // 1 metre in Mercator units
-
-  // Map each waypoint to Three.js local space (metres from origin).
-  // The render() method applies: translate(origin) · scale(sc,-sc,sc) · rotateX(π/2)
-  // which converts (x_t, y_t, z_t) → Mercator (origin.x + x_t·sc,
-  //                                              origin.y + z_t·sc,
-  //                                              origin.z + y_t·sc)
-  // So:  x_t = (m.x - origin.x)/sc  (east, metres)
-  //      y_t = m.z / sc              (altitude, metres)
-  //      z_t = (m.y - origin.y)/sc   (south, metres — Mercator Y grows southward)
-  const pts = wps.map(w => {
-    const m = maplibregl.MercatorCoordinate.fromLngLat([w.lon, w.lat], w.alt);
-    return new THREE.Vector3(
-      (m.x - origin.x) / sc,
-       m.z / sc,
-      (m.y - origin.y) / sc
-    );
-  });
-
-  mlMap.addLayer({
-    id: 'flight-tube', type: 'custom', renderingMode: '3d',
-
-    onAdd(map, gl) {
-      this.map = map;
-      // Share MapLibre's WebGL context so we draw into the same canvas.
-      this.renderer = new THREE.WebGLRenderer({ canvas: map.getCanvas(), context: gl, antialias: true });
-      this.renderer.autoClear = false;
-      this.camera = new THREE.Camera(); // raw camera — projection set manually in render()
-      this.scene  = new THREE.Scene();
-
-      // Catmull-Rom spline for smooth curves through waypoints (no sharp kinks at turns).
-      const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.5);
-      const segments = Math.max(wps.length * 20, 80);
-      // radius = 5 m, 12 radial sides → visually smooth circle at typical drone zoom levels.
-      const geo = new THREE.TubeGeometry(curve, segments, 5, 12, false);
-      const mat = new THREE.MeshPhongMaterial({
-        color:             0xff8c00,  // amber-orange
-        emissive:          0xff4400,  // red-orange inner glow
-        emissiveIntensity: 0.45,
-        shininess:         90,
-        transparent:       true,
-        opacity:           0.92,
-        side:              THREE.DoubleSide
-      });
-      this.scene.add(new THREE.Mesh(geo, mat));
-      this.scene.add(new THREE.AmbientLight(0xffffff, 2.0));
-      const dir = new THREE.DirectionalLight(0xffffff, 2.0);
-      dir.position.set(0.5, 1.0, 0.3).normalize();
-      this.scene.add(dir);
-      this.origin = origin;
-      this.sc = sc;
-    },
-
-    onRemove() { this.renderer.dispose(); this.scene.clear(); },
-
-    render(gl, matrix) {
-      // Build the model→Mercator matrix, then premultiply by MapLibre's projection matrix.
-      const proj = new THREE.Matrix4().fromArray(matrix);
-      const model = new THREE.Matrix4()
-        .makeTranslation(this.origin.x, this.origin.y, this.origin.z)
-        .scale(new THREE.Vector3(this.sc, -this.sc, this.sc))
-        .multiply(new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(1, 0, 0), Math.PI / 2));
-      this.camera.projectionMatrix = proj.multiply(model);
-      this.renderer.resetState();
-      this.renderer.render(this.scene, this.camera);
-      this.map.triggerRepaint();
-    }
-  });
-};
-</script>
+<!-- Three.js TubeGeometry custom layer (ESM, imports via importmap above) -->
+<script type="module" src="js/flight-tube.js"></script>
+<!-- MAVLink/ArduPilot serial bridge — blackbox reader + waypoint upload -->
+<script src="js/mavlink-serial.js"></script>
 </body>
 </html>
