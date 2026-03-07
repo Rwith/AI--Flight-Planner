@@ -48,7 +48,17 @@ udp.on('message', (msg, rinfo) => {
   }
 });
 
-udp.on('error', (e) => console.error('[udp]', e.message));
+udp.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`\n[udp ] FATAL: Port ${UDP_RECV} is already in use.`);
+    console.error(`[udp ] Another app (Mission Planner, QGroundControl, or a second bridge) is holding it.`);
+    console.error(`[udp ] Fix on Windows:  netstat -ano | findstr :${UDP_RECV}  then  taskkill /PID <pid> /F`);
+    console.error(`[udp ] Fix on Linux:    fuser -k ${UDP_RECV}/udp`);
+    console.error(`[udp ] Or override:     UDP_RECV=14551 node mavlink-bridge.js\n`);
+    process.exit(1);
+  }
+  console.error('[udp ]', e.message);
+});
 
 udp.bind(UDP_RECV, () =>
   console.log(`[udp ] Listening for MAVLink on :${UDP_RECV}`)
