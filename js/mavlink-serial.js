@@ -161,13 +161,15 @@
   }
 
   // ─── Connection state ─────────────────────────────────────────────────────
-  let port         = null;
-  let writer       = null;
-  let reader       = null;
-  let uploadState  = null;  // { wps, tSys, tComp, resolve, reject }
-  let logPaused    = false;
-  let telLog       = [];    // CSV rows for export
-  const tele       = {};    // live telemetry snapshot
+  let port            = null;
+  let writer          = null;
+  let reader          = null;
+  let uploadState     = null;  // { wps, tSys, tComp, resolve, reject }
+  let wsConn          = null;  // active WebSocket (WiFi backpack mode)
+  let flightStartTime = null;  // set on first position telemetry received
+  let logPaused       = false;
+  let telLog          = [];    // CSV rows for export
+  const tele          = {};    // live telemetry snapshot
 
   // ─── Telemetry message decoder ────────────────────────────────────────────
   function onMessage (msgId, payload) {
@@ -237,6 +239,7 @@
           tele.vy     = dv.getInt16(22, true) / 100;
           tele.vz     = dv.getInt16(24, true) / 100;
         }
+        flightStartTime = flightStartTime || Date.now();
         logTele();
         renderTele();
         break;
@@ -390,6 +393,34 @@
 
   // ─── Connection management ────────────────────────────────────────────────
   async function connect () {
+    const mode = document.getElementById('conn-mode')?.value ?? 'usb';
+
+    // ── WiFi / WebSocket backpack path ──────────────────────────────────────
+    if (mode === 'wifi') {
+      if (wsConn) { await disconnect(); return; }
+      const url = document.getElementById('wifi-url')?.value?.trim() || 'ws://192.168.4.1:14550';
+      try {
+        const ws = new WebSocket(url);
+        ws.binaryType = 'arraybuffer';
+        const parser = new MAVParser(onMessage);
+        ws.onopen = () => {
+          wsConn  = ws;
+          writer  = { write: (d) => { ws.send(d); return Promise.resolve(); } };
+          setConnected(true);
+          addLog('Wireless connected · ' + url);
+        };
+        ws.onmessage = (e) => parser.push(new Uint8Array(e.data));
+        ws.onerror   = ()  => addLog('[wifi] Connection failed — check URL and that the backpack AP is active');
+        ws.onclose   = ()  => {
+          if (wsConn) { wsConn = null; writer = null; setConnected(false); addLog('Wireless disconnected'); }
+        };
+      } catch (e) {
+        addLog('[wifi] ' + e.message);
+      }
+      return;
+    }
+
+    // ── USB / Serial path ───────────────────────────────────────────────────
     if (!('serial' in navigator)) {
       alert('Web Serial API is not available.\nUse Chrome or Edge 89+ over HTTPS (or localhost).');
       return;
@@ -413,10 +444,17 @@
   }
 
   async function disconnect () {
-    try { await reader?.cancel(); }   catch {}
-    try { writer?.releaseLock(); }    catch {}
-    try { await port?.close(); }      catch {}
-    port = null; writer = null; reader = null;
+    if (wsConn) {
+      const ws = wsConn; wsConn = null;
+      try { ws.close(); } catch {}
+      writer = null;
+    } else {
+      try { await reader?.cancel(); }   catch {}
+      try { writer?.releaseLock(); }    catch {}
+      try { await port?.close(); }      catch {}
+      port = null; writer = null; reader = null;
+    }
+    flightStartTime = null;
     setConnected(false);
     addLog('Disconnected');
   }
@@ -515,11 +553,55 @@
     if (btn) btn.textContent = logPaused ? '▶ Resume Log' : '⏸ Pause Log';
   }
 
+  // ─── Finish Flight — pause log + pre-fill logbook ────────────────────────
+  function finishFlight () {
+    // Pause logging
+    if (!logPaused) {
+      logPaused = true;
+      const btn = document.getElementById('tele-pause-btn');
+      if (btn) btn.textContent = '▶ Resume Log';
+    }
+
+    // Duration from first position telemetry to now
+    const durationMin = flightStartTime
+      ? Math.max(1, Math.round((Date.now() - flightStartTime) / 60000))
+      : 15;
+
+    // Open the logbook panel (defined in main script, global scope)
+    if (typeof openLogbook === 'function') openLogbook();
+
+    // Pre-fill the entry form with live telemetry
+    const dateEl = document.getElementById('log-date');
+    if (dateEl) dateEl.value = new Date().toISOString().split('T')[0];
+
+    const locEl = document.getElementById('log-location');
+    if (locEl && tele.lat != null && tele.lon != null) {
+      locEl.value = `${tele.lat.toFixed(4)}, ${tele.lon.toFixed(4)}`;
+    }
+
+    const durEl = document.getElementById('log-duration');
+    if (durEl) durEl.value = durationMin;
+
+    const notes = [
+      tele.altRel  != null ? `AGL: ${tele.altRel.toFixed(0)} m`   : null,
+      tele.gpsSats != null ? `GPS: ${tele.gpsSats} sats`           : null,
+      telLog.length        ? `${telLog.length} telemetry rows`      : null,
+    ].filter(Boolean).join(' · ');
+    const notesEl = document.getElementById('log-notes');
+    if (notesEl && notes) notesEl.value = notes;
+
+    const outcomeEl = document.getElementById('log-outcome');
+    if (outcomeEl) outcomeEl.value = 'Successful';
+
+    addLog('[flight] Finished — logbook pre-filled (' + durationMin + ' min)');
+  }
+
   // ─── Expose to global scope ───────────────────────────────────────────────
   window.serialConnect          = connect;
   window.serialUploadWaypoints  = uploadWaypoints;
   window.serialExportCSV        = exportTelCSV;
   window.serialClearLog         = clearLog;
   window.serialToggleLogPause   = toggleLogPause;
+  window.serialFinishFlight     = finishFlight;
 
 })();
