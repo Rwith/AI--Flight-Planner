@@ -195,6 +195,10 @@
   let telLog          = [];    // CSV rows for export
   const tele          = {};    // live telemetry snapshot
 
+  // Live altitude track: array of {dist, alt} where dist = distance from home (m)
+  let liveAltLog = [];
+  window._getLiveAltPoints = () => liveAltLog;
+
   // ─── Live drone map marker ────────────────────────────────────────────────
   let droneMarker   = null;  // Leaflet marker showing live FC position
   let homeSet       = false; // true once home has been snapped to 8+ sat fix
@@ -310,6 +314,16 @@
           tele.vy     = dv.getInt16(22, true) / 100;
           tele.vz     = dv.getInt16(24, true) / 100;
           updateDroneMarker(tele.lat, tele.lon, tele.hdg);
+          // Track live altitude vs distance from home for chart overlay
+          const hLat = window._serialGetHome?.()?.lat;
+          const hLon = window._serialGetHome?.()?.lon;
+          if (hLat != null && tele.altRel != null) {
+            const R = 6371000, dL = (tele.lat - hLat) * Math.PI / 180, dO = (tele.lon - hLon) * Math.PI / 180;
+            const a = Math.sin(dL/2)**2 + Math.cos(hLat*Math.PI/180)*Math.cos(tele.lat*Math.PI/180)*Math.sin(dO/2)**2;
+            const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            liveAltLog.push({ dist, alt: tele.altRel });
+            if (liveAltLog.length > 2000) liveAltLog.splice(0, 200); // cap at 2000 points
+          }
         }
         flightStartTime = flightStartTime || Date.now();
         logTele();
@@ -469,25 +483,62 @@
     }
   }
 
+  // ─── Auto baud rate detection ─────────────────────────────────────────────
+  const AUTO_BAUDS = [57600, 115200, 921600, 230400, 38400];
+
+  async function detectBaud (s, portPath) {
+    addLog('[baud] Auto-detecting baud rate — trying ' + AUTO_BAUDS.join(', '));
+    for (const baud of AUTO_BAUDS) {
+      addLog(`[baud] Trying ${baud}…`);
+      s.removeListeners();
+      try { await s.open(portPath, baud); } catch (e) { addLog('[baud] open: ' + e); continue; }
+
+      const detected = await new Promise(resolve => {
+        const timer = setTimeout(() => resolve(false), 2500);
+        const parser = new MAVParser((id) => {
+          if (id === 0) { clearTimeout(timer); resolve(true); }
+        });
+        s.onData(buf => parser.push(buf));
+        s.onError(() => { clearTimeout(timer); resolve(false); });
+        s.onClose(() => { clearTimeout(timer); resolve(false); });
+      });
+
+      if (detected) {
+        addLog(`[baud] Heartbeat detected at ${baud} baud`);
+        return baud; // port stays open
+      }
+      try { await s.close(); } catch {}
+      await new Promise(r => setTimeout(r, 250));
+    }
+    addLog('[baud] Auto-detect failed — connect manually or pick a baud rate');
+    return null;
+  }
+
   // ─── Electron IPC serial connection ──────────────────────────────────────
   async function connectIPC () {
     const s = window.electronBridge?.serial;
     if (!s) { addLog('[usb] Not running in Electron — serial not available'); return; }
 
     addLog('[usb] Scanning for serial ports…');
-    let ports;
-    try { ports = await s.list(); } catch (e) { addLog('[usb] ' + e); return; }
+    const { ports = [], error } = await s.list().catch(e => ({ ports: [], error: e.message }));
 
-    const selectedPath = await window.showSerialPortPicker(ports);
+    const selectedPath = await window.showSerialPortPicker(ports, error);
     if (!selectedPath) return; // user cancelled
 
-    const baud = parseInt(document.getElementById('serial-baud')?.value ?? '115200', 10);
-    addLog(`[usb] Connecting to ${selectedPath} at ${baud} baud…`);
+    const baudVal = document.getElementById('serial-baud')?.value ?? '115200';
+    let baud;
 
     s.removeListeners();
-    try {
-      await s.open(selectedPath, baud);
-    } catch (e) { addLog('[usb] ' + e); return; }
+    if (baudVal === 'auto') {
+      addLog(`[usb] Auto-detecting baud on ${selectedPath}…`);
+      baud = await detectBaud(s, selectedPath);
+      if (!baud) return;
+      s.removeListeners(); // clear temp listeners from detectBaud; port stays open
+    } else {
+      baud = parseInt(baudVal, 10);
+      addLog(`[usb] Connecting to ${selectedPath} at ${baud} baud…`);
+      try { await s.open(selectedPath, baud); } catch (e) { addLog('[usb] ' + e); return; }
+    }
 
     // IPC writer — same interface as Web Serial WritableStreamDefaultWriter
     writer = {
@@ -580,9 +631,10 @@
     const upBtn = document.getElementById('upload-btn');
     if (upBtn) upBtn.disabled = !on;
     if (!on) {
-      // Clear telemetry display and live map marker when disconnected.
+      // Clear telemetry display, live map marker, and altitude track when disconnected.
       removeDroneMarker();
       Object.keys(tele).forEach(k => delete tele[k]);
+      liveAltLog = [];
       renderTele();
       setUploadStatus('', '');
     }

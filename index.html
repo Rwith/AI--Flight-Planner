@@ -286,7 +286,16 @@
   <button class="topbtn" id="view3d-btn" onclick="toggle3DView()">3D View</button>
   <button class="topbtn" onclick="openLogbook()">Logbook</button>
   <button class="topbtn" id="nfz-btn" onclick="toggleNFZ()">NFZ Off</button>
+  <button class="topbtn" id="cache-btn" onclick="downloadTilesForView()" title="Download map tiles for current view for offline use">Cache Tiles</button>
   <button class="topbtn danger" onclick="clearMission()">Clear</button>
+</div>
+<!-- tile download progress bar -->
+<div id="tile-progress-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;height:22px;background:var(--panel);border-top:1px solid var(--border);z-index:9000;display:flex;align-items:center;padding:0 10px;gap:8px;font-size:11px;color:var(--sec)">
+  <span id="tile-progress-msg">Caching tiles…</span>
+  <div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+    <div id="tile-progress-fill" style="height:100%;width:0%;background:var(--blue);transition:width .15s"></div>
+  </div>
+  <span id="tile-progress-pct">0%</span>
 </div>
 
 <!-- MAIN -->
@@ -361,6 +370,7 @@
           <div class="stat-card"><div class="stat-val" id="ms-dist">0 m</div><div class="stat-label">Distance</div></div>
           <div class="stat-card"><div class="stat-val" id="ms-time">0 s</div><div class="stat-label">Est. Time</div></div>
           <div class="stat-card"><div class="stat-val" id="ms-alt">0 m</div><div class="stat-label">Max Alt</div></div>
+          <div class="stat-card"><div class="stat-val" id="ms-range">0 m</div><div class="stat-label">Max Range</div></div>
         </div>
       </div>
       <div id="no-wp">No waypoints yet.<br>Click the map to place them.</div>
@@ -642,6 +652,8 @@ let currentTileLayer = null;
 
 // ====================== MAP INIT ======================
 const map = L.map('map', { center: [-26.65, 153.06], zoom: 14, zoomControl: true });
+// CachedTileLayer is defined later in the script block but hoisted — use L.tileLayer here
+// then swap to CachedTileLayer once it's available (see INIT section).
 currentTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; OpenStreetMap &copy; CARTO',
   subdomains: 'abcd', maxZoom: 20
@@ -1121,11 +1133,14 @@ function updateMissionStats() {
     totalTime += d / 20.8; // estimate at 20.8 m/s (75 km/h)
   }
   const maxAlt = Math.max(...waypoints.map(w => w.alt));
-  const distStr = totalDist >= 1000 ? (totalDist / 1000).toFixed(2) + ' km' : Math.round(totalDist) + ' m';
-  const timeStr = totalTime >= 60 ? (totalTime / 60).toFixed(1) + ' min' : Math.round(totalTime) + ' s';
+  const maxRange = Math.max(...waypoints.map(w => haversine(homeLat, homeLon, w.lat, w.lon)));
+  const distStr  = totalDist >= 1000 ? (totalDist / 1000).toFixed(2) + ' km' : Math.round(totalDist) + ' m';
+  const timeStr  = totalTime >= 60 ? (totalTime / 60).toFixed(1) + ' min' : Math.round(totalTime) + ' s';
+  const rangeStr = maxRange >= 1000 ? (maxRange / 1000).toFixed(2) + ' km' : Math.round(maxRange) + ' m';
   document.getElementById('ms-dist').textContent = distStr;
   document.getElementById('ms-time').textContent = timeStr;
   document.getElementById('ms-alt').textContent = maxAlt + ' m';
+  document.getElementById('ms-range').textContent = rangeStr;
 }
 
 // ====================== ALTITUDE PROFILE ======================
@@ -1156,56 +1171,92 @@ function updateProfile() {
   const scale = totalDist >= 1000 ? 1000 : 1;
   document.getElementById('profile-dist').textContent = `Total: ${(totalDist / scale).toFixed(2)} ${unit}`;
 
-  const labels = waypoints.map((_, i) => `WP${i + 1}`);
   const xData = cumDist.map(d => parseFloat((d / scale).toFixed(3)));
-  const yData = waypoints.map(w => w.alt);
   const pointColors = waypoints.map((w, i) => i === selectedIdx ? '#fff' : (ACTION_COLORS[w.action] || '#58a6ff'));
 
   if (profileChart) { profileChart.destroy(); profileChart = null; }
 
+  // Build datasets using {x, y} pairs so live-alt overlay can share the same axis
+  let missionDsIdx = 0;
   const chartDatasets = [];
   if (terrainElevations && terrainElevations.length === waypoints.length) {
-    chartDatasets.push({ data: terrainElevations, borderColor: '#db6d28', backgroundColor: 'rgba(219,109,40,.25)', pointRadius: 0, fill: true, tension: 0.4, borderWidth: 1.5, order: 1 });
+    chartDatasets.push({
+      data: terrainElevations.map((e, i) => ({ x: xData[i], y: e })),
+      borderColor: '#db6d28', backgroundColor: 'rgba(219,109,40,.25)',
+      pointRadius: 0, fill: true, tension: 0.4, borderWidth: 1.5, order: 1
+    });
+    missionDsIdx = 1;
   }
-  chartDatasets.push({ data: yData, borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,.12)', pointBackgroundColor: pointColors, pointBorderColor: '#fff', pointBorderWidth: 1.5, pointRadius: 6, pointHoverRadius: 8, fill: true, tension: 0.3, order: 0 });
+  chartDatasets.push({
+    data: waypoints.map((w, i) => ({ x: xData[i], y: w.alt })),
+    borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,.12)',
+    pointBackgroundColor: pointColors, pointBorderColor: '#fff',
+    pointBorderWidth: 1.5, pointRadius: 6, pointHoverRadius: 8,
+    fill: true, tension: 0.3, order: 0
+  });
+
+  // Live altitude overlay — pushed by mavlink-serial.js as drone flies
+  const liveAlt = window._getLiveAltPoints?.() || [];
+  if (liveAlt.length > 0) {
+    chartDatasets.push({
+      label: 'Live',
+      data: liveAlt.map(p => ({ x: parseFloat((p.dist / scale).toFixed(3)), y: p.alt })),
+      borderColor: '#f85149', backgroundColor: 'rgba(248,81,73,0.15)',
+      borderWidth: 2, pointRadius: 1.5, fill: false, tension: 0.3,
+      borderDash: [5, 3], order: -1
+    });
+  }
 
   profileChart = new Chart(canvas, {
     type: 'line',
-    data: {
-      labels: labels,
-      datasets: chartDatasets
-    },
+    data: { datasets: chartDatasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
       plugins: {
-        legend: { display: false },
+        legend: {
+          display: liveAlt.length > 0,
+          labels: { color: '#8b949e', font: { size: 10 }, boxWidth: 14 }
+        },
         tooltip: {
           callbacks: {
-            label: ctx => `Alt: ${ctx.parsed.y}m AGL | ${(xData[ctx.dataIndex])} ${unit}`
+            label: ctx => `Alt: ${ctx.parsed.y.toFixed(0)}m AGL | ${ctx.parsed.x.toFixed(2)} ${unit}`
           }
         }
       },
       scales: {
-        x: { ticks: { color: '#8b949e', font: { size: 10 } }, grid: { color: 'rgba(48,54,61,.6)' } },
-        y: { ticks: { color: '#8b949e', font: { size: 10 }, callback: v => v + 'm' }, grid: { color: 'rgba(48,54,61,.6)' } }
+        x: {
+          type: 'linear',
+          ticks: { color: '#8b949e', font: { size: 10 }, callback: v => v + unit },
+          grid: { color: 'rgba(48,54,61,.6)' }
+        },
+        y: {
+          ticks: { color: '#8b949e', font: { size: 10 }, callback: v => v + 'm' },
+          grid: { color: 'rgba(48,54,61,.6)' }
+        }
       },
       onClick: (e, elements) => {
-        if (elements.length > 0) {
-          selectWP(elements[0].index);
+        if (!elements.length) return;
+        const el = elements[0];
+        if (el.datasetIndex === missionDsIdx) {
+          selectWP(el.index);
           switchTab('waypoints');
         }
       }
     }
   });
+  // Store missionDsIdx for highlightProfilePoint
+  profileChart._missionDsIdx = missionDsIdx;
 }
 
 function highlightProfilePoint(idx) {
   if (!profileChart || idx < 0) return;
-  const ds = profileChart.data.datasets[0];
+  const dsIdx = profileChart._missionDsIdx ?? 0;
+  const ds = profileChart.data.datasets[dsIdx];
+  if (!ds) return;
   ds.pointBackgroundColor = waypoints.map((w, i) => i === idx ? '#fff' : (ACTION_COLORS[w.action] || '#58a6ff'));
-  profileChart.update();
+  profileChart.update('none');
 }
 
 function toggleProfile() {
@@ -1373,6 +1424,15 @@ function insertWaypointAt(segIdx, lat, lon) {
 }
 
 // ====================== WIND ROSE ======================
+// Speed bands: each hour's reading is classified into one of 4 bands.
+// Within each direction sector the bar is stacked (innermost = calm → outermost = high).
+const ROSE_BANDS = [
+  { max: 15,       color: 'rgba(63,185,80,0.90)'  }, // calm   < 15 km/h
+  { max: 28,       color: 'rgba(88,166,255,0.90)'  }, // breeze 15–28 km/h
+  { max: 46,       color: 'rgba(210,153,34,0.90)'  }, // strong 28–46 km/h
+  { max: Infinity, color: 'rgba(248,81,73,0.90)'   }, // high   ≥ 46 km/h
+];
+
 function renderWindRose(data) {
   const canvas = document.getElementById('wind-rose-canvas');
   const loading = document.getElementById('wind-rose-loading');
@@ -1386,12 +1446,13 @@ function renderWindRose(data) {
   const dirs   = data.hourly.winddirection_10m.slice(startIdx, startIdx + 24);
 
   const N = 8;
-  const bins = Array.from({length: N}, () => ({count: 0, total: 0}));
+  // Each bin has a count per speed band instead of just a total
+  const bins = Array.from({length: N}, () => ({ counts: [0, 0, 0, 0] }));
   speeds.forEach((spd, i) => {
     if (spd == null || dirs[i] == null) return;
-    const bin = Math.round(dirs[i] / (360 / N)) % N;
-    bins[bin].count++;
-    bins[bin].total += spd;
+    const bin  = Math.round(dirs[i] / (360 / N)) % N;
+    const band = ROSE_BANDS.findIndex(b => spd < b.max);
+    bins[bin].counts[band >= 0 ? band : 3]++;
   });
 
   const size = 200;
@@ -1402,7 +1463,8 @@ function renderWindRose(data) {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, size, size);
   const cx = size / 2, cy = size / 2, maxR = size * 0.38;
-  const maxCount = Math.max(...bins.map(b => b.count), 1);
+  // Normalise against the busiest sector (total across all bands)
+  const maxTotal = Math.max(...bins.map(b => b.counts.reduce((s, c) => s + c, 0)), 1);
 
   // Grid rings
   [0.33, 0.66, 1.0].forEach(r => {
@@ -1416,17 +1478,25 @@ function renderWindRose(data) {
     ctx.lineTo(cx + Math.cos(a) * maxR, cy + Math.sin(a) * maxR);
     ctx.strokeStyle = 'rgba(48,54,61,0.7)'; ctx.lineWidth = 1; ctx.stroke();
   }
-  // Sector bars
+  // Stacked sector bars — calm innermost, high outermost
   bins.forEach((bin, i) => {
-    if (bin.count === 0) return;
-    const a = (i / N) * 2 * Math.PI - Math.PI / 2;
-    const r = (bin.count / maxCount) * maxR;
-    const hw = (Math.PI / N) * 0.75;
-    const avg = bin.total / bin.count;
-    const color = avg >= 46 ? 'rgba(248,81,73,0.85)' : avg >= 28 ? 'rgba(210,153,34,0.85)' : avg >= 15 ? 'rgba(88,166,255,0.85)' : 'rgba(63,185,80,0.85)';
-    ctx.beginPath(); ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, r, a - hw, a + hw); ctx.closePath();
-    ctx.fillStyle = color; ctx.fill();
+    const total = bin.counts.reduce((s, c) => s + c, 0);
+    if (total === 0) return;
+    const a  = (i / N) * 2 * Math.PI - Math.PI / 2;
+    const hw = (Math.PI / N) * 0.72;
+    let innerR = 0;
+    ROSE_BANDS.forEach((band, bi) => {
+      const segR = (bin.counts[bi] / maxTotal) * maxR;
+      if (segR < 0.5) { innerR += segR; return; } // skip invisible slivers
+      const outerR = innerR + segR;
+      ctx.beginPath();
+      ctx.arc(cx, cy, outerR, a - hw, a + hw);
+      ctx.arc(cx, cy, Math.max(innerR, 0.1), a + hw, a - hw, true);
+      ctx.closePath();
+      ctx.fillStyle = band.color;
+      ctx.fill();
+      innerR = outerR;
+    });
   });
   // Labels
   ['N','NE','E','SE','S','SW','W','NW'].forEach((lbl, i) => {
@@ -1820,6 +1890,131 @@ function toggle3DView() {
   }
 }
 
+// ====================== OFFLINE TILE CACHE (IndexedDB) ======================
+const TILE_DB_NAME = 'tile-cache', TILE_DB_STORE = 'tiles', TILE_DB_VER = 1;
+let _tileDB = null;
+
+function openTileDB() {
+  if (_tileDB) return Promise.resolve(_tileDB);
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(TILE_DB_NAME, TILE_DB_VER);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(TILE_DB_STORE);
+    req.onsuccess = e => { _tileDB = e.target.result; res(_tileDB); };
+    req.onerror   = () => rej(req.error);
+  });
+}
+
+async function getTileFromDB(url) {
+  try {
+    const db = await openTileDB();
+    return await new Promise(res => {
+      const tx = db.transaction(TILE_DB_STORE, 'readonly');
+      const req = tx.objectStore(TILE_DB_STORE).get(url);
+      req.onsuccess = () => res(req.result ?? null);
+      req.onerror   = () => res(null);
+    });
+  } catch { return null; }
+}
+
+async function putTileToDB(url, blob) {
+  try {
+    const db = await openTileDB();
+    await new Promise((res, rej) => {
+      const tx = db.transaction(TILE_DB_STORE, 'readwrite');
+      const req = tx.objectStore(TILE_DB_STORE).put(blob, url);
+      req.onsuccess = res; req.onerror = () => rej(req.error);
+    });
+  } catch { /* non-fatal */ }
+}
+
+// Leaflet tile layer that serves from IndexedDB cache if available
+const CachedTileLayer = L.TileLayer.extend({
+  createTile(coords, done) {
+    const tile = document.createElement('img');
+    tile.alt = '';
+    const url = this.getTileUrl(coords);
+    getTileFromDB(url).then(blob => {
+      tile.src = blob ? URL.createObjectURL(blob) : url;
+      tile.onload  = () => done(null, tile);
+      tile.onerror = (e) => done(e, tile);
+    });
+    return tile;
+  }
+});
+
+// Tile coord helpers (Web Mercator)
+function lonToTileX(lon, z) { return Math.floor((lon + 180) / 360 * (1 << z)); }
+function latToTileY(lat, z) {
+  const lr = lat * Math.PI / 180;
+  return Math.floor((1 - Math.log(Math.tan(lr) + 1 / Math.cos(lr)) / Math.PI) / 2 * (1 << z));
+}
+
+async function downloadTilesForView() {
+  const btn = document.getElementById('cache-btn');
+  const bar = document.getElementById('tile-progress-bar');
+  const msg = document.getElementById('tile-progress-msg');
+  const fill = document.getElementById('tile-progress-fill');
+  const pct = document.getElementById('tile-progress-pct');
+
+  const bounds = map.getBounds();
+  const tileType = document.getElementById('map-tile-select').value;
+  const cfg = TILE_LAYERS[tileType] || TILE_LAYERS.dark;
+
+  // Collect all tile URLs for zoom 11–16
+  const MIN_Z = 11, MAX_Z = 16;
+  const tilesToFetch = [];
+  for (let z = MIN_Z; z <= MAX_Z; z++) {
+    const x0 = lonToTileX(bounds.getWest(),  z), x1 = lonToTileX(bounds.getEast(),  z);
+    const y0 = latToTileY(bounds.getNorth(), z), y1 = latToTileY(bounds.getSouth(), z);
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        // Build concrete URL (pick subdomain 'a', no retina suffix)
+        const url = cfg.url
+          .replace('{s}', 'a')
+          .replace('{z}', z).replace('{x}', x).replace('{y}', y)
+          .replace('{r}', '');
+        tilesToFetch.push(url);
+      }
+    }
+  }
+
+  if (tilesToFetch.length > 2000) {
+    alert(`Too many tiles (${tilesToFetch.length}). Zoom in closer and try again.`);
+    return;
+  }
+
+  btn.disabled = true;
+  bar.style.display = 'flex';
+  let done = 0;
+  const total = tilesToFetch.length;
+
+  // Fetch 6 at a time
+  const CONCURRENCY = 6;
+  async function fetchOne(url) {
+    const cached = await getTileFromDB(url);
+    if (!cached) {
+      try {
+        const resp = await fetch(url);
+        if (resp.ok) await putTileToDB(url, await resp.blob());
+      } catch { /* skip on error */ }
+    }
+    done++;
+    const p = Math.round(done / total * 100);
+    fill.style.width = p + '%';
+    pct.textContent = p + '%';
+    msg.textContent = `Caching tiles… ${done}/${total}`;
+  }
+
+  const queue = [...tilesToFetch];
+  async function worker() { while (queue.length) await fetchOne(queue.shift()); }
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+
+  bar.style.display = 'none';
+  btn.disabled = false;
+  btn.textContent = `Cached ✓`;
+  setTimeout(() => { btn.textContent = 'Cache Tiles'; }, 3000);
+}
+
 // ====================== MAP TILE SWITCHER ======================
 const TILE_LAYERS = {
   dark: { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', attr: '&copy; OpenStreetMap &copy; CARTO' },
@@ -1830,7 +2025,7 @@ const TILE_LAYERS = {
 function switchMapTile(type) {
   if (currentTileLayer) map.removeLayer(currentTileLayer);
   const cfg = TILE_LAYERS[type] || TILE_LAYERS.dark;
-  currentTileLayer = L.tileLayer(cfg.url, { attribution: cfg.attr, subdomains: 'abcd', maxZoom: 20 }).addTo(map);
+  currentTileLayer = new CachedTileLayer(cfg.url, { attribution: cfg.attr, subdomains: 'abcd', maxZoom: 20 }).addTo(map);
   currentTileLayer.bringToBack();
 }
 
@@ -1882,6 +2077,14 @@ function exportKML() {
 
 // ====================== INIT ======================
 setInterval(updateSkyOverlay, 60000); // refresh sky colour every minute
+// Swap the initial tile layer to CachedTileLayer (defined above) so offline tiles work from start
+;(function() {
+  map.removeLayer(currentTileLayer);
+  currentTileLayer = new CachedTileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OpenStreetMap &copy; CARTO', subdomains: 'abcd', maxZoom: 20
+  }).addTo(map);
+  currentTileLayer.bringToBack();
+})();
 fetchWeather();
 renderWPList();
 updateProfile();
