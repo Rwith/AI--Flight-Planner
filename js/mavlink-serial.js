@@ -17,7 +17,8 @@
     47: 153, // MISSION_ACK
     51: 196, // MISSION_REQUEST_INT
     73: 38,  // MISSION_ITEM_INT
-    74: 20   // VFR_HUD
+    74: 20,  // VFR_HUD
+    66: 148  // REQUEST_DATA_STREAM
   };
 
   function crc16 (data) {
@@ -85,6 +86,24 @@
       tSys, tComp, frame, current, autoCont
     ];
     return buildFrame(73, payload);
+  }
+
+  // ─── REQUEST_DATA_STREAM (id=66) ─────────────────────────────────────────
+  // Asks the FC to start sending a telemetry stream at the given rate (Hz).
+  // streamId: 2=EXTENDED_STATUS(SYS_STATUS/battery), 11=EXTRA2(VFR_HUD/speed)
+  function buildRequestDataStream (streamId, rateHz, tSys, tComp) {
+    return buildFrame(66, [...u16(rateHz), tSys, tComp, streamId, 1 /*start*/]);
+  }
+
+  function requestStreams (tSys, tComp) {
+    const streams = [
+      2,  // EXTENDED_STATUS  → SYS_STATUS (battery)
+      11, // EXTRA2           → VFR_HUD (speed/throttle)
+    ];
+    for (const s of streams) {
+      const frame = buildRequestDataStream(s, 2, tSys ?? 1, tComp ?? 1);
+      writer?.write(frame);
+    }
   }
 
   // ─── Incoming MAVLink parser (v1 + v2) ───────────────────────────────────
@@ -412,6 +431,7 @@
           writer  = { write: (d) => { ws.send(d); return Promise.resolve(); } };
           setConnected(true);
           addLog('Wireless connected · ' + url);
+          setTimeout(() => requestStreams(1, 1), 1000);
         };
         ws.onmessage = (e) => parser.push(new Uint8Array(e.data));
         ws.onerror   = ()  => addLog('[wifi] Connection failed — check URL and that the backpack AP is active');
@@ -441,6 +461,7 @@
       addLog('Port opened at ' + baud + ' baud');
       const parser = new MAVParser(onMessage);
       readLoop(parser); // fire-and-forget; stops when disconnect() cancels
+      setTimeout(() => requestStreams(1, 1), 1000);
     } catch (e) {
       port = null; writer = null; reader = null;
       if (e.name !== 'NotFoundError') addLog('[connect] ' + e.message);
