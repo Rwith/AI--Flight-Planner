@@ -460,7 +460,7 @@
         </div>
         <div id="conn-wifi-opts" class="serial-row" style="margin-bottom:8px;display:none">
           <label style="font-size:11px;color:var(--sec)">WS URL</label>
-          <input type="text" id="wifi-url" value="ws://192.168.4.1:14550"
+          <input type="text" id="wifi-url" value="ws://localhost:5760"
                  style="flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:4px 6px;font-size:11px;outline:none">
         </div>
         <div class="btn-row">
@@ -1892,7 +1892,7 @@ function toggleConnMode() {
   document.getElementById('conn-usb-opts').style.display  = wifi ? 'none'  : '';
   document.getElementById('conn-wifi-opts').style.display = wifi ? ''      : 'none';
   document.getElementById('conn-hint').textContent = wifi
-    ? 'Connect your WiFi backpack AP first, then enter its WebSocket URL above.'
+    ? 'Join the backpack WiFi AP, run: node mavlink-bridge.js, then connect here.'
     : 'Requires USB/serial cable (FTDI, Telemetry Radio) · Chrome / Edge 89+';
 }
 </script>
