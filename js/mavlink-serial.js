@@ -396,7 +396,7 @@
     const mode = document.getElementById('conn-mode')?.value ?? 'usb';
 
     // ── WiFi / WebSocket backpack path ──────────────────────────────────────
-    if (mode === 'wifi') {
+    if (mode === 'wifi' || mode === 'direct') {
       if (wsConn) { await disconnect(); return; }
       const url = document.getElementById('wifi-url')?.value?.trim() || 'ws://192.168.4.1:14550';
       try {

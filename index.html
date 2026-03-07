@@ -439,9 +439,10 @@
         </div>
         <div class="serial-row" style="margin-bottom:6px">
           <label style="font-size:11px;color:var(--sec)">Mode</label>
-          <select id="conn-mode" onchange="toggleConnMode()" style="width:110px">
+          <select id="conn-mode" onchange="toggleConnMode()" style="width:130px">
             <option value="usb">USB / Serial</option>
-            <option value="wifi">WiFi Backpack</option>
+            <option value="direct">WiFi Direct</option>
+            <option value="wifi">WiFi + Bridge</option>
           </select>
         </div>
         <div id="conn-usb-opts" class="serial-row" style="margin-bottom:8px">
@@ -1888,12 +1889,19 @@ window._serialGetWaypoints = () => waypoints;
 window._serialGetHome      = () => ({ lat: homeLat, lon: homeLon });
 
 function toggleConnMode() {
-  const wifi = document.getElementById('conn-mode').value === 'wifi';
-  document.getElementById('conn-usb-opts').style.display  = wifi ? 'none'  : '';
-  document.getElementById('conn-wifi-opts').style.display = wifi ? ''      : 'none';
-  document.getElementById('conn-hint').textContent = wifi
-    ? 'Join the backpack WiFi AP, run: node mavlink-bridge.js, then connect here.'
-    : 'Requires USB/serial cable (FTDI, Telemetry Radio) · Chrome / Edge 89+';
+  const mode = document.getElementById('conn-mode').value;
+  const isWifi = mode === 'wifi' || mode === 'direct';
+  document.getElementById('conn-usb-opts').style.display  = isWifi ? 'none' : '';
+  document.getElementById('conn-wifi-opts').style.display = isWifi ? ''     : 'none';
+  if (mode === 'direct') {
+    document.getElementById('wifi-url').value = 'ws://10.0.0.1:5760';
+    document.getElementById('conn-hint').textContent = 'Join the backpack WiFi AP — browser connects directly to ws://10.0.0.1:5760 (no bridge needed).';
+  } else if (mode === 'wifi') {
+    document.getElementById('wifi-url').value = 'ws://localhost:5760';
+    document.getElementById('conn-hint').textContent = 'Join the backpack WiFi AP, run: node mavlink-bridge.js, then connect here.';
+  } else {
+    document.getElementById('conn-hint').textContent = 'Requires USB/serial cable (FTDI, Telemetry Radio) · Chrome / Edge 89+';
+  }
 }
 </script>
 
