@@ -596,7 +596,7 @@
     }
 
     // ── USB / Serial path (Electron IPC via serialport package) ────────────
-    if (port) { await disconnect(); return; }
+    if (writer) { await disconnect(); return; }
     await connectIPC();
   }
 
@@ -758,6 +758,7 @@
 
   // ─── Expose to global scope ───────────────────────────────────────────────
   window.serialConnect          = connect;
+  window.serialDisconnect       = disconnect;
   window.serialUploadWaypoints  = uploadWaypoints;
   window.serialExportCSV        = exportTelCSV;
   window.serialClearLog         = clearLog;

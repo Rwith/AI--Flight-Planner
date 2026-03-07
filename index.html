@@ -2098,6 +2098,10 @@ window._serialGetWaypoints = () => waypoints;
 window._serialGetHome      = () => ({ lat: homeLat, lon: homeLon });
 
 function toggleConnMode() {
+  // Auto-disconnect whenever the user switches connection mode
+  const btn = document.getElementById('serial-connect-btn');
+  if (btn?.dataset.on === '1') window.serialDisconnect?.();
+
   const mode = document.getElementById('conn-mode').value;
   const isWifi = mode === 'wifi' || mode === 'direct';
   const wsPort = window.electronBridge?.WS_PORT ?? 5761;
