@@ -504,13 +504,20 @@
 
     // ── USB / Serial path ───────────────────────────────────────────────────
     if (!('serial' in navigator)) {
-      alert('Web Serial API is not available.\nUse Chrome or Edge 89+ over HTTPS (or localhost).');
+      addLog('[usb] Web Serial API not available — make sure you are running the Electron app (not a browser)');
       return;
     }
     if (port) { await disconnect(); return; }
 
     try {
-      port = await navigator.serial.requestPort();
+      addLog('[usb] Opening port picker…');
+      // Wrap requestPort() with a 60-second timeout so the app doesn't hang
+      // if the Electron select-serial-port event never fires.
+      const portRace = Promise.race([
+        navigator.serial.requestPort(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('Port picker timed out — check Electron serial permissions')), 60000))
+      ]);
+      port = await portRace;
       const baud = parseInt(document.getElementById('serial-baud')?.value ?? '115200', 10);
       addLog(`[usb] Opening port at ${baud} baud…`);
       await port.open({ baudRate: baud });

@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, session } = require('electron');
 const path   = require('path');
 const dgram  = require('dgram');
 const net    = require('net');
@@ -134,34 +134,30 @@ function createWindow () {
     }
   });
 
-  // ── Web Serial API: port picker ───────────────────────────────────────────
-  // When navigator.serial.requestPort() is called in the renderer, Electron
-  // fires this event instead of showing the browser's built-in dialog.
-  // We forward the port list to the renderer and wait for the user's choice.
-  mainWin.webContents.session.on('select-serial-port', (event, portList, _wc, callback) => {
-    event.preventDefault(); // we handle it ourselves
-    if (!portList || portList.length === 0) {
-      callback(''); // no ports available
-      return;
-    }
-    mainWin.webContents.send('serial-select-port', portList);
-    ipcMain.once('serial-port-chosen', (_, portId) => callback(portId ?? ''));
-  });
-
-  // Grant serial permission automatically (this is a trusted desktop app).
-  mainWin.webContents.session.setPermissionCheckHandler((_wc, permission) => {
-    if (permission === 'serial') return true;
-    return null; // default for everything else
-  });
-  mainWin.webContents.session.setDevicePermissionHandler((details) => {
-    return details.deviceType === 'serial';
-  });
-
   mainWin.loadFile('index.html');
   // mainWin.webContents.openDevTools(); // uncomment for debugging
 }
 
 app.whenReady().then(() => {
+  // ── Web Serial permissions (must be set before any window loads) ─────────
+  session.defaultSession.setPermissionCheckHandler(() => true);
+  session.defaultSession.setDevicePermissionHandler(() => true);
+  session.defaultSession.on('select-serial-port', (event, portList, _wc, callback) => {
+    event.preventDefault();
+    console.log(`[serial] select-serial-port: ${portList.length} port(s) found`);
+    if (!mainWin) { callback(''); return; }
+    if (!portList || portList.length === 0) {
+      mainWin.webContents.send('serial-select-port', []);
+      ipcMain.once('serial-port-chosen', () => callback(''));
+      return;
+    }
+    mainWin.webContents.send('serial-select-port', portList);
+    ipcMain.once('serial-port-chosen', (_, portId) => {
+      console.log(`[serial] port chosen: ${portId || '(none)'}`);
+      callback(portId ?? '');
+    });
+  });
+
   startWSServer();
   startUDP();       // start UDP bridge by default
   createWindow();
