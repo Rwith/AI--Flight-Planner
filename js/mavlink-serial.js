@@ -190,17 +190,51 @@
   let telLog          = [];    // CSV rows for export
   const tele          = {};    // live telemetry snapshot
 
+  // ─── Live drone map marker ────────────────────────────────────────────────
+  let droneMarker   = null;  // Leaflet marker showing live FC position
+  let homeSet       = false; // true once home has been snapped to 8+ sat fix
+  let streamsAsked  = false; // send REQUEST_DATA_STREAM only once per session
+
+  const DRONE_ICON_HTML = `<svg xmlns="http://www.w3.org/2000/svg" id="live-drone-icon" width="22" height="30"
+    viewBox="0 0 18 26" style="display:block;filter:drop-shadow(0 1px 6px rgba(0,0,0,.9));transform-origin:9px 13px">
+    <polygon points="9,0 18,26 9,19 0,26" fill="#3fb950" stroke="rgba(0,0,0,0.5)" stroke-width="1.2" stroke-linejoin="round"/>
+  </svg>`;
+
+  function updateDroneMarker (lat, lon, headingDeg) {
+    if (typeof map === 'undefined' || !map) return;
+    if (!droneMarker) {
+      droneMarker = L.marker([lat, lon], {
+        icon: L.divIcon({ className: '', html: DRONE_ICON_HTML, iconSize: [22, 30], iconAnchor: [11, 15] }),
+        zIndexOffset: 3000, interactive: false
+      }).addTo(map);
+    } else {
+      droneMarker.setLatLng([lat, lon]);
+    }
+    const el = document.getElementById('live-drone-icon');
+    if (el && headingDeg != null) el.style.transform = `rotate(${headingDeg}deg)`;
+  }
+
+  function removeDroneMarker () {
+    if (droneMarker) { map?.removeLayer(droneMarker); droneMarker = null; }
+    homeSet      = false;
+    streamsAsked = false;
+  }
+
   // ─── Telemetry message decoder ────────────────────────────────────────────
   function onMessage (msgId, payload) {
     const dv = new DataView(new Uint8Array(payload).buffer);
 
     switch (msgId) {
       case 0: { // HEARTBEAT — type, autopilot, base_mode, system_status
-        tele.baseMode      = payload[6]; // offset after custom_mode(u32)=4, type(u8)=5, autopilot(u8)=6 → wait
         // Wire (sorted 32→8): custom_mode(u32,0), type(u8,4), autopilot(u8,5), base_mode(u8,6), system_status(u8,7), mavlink_version(u8,8)
         if (payload.length >= 9) {
-          tele.baseMode      = payload[6];
-          tele.sysStatus     = payload[7];
+          tele.baseMode  = payload[6];
+          tele.sysStatus = payload[7];
+        }
+        // On first heartbeat ask the FC to stream battery + speed data.
+        if (!streamsAsked) {
+          streamsAsked = true;
+          requestStreams(1, 1);
         }
         renderTele();
         break;
@@ -229,6 +263,18 @@
           tele.gpsFix  = payload[28];
           tele.gpsSats = payload[29];
           tele.hdop    = dv.getUint16(20, true) / 100;
+          // Snap home marker to drone's GPS position on first 8+ sat fix.
+          if (!homeSet && tele.gpsSats >= 8 && tele.gpsLat && tele.gpsLon) {
+            homeSet = true;
+            if (typeof homeLat !== 'undefined') {
+              homeLat = tele.gpsLat; homeLon = tele.gpsLon;
+              if (typeof homeMarker !== 'undefined' && homeMarker) {
+                homeMarker.setLatLng([homeLat, homeLon]);
+                if (typeof updatePolyline === 'function') updatePolyline();
+              }
+              addLog(`[home] Set to ${homeLat.toFixed(5)}, ${homeLon.toFixed(5)} (${tele.gpsSats} sats)`);
+            }
+          }
         }
         renderTele();
         break;
@@ -257,6 +303,7 @@
           tele.vx     = dv.getInt16(20, true) / 100;
           tele.vy     = dv.getInt16(22, true) / 100;
           tele.vz     = dv.getInt16(24, true) / 100;
+          updateDroneMarker(tele.lat, tele.lon, tele.hdg);
         }
         flightStartTime = flightStartTime || Date.now();
         logTele();
@@ -431,7 +478,6 @@
           writer  = { write: (d) => { ws.send(d); return Promise.resolve(); } };
           setConnected(true);
           addLog('Wireless connected · ' + url);
-          setTimeout(() => requestStreams(1, 1), 1000);
         };
         ws.onmessage = (e) => parser.push(new Uint8Array(e.data));
         ws.onerror   = ()  => addLog('[wifi] Connection failed — check URL and that the backpack AP is active');
@@ -461,7 +507,6 @@
       addLog('Port opened at ' + baud + ' baud');
       const parser = new MAVParser(onMessage);
       readLoop(parser); // fire-and-forget; stops when disconnect() cancels
-      setTimeout(() => requestStreams(1, 1), 1000);
     } catch (e) {
       port = null; writer = null; reader = null;
       if (e.name !== 'NotFoundError') addLog('[connect] ' + e.message);
@@ -498,7 +543,8 @@
     const upBtn = document.getElementById('upload-btn');
     if (upBtn) upBtn.disabled = !on;
     if (!on) {
-      // Clear telemetry display when disconnected.
+      // Clear telemetry display and live map marker when disconnected.
+      removeDroneMarker();
       Object.keys(tele).forEach(k => delete tele[k]);
       renderTele();
       setUploadStatus('', '');
