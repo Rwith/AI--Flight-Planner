@@ -96,14 +96,19 @@
   }
 
   function requestStreams (tSys, tComp) {
-    const streams = [
-      2,  // EXTENDED_STATUS  → SYS_STATUS (battery)
-      11, // EXTRA2           → VFR_HUD (speed/throttle)
+    const ts = tSys ?? 1, tc = tComp ?? 1;
+    // Request all streams at 2 Hz as a broad fallback, then explicitly ask for
+    // the two streams that carry battery and speed data.
+    const ids = [
+      0,  // ALL            → broad enable
+      2,  // EXTENDED_STATUS → SYS_STATUS (battery voltage/current/%)
+      11, // EXTRA2          → VFR_HUD (airspeed, groundspeed, throttle)
     ];
-    for (const s of streams) {
-      const frame = buildRequestDataStream(s, 2, tSys ?? 1, tComp ?? 1);
-      writer?.write(frame);
+    for (const s of ids) {
+      const frame = buildRequestDataStream(s, 2, ts, tc);
+      writer?.write(frame).catch(() => {});
     }
+    addLog(`[streams] Requested data streams from sysid=${ts}`);
   }
 
   // ─── Incoming MAVLink parser (v1 + v2) ───────────────────────────────────
@@ -243,12 +248,13 @@
         // Wire: sensors_present(u32,0), sensors_enabled(u32,4), sensors_health(u32,8),
         //        load(u16,12), voltage_battery(u16,14), current_battery(i16,16),
         //        drop_rate(u16,18), errors_comm(u16,20)×4, battery_remaining(i8,30)
-        if (payload.length >= 31) {
-          tele.voltageMv = dv.getUint16(14, true);
-          tele.currentCa = dv.getInt16(16, true);
-          tele.battPct   = dv.getInt8(30);
-          tele.cpuLoad   = dv.getUint16(12, true) / 10; // milli-%
-        }
+        // NOTE: MAVLink v2 zero-trims trailing bytes, so battery_remaining (byte 30)
+        //       may be absent when 0%.  Read each field only if the byte is present.
+        if (payload.length >= 16) tele.voltageMv = dv.getUint16(14, true);
+        if (payload.length >= 18) tele.currentCa = dv.getInt16(16, true);
+        if (payload.length >= 14) tele.cpuLoad   = dv.getUint16(12, true) / 10;
+        if (payload.length >= 31) tele.battPct   = dv.getInt8(30);
+        else if (tele.battPct == null) tele.battPct = 0; // trimmed → 0%
         renderTele();
         break;
       }
@@ -313,14 +319,16 @@
       case 74: { // VFR_HUD
         // Wire: airspeed(f32,0), groundspeed(f32,4), alt(f32,8), climb(f32,12),
         //        heading(i16,16), throttle(u16,18)
-        if (payload.length >= 20) {
+        // NOTE: MAVLink v2 trims trailing zero bytes — throttle (bytes 18-19) is
+        //       absent when the motor is at 0%.  Read each field conditionally.
+        if (payload.length >= 16) {
           tele.airspeed    = dv.getFloat32(0,  true).toFixed(1);
           tele.groundspeed = dv.getFloat32(4,  true).toFixed(1);
           tele.altHUD      = dv.getFloat32(8,  true).toFixed(1);
           tele.climbRate   = dv.getFloat32(12, true).toFixed(2);
-          tele.heading     = dv.getInt16(16, true);
-          tele.throttle    = dv.getUint16(18, true);
         }
+        if (payload.length >= 18) tele.heading  = dv.getInt16(16, true);
+        tele.throttle = payload.length >= 20 ? dv.getUint16(18, true) : 0;
         renderTele();
         break;
       }
@@ -451,9 +459,13 @@
         parser.push(value);
       }
     } catch (e) {
-      if (e.name !== 'AbortError') addLog('[rx] ' + (e.message || e));
+      if (e.name !== 'AbortError' && e.name !== 'NetworkError') {
+        addLog('[rx] ' + (e.message || e));
+      }
     } finally {
       try { reader.releaseLock(); } catch {}
+      // If the port closed unexpectedly, update UI.
+      if (port) { port = null; writer = null; reader = null; setConnected(false); addLog('[usb] Port closed unexpectedly'); }
     }
   }
 
@@ -500,16 +512,19 @@
     try {
       port = await navigator.serial.requestPort();
       const baud = parseInt(document.getElementById('serial-baud')?.value ?? '115200', 10);
+      addLog(`[usb] Opening port at ${baud} baud…`);
       await port.open({ baudRate: baud });
       writer = port.writable.getWriter();
       reader = port.readable.getReader();
       setConnected(true);
-      addLog('Port opened at ' + baud + ' baud');
+      addLog(`[usb] Connected at ${baud} baud — waiting for MAVLink heartbeat`);
       const parser = new MAVParser(onMessage);
       readLoop(parser); // fire-and-forget; stops when disconnect() cancels
     } catch (e) {
+      // If the port was opened but writer/reader setup failed, close it cleanly.
+      if (port) { try { await port.close(); } catch {} }
       port = null; writer = null; reader = null;
-      if (e.name !== 'NotFoundError') addLog('[connect] ' + e.message);
+      if (e.name !== 'NotFoundError') addLog('[usb] ' + e.message);
     }
   }
 
