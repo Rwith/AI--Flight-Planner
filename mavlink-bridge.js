@@ -36,6 +36,7 @@ const clients = new Set();
 let udpPackets = 0;
 
 udp.on('message', (msg, rinfo) => {
+  if (rinfo.address !== BACKPACK_IP) return; // ignore packets from other sources
   udpPackets++;
   if (udpPackets === 1) {
     console.log(`[udp ] First packet received from ${rinfo.address}:${rinfo.port} (${msg.length} bytes) ✓`);
