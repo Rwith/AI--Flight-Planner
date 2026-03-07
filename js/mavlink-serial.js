@@ -399,6 +399,10 @@
     if (mode === 'wifi' || mode === 'direct') {
       if (wsConn) { await disconnect(); return; }
       const url = document.getElementById('wifi-url')?.value?.trim() || 'ws://192.168.4.1:14550';
+      if (mode === 'wifi' && window.electronBridge) {
+        const backpackIp = document.getElementById('backpack-ip')?.value?.trim() || '10.0.0.1';
+        window.electronBridge.startBridge({ mode: 'udp', backpackIp });
+      }
       try {
         const ws = new WebSocket(url);
         ws.binaryType = 'arraybuffer';
