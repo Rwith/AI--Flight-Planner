@@ -93,10 +93,12 @@ let serialPort = null;
 ipcMain.handle('serial-list', async () => {
   try {
     const { SerialPort } = require('serialport');
-    return await SerialPort.list();
+    const ports = await SerialPort.list();
+    return { ports };
   } catch (e) {
     console.error('[serial-list]', e.message);
-    return [];
+    // Return error so renderer can show a manual-entry fallback.
+    return { ports: [], error: e.message };
   }
 });
 
