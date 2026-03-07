@@ -1,69 +1,114 @@
 #!/usr/bin/env node
 /**
- * mavlink-bridge.js — UDP ↔ WebSocket bridge for ExpressLRS / WiFi backpacks.
+ * mavlink-bridge.js — UDP / TCP ↔ WebSocket bridge for WiFi backpacks / FC.
  *
- * The ExpressLRS backpack sends MAVLink as raw UDP packets.  Browsers can't
- * receive raw UDP, so this bridge sits in between:
+ * Browsers can't open raw UDP or TCP sockets, so this bridge sits between
+ * the flight controller / backpack and the browser:
  *
- *   Backpack (UDP :14550) ──► this bridge ──► browser (ws://localhost:5760)
- *   Browser  (ws://localhost:5760)  ──► this bridge ──► Backpack (UDP :14555)
+ *   FC/Backpack ──(UDP or TCP)──► this bridge ──(WebSocket)──► browser
+ *   browser ──(WebSocket)──► this bridge ──(UDP or TCP)──► FC/Backpack
  *
  * Usage:
- *   node mavlink-bridge.js
+ *   node mavlink-bridge.js              (UDP mode, default)
+ *   MODE=tcp node mavlink-bridge.js     (TCP client mode)
  *
  * Optional env overrides:
- *   BACKPACK_IP   default 10.0.0.1   (backpack address — join its WiFi AP first)
- *   UDP_RECV      default 14550       (port backpack sends MAVLink on)
- *   UDP_SEND      default 14555       (port backpack listens for uplink)
- *   WS_PORT       default 5760        (WebSocket port the browser connects to)
+ *   MODE          udp | tcp             default: udp
+ *   BACKPACK_IP   default 10.0.0.1
+ *   UDP_RECV      default 14550         (UDP: port backpack sends on)
+ *   UDP_SEND      default 14555         (UDP: port backpack listens on)
+ *   TCP_PORT      default 5760          (TCP: port FC/backpack listens on)
+ *   WS_PORT       default 5760          (WebSocket port browser connects to)
  */
 
 'use strict';
 
 const dgram = require('dgram');
+const net   = require('net');
 const http  = require('http');
 const { WebSocketServer } = require('ws');
 
-const BACKPACK_IP = process.env.BACKPACK_IP ?? '10.0.0.1';
+const MODE        = (process.env.MODE        ?? 'udp').toLowerCase();
+const BACKPACK_IP = process.env.BACKPACK_IP  ?? '10.0.0.1';
 const UDP_RECV    = Number(process.env.UDP_RECV  ?? 14550);
 const UDP_SEND    = Number(process.env.UDP_SEND  ?? 14555);
+const TCP_PORT    = Number(process.env.TCP_PORT  ?? 5760);
 const WS_PORT     = Number(process.env.WS_PORT   ?? 5760);
 
-// ── UDP socket (receives MAVLink from the backpack) ───────────────────────────
-const udp = dgram.createSocket('udp4');
-const clients = new Set();
+const clients = new Set(); // connected WebSocket browsers
+let   fcSend  = null;      // function(buf) → sends data to FC
 
-let udpPackets = 0;
+// ── UDP mode ──────────────────────────────────────────────────────────────────
+function startUDP () {
+  const udp = dgram.createSocket('udp4');
+  let packets = 0;
 
-udp.on('message', (msg, rinfo) => {
-  if (rinfo.address !== BACKPACK_IP) return; // ignore packets from other sources
-  udpPackets++;
-  if (udpPackets === 1) {
-    console.log(`[udp ] First packet received from ${rinfo.address}:${rinfo.port} (${msg.length} bytes) ✓`);
-  }
-  if (udpPackets % 100 === 0) {
-    console.log(`[udp ] ${udpPackets} packets received · ${clients.size} browser(s) connected`);
-  }
-  for (const ws of clients) {
-    if (ws.readyState === ws.OPEN) ws.send(msg);
-  }
-});
+  udp.on('message', (msg, rinfo) => {
+    if (rinfo.address !== BACKPACK_IP) return;
+    packets++;
+    if (packets === 1)        console.log(`[udp ] First packet from ${rinfo.address}:${rinfo.port} (${msg.length} B) ✓`);
+    if (packets % 100 === 0)  console.log(`[udp ] ${packets} packets · ${clients.size} browser(s)`);
+    for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(msg);
+  });
 
-udp.on('error', (e) => {
-  if (e.code === 'EADDRINUSE') {
-    console.error(`\n[udp ] FATAL: Port ${UDP_RECV} is already in use.`);
-    console.error(`[udp ] Another app (Mission Planner, QGroundControl, or a second bridge) is holding it.`);
-    console.error(`[udp ] Fix on Windows:  netstat -ano | findstr :${UDP_RECV}  then  taskkill /PID <pid> /F`);
-    console.error(`[udp ] Fix on Linux:    fuser -k ${UDP_RECV}/udp`);
-    console.error(`[udp ] Or override:     UDP_RECV=14551 node mavlink-bridge.js\n`);
-    process.exit(1);
-  }
-  console.error('[udp ]', e.message);
-});
+  udp.on('error', (e) => {
+    if (e.code === 'EADDRINUSE') {
+      console.error(`\n[udp ] FATAL: Port ${UDP_RECV} already in use.`);
+      console.error(`[udp ] Windows: netstat -ano | findstr :${UDP_RECV}  then  taskkill /PID <pid> /F`);
+      console.error(`[udp ] Linux:   fuser -k ${UDP_RECV}/udp`);
+      console.error(`[udp ] Or:      UDP_RECV=14551 node mavlink-bridge.js\n`);
+      process.exit(1);
+    }
+    console.error('[udp ]', e.message);
+  });
 
-udp.bind(UDP_RECV, () =>
-  console.log(`[udp ] Listening for MAVLink on :${UDP_RECV}`)
-);
+  udp.bind(UDP_RECV, () =>
+    console.log(`[udp ] Listening for MAVLink on :${UDP_RECV}`)
+  );
+
+  fcSend = (buf) => udp.send(buf, UDP_SEND, BACKPACK_IP, (e) => {
+    if (e) console.error('[udp↑]', e.message);
+  });
+}
+
+// ── TCP client mode ───────────────────────────────────────────────────────────
+function startTCP () {
+  let socket = null;
+  let packets = 0;
+
+  function connect () {
+    console.log(`[tcp ] Connecting to ${BACKPACK_IP}:${TCP_PORT} …`);
+    socket = net.createConnection({ host: BACKPACK_IP, port: TCP_PORT });
+
+    socket.on('connect', () =>
+      console.log(`[tcp ] Connected to ${BACKPACK_IP}:${TCP_PORT} ✓`)
+    );
+
+    socket.on('data', (buf) => {
+      packets++;
+      if (packets === 1)        console.log(`[tcp ] First data received (${buf.length} B) ✓`);
+      if (packets % 100 === 0)  console.log(`[tcp ] ${packets} packets · ${clients.size} browser(s)`);
+      for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(buf);
+    });
+
+    socket.on('close', () => {
+      console.log('[tcp ] Connection closed — retrying in 3 s …');
+      socket = null;
+      fcSend = null;
+      setTimeout(connect, 3000);
+    });
+
+    socket.on('error', (e) =>
+      console.error('[tcp ]', e.message)
+    );
+
+    fcSend = (buf) => {
+      if (socket?.writable) socket.write(buf);
+    };
+  }
+
+  connect();
+}
 
 // ── WebSocket server (browser connects here) ──────────────────────────────────
 const server = http.createServer();
@@ -74,26 +119,30 @@ wss.on('connection', (ws, req) => {
   console.log(`[ws  ] Browser connected (${req.socket.remoteAddress})`);
 
   ws.on('message', (data) => {
-    // Forward browser → backpack uplink port
-    udp.send(data, UDP_SEND, BACKPACK_IP, (e) => {
-      if (e) console.error('[udp↑]', e.message);
-    });
+    if (fcSend) fcSend(Buffer.isBuffer(data) ? data : Buffer.from(data));
   });
 
-  ws.on('close', () => {
-    clients.delete(ws);
-    console.log('[ws  ] Browser disconnected');
-  });
-
-  ws.on('error', (e) => {
-    clients.delete(ws);
-    console.error('[ws  ]', e.message);
-  });
+  ws.on('close', () => { clients.delete(ws); console.log('[ws  ] Browser disconnected'); });
+  ws.on('error', (e) => { clients.delete(ws); console.error('[ws  ]', e.message); });
 });
 
 server.listen(WS_PORT, '127.0.0.1', () => {
   console.log(`[ws  ] Listening on ws://localhost:${WS_PORT}`);
-  console.log(`[    ] Backpack target : ${BACKPACK_IP}  send→:${UDP_SEND}  recv←:${UDP_RECV}`);
-  console.log(`[    ] In the app      : WiFi Backpack mode → ws://localhost:${WS_PORT}`);
+  if (MODE === 'tcp') {
+    console.log(`[    ] Mode: TCP client → ${BACKPACK_IP}:${TCP_PORT}`);
+    console.log(`[    ] Override port:  TCP_PORT=14550 node mavlink-bridge.js`);
+  } else {
+    console.log(`[    ] Mode: UDP  recv←:${UDP_RECV}  send→:${UDP_SEND}  target:${BACKPACK_IP}`);
+    console.log(`[    ] Switch to TCP:  MODE=tcp node mavlink-bridge.js`);
+  }
+  console.log(`[    ] In the app: WiFi + Bridge → ws://localhost:${WS_PORT}`);
   console.log('[    ] Press Ctrl+C to stop.');
 });
+
+// ── Start the chosen transport ─────────────────────────────────────────────────
+if (MODE === 'tcp') {
+  startTCP();
+} else {
+  if (MODE !== 'udp') console.warn(`[    ] Unknown MODE="${MODE}", defaulting to UDP`);
+  startUDP();
+}
