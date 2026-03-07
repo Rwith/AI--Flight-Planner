@@ -118,8 +118,10 @@ ipcMain.on('bridge-start', (_, opts) => {
 ipcMain.on('bridge-stop', () => stopBridge());
 
 // ── Electron window ───────────────────────────────────────────────────────────
+let mainWin = null;
+
 function createWindow () {
-  const win = new BrowserWindow({
+  mainWin = new BrowserWindow({
     width:  1280,
     height: 820,
     minWidth: 900,
@@ -132,8 +134,31 @@ function createWindow () {
     }
   });
 
-  win.loadFile('index.html');
-  // win.webContents.openDevTools(); // uncomment for debugging
+  // ── Web Serial API: port picker ───────────────────────────────────────────
+  // When navigator.serial.requestPort() is called in the renderer, Electron
+  // fires this event instead of showing the browser's built-in dialog.
+  // We forward the port list to the renderer and wait for the user's choice.
+  mainWin.webContents.session.on('select-serial-port', (event, portList, _wc, callback) => {
+    event.preventDefault(); // we handle it ourselves
+    if (!portList || portList.length === 0) {
+      callback(''); // no ports available
+      return;
+    }
+    mainWin.webContents.send('serial-select-port', portList);
+    ipcMain.once('serial-port-chosen', (_, portId) => callback(portId ?? ''));
+  });
+
+  // Grant serial permission automatically (this is a trusted desktop app).
+  mainWin.webContents.session.setPermissionCheckHandler((_wc, permission) => {
+    if (permission === 'serial') return true;
+    return null; // default for everything else
+  });
+  mainWin.webContents.session.setDevicePermissionHandler((details) => {
+    return details.deviceType === 'serial';
+  });
+
+  mainWin.loadFile('index.html');
+  // mainWin.webContents.openDevTools(); // uncomment for debugging
 }
 
 app.whenReady().then(() => {

@@ -1918,5 +1918,70 @@ function toggleConnMode() {
 <script type="module" src="js/flight-tube.js"></script>
 <!-- MAVLink/ArduPilot serial bridge — blackbox reader + waypoint upload -->
 <script src="js/mavlink-serial.js"></script>
+
+<!-- ── COM Port Picker Modal (Electron only) ──────────────────────────────── -->
+<div id="serial-port-modal" style="display:none;position:fixed;inset:0;z-index:9999;
+  background:rgba(0,0,0,.6);align-items:center;justify-content:center">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;
+    padding:24px;min-width:320px;max-width:460px;box-shadow:0 8px 32px rgba(0,0,0,.5)">
+    <div style="font-size:15px;font-weight:600;margin-bottom:4px">Select Serial Port</div>
+    <div style="font-size:11px;color:var(--sec);margin-bottom:16px">
+      Choose the COM port your device is connected to
+    </div>
+    <div id="serial-port-list" style="display:flex;flex-direction:column;gap:8px;max-height:260px;overflow-y:auto"></div>
+    <div style="margin-top:18px;display:flex;justify-content:flex-end">
+      <button class="btn" onclick="cancelSerialPort()"
+        style="padding:6px 18px;font-size:12px">Cancel</button>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  const modal = document.getElementById('serial-port-modal');
+
+  function showPortPicker (ports) {
+    const list = document.getElementById('serial-port-list');
+    list.innerHTML = '';
+
+    if (!ports || ports.length === 0) {
+      const msg = document.createElement('div');
+      msg.style.cssText = 'color:var(--sec);font-size:12px;padding:8px 0';
+      msg.textContent = 'No serial ports found. Connect your device and try again.';
+      list.appendChild(msg);
+    } else {
+      ports.forEach(p => {
+        const btn = document.createElement('button');
+        btn.className = 'btn';
+        btn.style.cssText = 'text-align:left;padding:10px 14px;width:100%;display:flex;flex-direction:column;gap:3px;border-radius:6px';
+        const row1 = document.createElement('span');
+        row1.style.fontWeight = '600';
+        row1.textContent = p.portName || p.portId || 'Unknown Port';
+        btn.appendChild(row1);
+        if (p.displayName && p.displayName !== p.portName) {
+          const row2 = document.createElement('span');
+          row2.style.cssText = 'font-size:10px;color:var(--sec)';
+          row2.textContent = p.displayName;
+          btn.appendChild(row2);
+        }
+        btn.onclick = () => {
+          modal.style.display = 'none';
+          window.electronBridge?.confirmSerialPort(p.portId);
+        };
+        list.appendChild(btn);
+      });
+    }
+    modal.style.display = 'flex';
+  }
+
+  window.cancelSerialPort = function () {
+    modal.style.display = 'none';
+    window.electronBridge?.confirmSerialPort('');
+  };
+
+  if (window.electronBridge?.onSerialPortSelect) {
+    window.electronBridge.onSerialPortSelect(showPortPicker);
+  }
+})();
+</script>
 </body>
 </html>
