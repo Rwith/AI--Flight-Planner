@@ -5,22 +5,28 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "rebuild": "electron-rebuild -f -w serialport",
+    "postinstall": "electron-rebuild -f -w serialport",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux"
   },
   "dependencies": {
+    "serialport": "^12.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
     "electron": "^34.0.0",
     "electron-builder": "^25.0.0"
   },
   "build": {
     "appId": "com.flightplanner.app",
     "productName": "Flight Planner",
+    "npmRebuild": true,
     "files": [
       "main.js",
+      "preload.js",
       "index.html",
       "js/**/*"
     ],

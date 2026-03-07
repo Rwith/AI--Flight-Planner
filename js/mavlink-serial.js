@@ -469,6 +469,48 @@
     }
   }
 
+  // ─── Electron IPC serial connection ──────────────────────────────────────
+  async function connectIPC () {
+    const s = window.electronBridge?.serial;
+    if (!s) { addLog('[usb] Not running in Electron — serial not available'); return; }
+
+    addLog('[usb] Scanning for serial ports…');
+    let ports;
+    try { ports = await s.list(); } catch (e) { addLog('[usb] ' + e); return; }
+
+    const selectedPath = await window.showSerialPortPicker(ports);
+    if (!selectedPath) return; // user cancelled
+
+    const baud = parseInt(document.getElementById('serial-baud')?.value ?? '115200', 10);
+    addLog(`[usb] Connecting to ${selectedPath} at ${baud} baud…`);
+
+    s.removeListeners();
+    try {
+      await s.open(selectedPath, baud);
+    } catch (e) { addLog('[usb] ' + e); return; }
+
+    // IPC writer — same interface as Web Serial WritableStreamDefaultWriter
+    writer = {
+      write:       (data) => { s.write(Array.from(data)); return Promise.resolve(); },
+      releaseLock: () => {},
+    };
+    // IPC reader — only cancel() is used (by disconnect)
+    reader = {
+      cancel:      async () => { try { await s.close(); } catch {} },
+      releaseLock: () => {},
+    };
+
+    const parser = new MAVParser(onMessage);
+    s.onData(buf  => parser.push(buf));
+    s.onError(msg => addLog('[usb] Error: ' + msg));
+    s.onClose(()  => {
+      if (writer) { writer = null; reader = null; setConnected(false); addLog('[usb] Port closed'); }
+    });
+
+    setConnected(true);
+    addLog(`[usb] Connected to ${selectedPath} at ${baud} baud — waiting for heartbeat`);
+  }
+
   // ─── Connection management ────────────────────────────────────────────────
   async function connect () {
     const mode = document.getElementById('conn-mode')?.value ?? 'usb';
@@ -502,37 +544,9 @@
       return;
     }
 
-    // ── USB / Serial path ───────────────────────────────────────────────────
-    if (!('serial' in navigator)) {
-      addLog('[usb] Web Serial API not available — make sure you are running the Electron app (not a browser)');
-      return;
-    }
+    // ── USB / Serial path (Electron IPC via serialport package) ────────────
     if (port) { await disconnect(); return; }
-
-    try {
-      addLog('[usb] Opening port picker…');
-      // Wrap requestPort() with a 60-second timeout so the app doesn't hang
-      // if the Electron select-serial-port event never fires.
-      const portRace = Promise.race([
-        navigator.serial.requestPort(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('Port picker timed out — check Electron serial permissions')), 60000))
-      ]);
-      port = await portRace;
-      const baud = parseInt(document.getElementById('serial-baud')?.value ?? '115200', 10);
-      addLog(`[usb] Opening port at ${baud} baud…`);
-      await port.open({ baudRate: baud });
-      writer = port.writable.getWriter();
-      reader = port.readable.getReader();
-      setConnected(true);
-      addLog(`[usb] Connected at ${baud} baud — waiting for MAVLink heartbeat`);
-      const parser = new MAVParser(onMessage);
-      readLoop(parser); // fire-and-forget; stops when disconnect() cancels
-    } catch (e) {
-      // If the port was opened but writer/reader setup failed, close it cleanly.
-      if (port) { try { await port.close(); } catch {} }
-      port = null; writer = null; reader = null;
-      if (e.name !== 'NotFoundError') addLog('[usb] ' + e.message);
-    }
+    await connectIPC();
   }
 
   async function disconnect () {
@@ -541,6 +555,7 @@
       try { ws.close(); } catch {}
       writer = null;
     } else {
+      window.electronBridge?.serial?.removeListeners();
       try { await reader?.cancel(); }   catch {}
       try { writer?.releaseLock(); }    catch {}
       try { await port?.close(); }      catch {}
