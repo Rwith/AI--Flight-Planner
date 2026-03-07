@@ -461,7 +461,7 @@
         </div>
         <div id="conn-wifi-opts" class="serial-row" style="margin-bottom:8px;display:none">
           <label style="font-size:11px;color:var(--sec)">WS URL</label>
-          <input type="text" id="wifi-url" value="ws://localhost:5760"
+          <input type="text" id="wifi-url" value="ws://localhost:5761"
                  style="flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:4px 6px;font-size:11px;outline:none">
         </div>
         <div class="btn-row">
@@ -1891,14 +1891,17 @@ window._serialGetHome      = () => ({ lat: homeLat, lon: homeLon });
 function toggleConnMode() {
   const mode = document.getElementById('conn-mode').value;
   const isWifi = mode === 'wifi' || mode === 'direct';
+  const wsPort = window.electronBridge?.WS_PORT ?? 5761;
   document.getElementById('conn-usb-opts').style.display  = isWifi ? 'none' : '';
   document.getElementById('conn-wifi-opts').style.display = isWifi ? ''     : 'none';
   if (mode === 'direct') {
     document.getElementById('wifi-url').value = 'ws://10.0.0.1:5760';
-    document.getElementById('conn-hint').textContent = 'Join the backpack WiFi AP — browser connects directly to ws://10.0.0.1:5760 (no bridge needed).';
+    document.getElementById('conn-hint').textContent = 'Join the backpack WiFi AP — connects directly to ws://10.0.0.1:5760 (no bridge needed).';
   } else if (mode === 'wifi') {
-    document.getElementById('wifi-url').value = 'ws://localhost:5760';
-    document.getElementById('conn-hint').textContent = 'Join the backpack WiFi AP, run: node mavlink-bridge.js, then connect here.';
+    document.getElementById('wifi-url').value = `ws://localhost:${wsPort}`;
+    document.getElementById('conn-hint').textContent = window.electronBridge
+      ? 'Built-in bridge active — join the backpack WiFi AP then connect.'
+      : 'Join the backpack WiFi AP, run: node mavlink-bridge.js, then connect here.';
   } else {
     document.getElementById('conn-hint').textContent = 'Requires USB/serial cable (FTDI, Telemetry Radio) · Chrome / Edge 89+';
   }
