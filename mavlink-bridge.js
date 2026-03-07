@@ -33,7 +33,16 @@ const WS_PORT     = Number(process.env.WS_PORT   ?? 5760);
 const udp = dgram.createSocket('udp4');
 const clients = new Set();
 
-udp.on('message', (msg) => {
+let udpPackets = 0;
+
+udp.on('message', (msg, rinfo) => {
+  udpPackets++;
+  if (udpPackets === 1) {
+    console.log(`[udp ] First packet received from ${rinfo.address}:${rinfo.port} (${msg.length} bytes) ✓`);
+  }
+  if (udpPackets % 100 === 0) {
+    console.log(`[udp ] ${udpPackets} packets received · ${clients.size} browser(s) connected`);
+  }
   for (const ws of clients) {
     if (ws.readyState === ws.OPEN) ws.send(msg);
   }
