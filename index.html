@@ -504,7 +504,7 @@
         <!-- Artificial horizon -->
         <canvas id="hud-horizon" width="318" height="180" style="display:block;width:100%;border-radius:6px"></canvas>
         <!-- Compass tape -->
-        <canvas id="hud-compass" width="318" height="44" style="display:block;width:100%;margin-top:6px;border-radius:4px"></canvas>
+        <canvas id="hud-compass" width="318" height="62" style="display:block;width:100%;margin-top:6px;border-radius:4px"></canvas>
         <!-- Data row: speed | alt | battery -->
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px">
           <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
@@ -2283,16 +2283,16 @@ function drawHUDCompass(canvas, rawHdg, armed) {
     const deg = ((hdg + d) % 360 + 360) % 360;
     const x = cx + d * PX_PER_DEG;
     const isCard = deg % 90 === 0, isMajor = deg % 30 === 0;
-    const tickH = isCard ? 16 : isMajor ? 11 : 6;
+    const tickH = isCard ? 18 : isMajor ? 13 : 8;
     ctx.beginPath(); ctx.moveTo(x, H - 1); ctx.lineTo(x, H - 1 - tickH);
     ctx.strokeStyle = isMajor ? 'rgba(255,255,255,.8)' : 'rgba(255,255,255,.3)';
     ctx.lineWidth = isCard ? 1.5 : 1; ctx.stroke();
     if (isMajor) {
       const lbl = { 0:'N', 90:'E', 180:'S', 270:'W' }[deg] ?? String(deg).padStart(3,'0');
-      ctx.fillStyle = isCard ? '#58a6ff' : 'rgba(255,255,255,.72)';
+      ctx.fillStyle = isCard ? '#58a6ff' : 'rgba(255,255,255,.85)';
       ctx.font = isCard ? 'bold 11px monospace' : '10px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(lbl, x, H - tickH - 3);
+      ctx.fillText(lbl, x, 40); // fixed Y in the label band (below readout box, above ticks)
     }
   }
 
