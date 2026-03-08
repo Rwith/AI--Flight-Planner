@@ -262,6 +262,37 @@
     color: var(--text); padding: 4px 6px; font-size: 11px; outline: none;
   }
   #serial-connect-btn[data-on="1"] { background: rgba(248,81,73,.15); border-color: var(--red); color: var(--red); }
+
+  /* ── HUD ─────────────────────────────────────────────────────────────────── */
+  #hud {
+    position: absolute; inset: 0; pointer-events: none; z-index: 601;
+    font-family: 'SFMono-Regular', Consolas, monospace; font-size: 12px;
+    color: rgba(255,255,255,.92);
+  }
+  .hud-panel {
+    background: rgba(2,6,18,.58); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 6px; padding: 7px 10px; backdrop-filter: blur(6px);
+  }
+  .hud-label {
+    font-size: 9px; color: rgba(255,255,255,.45);
+    text-transform: uppercase; letter-spacing: .9px; line-height: 1.4;
+  }
+  .hud-bignum {
+    font-size: 30px; font-weight: 700; line-height: 1.05; color: #fff;
+    font-variant-numeric: tabular-nums;
+  }
+  .hud-midnum {
+    font-size: 15px; font-weight: 600; color: #fff;
+    font-variant-numeric: tabular-nums;
+  }
+  .hud-unit { font-size: 10px; color: rgba(255,255,255,.4); }
+  .hud-dim  { font-size: 11px; color: rgba(255,255,255,.5); }
+  #hud-arm  {
+    padding: 2px 14px; border-radius: 4px; font-size: 11px; font-weight: 700;
+    letter-spacing: 1.2px; border: 1px solid rgba(255,255,255,.2);
+    background: rgba(0,0,0,.6);
+  }
+  #hud-btn.hud-on { border-color: var(--blue); color: var(--blue); background: rgba(88,166,255,.12); }
 </style>
 </head>
 <body>
@@ -285,6 +316,7 @@
   </select>
   <button class="topbtn" id="view3d-btn" onclick="toggle3DView()">3D View</button>
   <button class="topbtn" onclick="openLogbook()">Logbook</button>
+  <button class="topbtn" id="hud-btn" onclick="toggleHUD()">HUD</button>
   <button class="topbtn" id="nfz-btn" onclick="toggleNFZ()">NFZ Off</button>
   <button class="topbtn" id="cache-btn" onclick="downloadTilesForView()" title="Download map tiles for current view for offline use">Cache Tiles</button>
   <button class="topbtn danger" onclick="clearMission()">Clear</button>
@@ -303,6 +335,74 @@
   <!-- MAP AREA -->
   <div id="map-area">
     <div id="map"></div>
+
+    <!-- ── HUD overlay ───────────────────────────────────────────────────── -->
+    <div id="hud" style="display:none">
+
+      <!-- Top-left: GPS -->
+      <div class="hud-panel" style="position:absolute;top:10px;left:10px;min-width:90px">
+        <div class="hud-label">GPS</div>
+        <div style="display:flex;align-items:baseline;gap:4px;margin-top:2px">
+          <span id="hud-sats" class="hud-bignum" style="font-size:22px">--</span>
+          <span class="hud-unit">sats</span>
+        </div>
+        <div id="hud-fix"  class="hud-dim" style="margin-top:1px">--</div>
+        <div class="hud-dim">HDOP <span id="hud-hdop">--</span></div>
+      </div>
+
+      <!-- Top-center: Compass tape + ARM badge -->
+      <div style="position:absolute;top:10px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:5px">
+        <canvas id="hud-compass" width="300" height="42" style="display:block"></canvas>
+        <div id="hud-arm">DISARMED</div>
+      </div>
+
+      <!-- Top-right: Battery -->
+      <div class="hud-panel" style="position:absolute;top:10px;right:10px;text-align:right;min-width:90px">
+        <div class="hud-label">Battery</div>
+        <div style="display:flex;align-items:baseline;gap:4px;margin-top:2px;justify-content:flex-end">
+          <span id="hud-batt-pct" class="hud-bignum" style="font-size:22px">--%</span>
+        </div>
+        <div style="height:4px;background:rgba(255,255,255,.15);border-radius:2px;margin:4px 0;width:90px;margin-left:auto">
+          <div id="hud-batt-bar" style="height:100%;width:0%;border-radius:2px;background:#3fb950;transition:width .5s,background .5s"></div>
+        </div>
+        <div class="hud-dim"><span id="hud-volt">--V</span> · <span id="hud-curr">--A</span></div>
+      </div>
+
+      <!-- Mid-left: Speed -->
+      <div class="hud-panel" style="position:absolute;top:50%;left:10px;transform:translateY(-50%);text-align:center;min-width:74px">
+        <div class="hud-label">Gnd Spd</div>
+        <div id="hud-spd" class="hud-bignum">--</div>
+        <div class="hud-unit">m/s</div>
+        <div style="margin-top:10px" class="hud-label">Air Spd</div>
+        <div id="hud-aspd" class="hud-midnum">--</div>
+        <div class="hud-unit">m/s</div>
+        <div style="margin-top:10px" class="hud-label">Throttle</div>
+        <div style="height:5px;background:rgba(255,255,255,.15);border-radius:3px;margin-top:3px;width:60px">
+          <div id="hud-thr-fill" style="height:100%;width:0%;background:#58a6ff;border-radius:3px;transition:width .3s"></div>
+        </div>
+        <div id="hud-thr-pct" class="hud-dim" style="margin-top:2px">0%</div>
+      </div>
+
+      <!-- Center: Artificial horizon -->
+      <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)">
+        <canvas id="hud-horizon" width="210" height="158" style="display:block"></canvas>
+      </div>
+
+      <!-- Mid-right: Altitude + climb -->
+      <div class="hud-panel" style="position:absolute;top:50%;right:10px;transform:translateY(-50%);text-align:center;min-width:74px">
+        <div class="hud-label">Alt AGL</div>
+        <div id="hud-alt" class="hud-bignum">--</div>
+        <div class="hud-unit">m</div>
+        <div style="margin-top:10px" class="hud-label">Alt MSL</div>
+        <div id="hud-alt-msl" class="hud-midnum">--</div>
+        <div class="hud-unit">m</div>
+        <div style="margin-top:10px" class="hud-label">Climb</div>
+        <div id="hud-climb" class="hud-midnum">--</div>
+        <div class="hud-unit">m/s</div>
+      </div>
+
+    </div><!-- end #hud -->
+
     <div id="map-hint">Click to place waypoints • Drag to reposition</div>
     <div id="profile-wrap" style="height:160px">
       <div id="profile-header" onclick="toggleProfile()">
@@ -2136,6 +2236,205 @@ function exportKML() {
   const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = 'mission.kml'; a.click();
+}
+
+// ====================== HUD ======================
+let _hudVisible = false;
+
+function toggleHUD() {
+  _hudVisible = !_hudVisible;
+  document.getElementById('hud').style.display = _hudVisible ? 'block' : 'none';
+  document.getElementById('hud-btn').classList.toggle('hud-on', _hudVisible);
+  document.getElementById('hud-btn').textContent = _hudVisible ? 'HUD ✓' : 'HUD';
+  if (_hudVisible) hudUpdate({}); // render blank state immediately
+}
+
+// Called from mavlink-serial.js renderTele() via window.hudUpdate
+function hudUpdate(tele) {
+  if (!_hudVisible) return;
+  const GPS_FIX = ['No GPS','No Fix','2D Fix','3D Fix','DGPS','RTK Float','RTK Fixed'];
+
+  // GPS
+  const sats = tele.gpsSats;
+  const satEl = document.getElementById('hud-sats');
+  satEl.textContent = sats ?? '--';
+  satEl.style.color = sats >= 8 ? '#3fb950' : sats >= 6 ? '#d29922' : sats > 0 ? '#f85149' : 'rgba(255,255,255,.4)';
+  document.getElementById('hud-fix').textContent  = GPS_FIX[tele.gpsFix] ?? '--';
+  document.getElementById('hud-hdop').textContent = tele.hdop != null ? tele.hdop.toFixed(2) : '--';
+
+  // Battery
+  const pct = tele.battPct;
+  const battColor = pct >= 50 ? '#3fb950' : pct >= 20 ? '#d29922' : '#f85149';
+  const pctEl = document.getElementById('hud-batt-pct');
+  pctEl.textContent = pct != null ? pct + '%' : '--%';
+  pctEl.style.color = pct != null ? battColor : 'rgba(255,255,255,.4)';
+  const barEl = document.getElementById('hud-batt-bar');
+  if (pct != null) { barEl.style.width = Math.max(0, Math.min(100, pct)) + '%'; barEl.style.background = battColor; }
+  document.getElementById('hud-volt').textContent = tele.voltageMv != null ? (tele.voltageMv / 1000).toFixed(1) + 'V' : '--V';
+  document.getElementById('hud-curr').textContent = tele.currentCa != null ? (tele.currentCa / 100).toFixed(1) + 'A' : '--A';
+
+  // ARM
+  const armEl = document.getElementById('hud-arm');
+  if (tele.baseMode != null) {
+    const armed = !!(tele.baseMode & 0x80);
+    armEl.textContent = armed ? 'ARMED' : 'DISARMED';
+    armEl.style.color = armed ? '#f85149' : '#3fb950';
+    armEl.style.borderColor = armed ? 'rgba(248,81,73,.5)' : 'rgba(63,185,80,.35)';
+  } else {
+    armEl.textContent = '--'; armEl.style.color = 'rgba(255,255,255,.4)'; armEl.style.borderColor = 'rgba(255,255,255,.2)';
+  }
+
+  // Speed
+  document.getElementById('hud-spd').textContent  = tele.groundspeed != null ? parseFloat(tele.groundspeed).toFixed(1) : '--';
+  document.getElementById('hud-aspd').textContent = tele.airspeed    != null ? parseFloat(tele.airspeed).toFixed(1)    : '--';
+
+  // Throttle
+  const thr = tele.throttle;
+  document.getElementById('hud-thr-fill').style.width = thr != null ? Math.max(0, Math.min(100, thr)) + '%' : '0%';
+  document.getElementById('hud-thr-pct').textContent  = thr != null ? thr + '%' : '0%';
+
+  // Altitude
+  document.getElementById('hud-alt').textContent     = tele.altRel != null ? tele.altRel.toFixed(1)  : '--';
+  document.getElementById('hud-alt-msl').textContent = tele.altMSL != null ? tele.altMSL.toFixed(1)  : '--';
+
+  // Climb rate
+  const crEl = document.getElementById('hud-climb');
+  if (tele.climbRate != null) {
+    const cr = parseFloat(tele.climbRate);
+    crEl.textContent  = (cr >= 0 ? '+' : '') + cr.toFixed(1);
+    crEl.style.color  = cr > 0.3 ? '#3fb950' : cr < -0.3 ? '#f85149' : 'rgba(255,255,255,.75)';
+  } else { crEl.textContent = '--'; crEl.style.color = 'rgba(255,255,255,.4)'; }
+
+  // Canvases
+  drawHUDCompass(document.getElementById('hud-compass'), tele.hdg ?? tele.heading ?? 0, !!(tele.baseMode & 0x80));
+  drawHUDHorizon(document.getElementById('hud-horizon'), parseFloat(tele.roll) || 0, parseFloat(tele.pitch) || 0);
+}
+window.hudUpdate = hudUpdate;
+
+function drawHUDCompass(canvas, rawHdg, armed) {
+  const W = canvas.width, H = canvas.height, ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  const cx = W / 2;
+  const hdg = ((rawHdg % 360) + 360) % 360;
+  const PX_PER_DEG = 2.4;
+
+  // Background
+  ctx.fillStyle = 'rgba(2,6,18,.62)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Tick marks
+  for (let d = -65; d <= 65; d += 5) {
+    const deg = ((hdg + d) % 360 + 360) % 360;
+    const x = cx + d * PX_PER_DEG;
+    const isCard = deg % 90 === 0, isMajor = deg % 30 === 0;
+    const tickH = isCard ? 16 : isMajor ? 11 : 6;
+    ctx.beginPath(); ctx.moveTo(x, H - 1); ctx.lineTo(x, H - 1 - tickH);
+    ctx.strokeStyle = isMajor ? 'rgba(255,255,255,.8)' : 'rgba(255,255,255,.3)';
+    ctx.lineWidth = isCard ? 1.5 : 1; ctx.stroke();
+    if (isMajor) {
+      const lbl = { 0:'N', 90:'E', 180:'S', 270:'W' }[deg] ?? String(deg).padStart(3,'0');
+      ctx.fillStyle = isCard ? '#58a6ff' : 'rgba(255,255,255,.72)';
+      ctx.font = isCard ? 'bold 11px monospace' : '10px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(lbl, x, H - tickH - 3);
+    }
+  }
+
+  // Centre triangle pointer
+  ctx.fillStyle = '#f85149';
+  ctx.beginPath(); ctx.moveTo(cx, H - 1); ctx.lineTo(cx - 5, H - 11); ctx.lineTo(cx + 5, H - 11); ctx.closePath(); ctx.fill();
+
+  // Heading readout box
+  ctx.fillStyle = 'rgba(0,0,0,.75)'; ctx.fillRect(cx - 24, 0, 48, 18);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 13px monospace'; ctx.textAlign = 'center';
+  ctx.fillText(String(Math.round(hdg)).padStart(3,'0') + '°', cx, 13);
+
+  ctx.strokeStyle = 'rgba(255,255,255,.1)'; ctx.lineWidth = 1; ctx.strokeRect(.5, .5, W - 1, H - 1);
+}
+
+function drawHUDHorizon(canvas, roll, pitch) {
+  const W = canvas.width, H = canvas.height, ctx = canvas.getContext('2d');
+  const cx = W / 2, cy = H / 2;
+  const rollRad = roll * Math.PI / 180;
+  const pitchPx = pitch * 2.8; // px per degree
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Rounded clip
+  ctx.save();
+  ctx.beginPath();
+  const r = 8;
+  ctx.moveTo(r, 0); ctx.lineTo(W - r, 0); ctx.arcTo(W, 0, W, r, r);
+  ctx.lineTo(W, H - r); ctx.arcTo(W, H, W - r, H, r);
+  ctx.lineTo(r, H); ctx.arcTo(0, H, 0, H - r, r);
+  ctx.lineTo(0, r); ctx.arcTo(0, 0, r, 0, r); ctx.closePath();
+  ctx.clip();
+
+  // Rotate the sky/ground/ladder around centre for roll
+  ctx.save();
+  ctx.translate(cx, cy); ctx.rotate(-rollRad); ctx.translate(-cx, -cy);
+
+  // Sky gradient
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, cy + pitchPx + 10);
+  skyGrad.addColorStop(0, '#0a1e3a'); skyGrad.addColorStop(1, '#1a4a7a');
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(-W, -H * 2, W * 3, H * 2 + cy + pitchPx + 10);
+
+  // Ground gradient
+  const gndGrad = ctx.createLinearGradient(0, cy + pitchPx, 0, H);
+  gndGrad.addColorStop(0, '#3a1f0a'); gndGrad.addColorStop(1, '#1e0f05');
+  ctx.fillStyle = gndGrad;
+  ctx.fillRect(-W, cy + pitchPx, W * 3, H * 2);
+
+  // Horizon line
+  ctx.beginPath(); ctx.moveTo(-W, cy + pitchPx); ctx.lineTo(W * 2, cy + pitchPx);
+  ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // Pitch ladder
+  for (let p = -30; p <= 30; p += 5) {
+    if (p === 0) continue;
+    const y = cy + pitchPx - p * 2.8;
+    const len = p % 10 === 0 ? 34 : 18;
+    ctx.beginPath(); ctx.moveTo(cx - len, y); ctx.lineTo(cx + len, y);
+    ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = p % 10 === 0 ? 1.2 : 0.8; ctx.stroke();
+    if (p % 10 === 0) {
+      ctx.fillStyle = 'rgba(255,255,255,.65)'; ctx.font = '8px monospace'; ctx.textAlign = 'right';
+      ctx.fillText(Math.abs(p), cx - len - 3, y + 3);
+      ctx.textAlign = 'left'; ctx.fillText(Math.abs(p), cx + len + 3, y + 3);
+    }
+  }
+  ctx.restore(); // undo roll rotation
+
+  // Roll arc + ticks (drawn in canvas space, around centre)
+  ctx.save(); ctx.translate(cx, cy);
+  const arcR = 72;
+  ctx.beginPath(); ctx.arc(0, 0, arcR, -Math.PI / 2 - Math.PI / 3, -Math.PI / 2 + Math.PI / 3);
+  ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 1; ctx.stroke();
+  [-30, -20, -10, 10, 20, 30].forEach(deg => {
+    const a = -Math.PI / 2 + deg * Math.PI / 180;
+    const r1 = deg % 30 === 0 ? arcR - 10 : arcR - 6;
+    ctx.beginPath(); ctx.moveTo(Math.cos(a) * arcR, Math.sin(a) * arcR);
+    ctx.lineTo(Math.cos(a) * r1,  Math.sin(a) * r1);
+    ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.lineWidth = 1; ctx.stroke();
+  });
+  // Roll pointer triangle
+  ctx.rotate(-rollRad);
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.moveTo(0, -arcR); ctx.lineTo(-5, -arcR + 10); ctx.lineTo(5, -arcR + 10); ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  // Fixed aircraft symbol
+  ctx.save(); ctx.translate(cx, cy);
+  ctx.strokeStyle = '#f0c040'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-44, 0); ctx.lineTo(-14, 0); ctx.lineTo(-7, 7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( 44, 0); ctx.lineTo( 14, 0); ctx.lineTo(  7, 7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, 2.5, 0, Math.PI * 2); ctx.fillStyle = '#f0c040'; ctx.fill();
+  ctx.restore();
+
+  // Border
+  ctx.restore(); // undo clip
+  ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1; ctx.strokeRect(.5, .5, W - 1, H - 1);
 }
 
 // ====================== INIT ======================

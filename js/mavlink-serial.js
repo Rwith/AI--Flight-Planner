@@ -427,6 +427,8 @@
     set('tele-voltage', tele.voltageMv != null ? (tele.voltageMv / 1000).toFixed(2) + ' V' : null);
     set('tele-current', tele.currentCa != null ? (tele.currentCa / 100).toFixed(1) + ' A' : null);
     set('tele-batt',    tele.battPct   != null && tele.battPct >= 0 ? tele.battPct + '%' : null);
+    // HUD overlay (no-op if HUD is hidden)
+    window.hudUpdate?.(tele);
   }
 
   // ─── Telemetry CSV logger ─────────────────────────────────────────────────
