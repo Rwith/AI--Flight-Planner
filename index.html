@@ -1231,7 +1231,14 @@ function updateProfile() {
   const xData = cumDist.map(d => parseFloat((d / scale).toFixed(3)));
   const pointColors = waypoints.map((w, i) => i === selectedIdx ? '#fff' : (ACTION_COLORS[w.action] || '#58a6ff'));
 
-  if (profileChart) { profileChart.destroy(); profileChart = null; }
+  // Save which datasets the user has toggled off before destroying
+  const hiddenByLabel = {};
+  if (profileChart) {
+    profileChart.data.datasets.forEach(ds => {
+      if (ds.label) hiddenByLabel[ds.label] = !profileChart.isDatasetVisible(profileChart.data.datasets.indexOf(ds));
+    });
+    profileChart.destroy(); profileChart = null;
+  }
 
   // Build datasets using {x, y} pairs so live-alt overlay can share the same axis
   let missionDsIdx = 0;
@@ -1305,6 +1312,11 @@ function updateProfile() {
       }
     }
   });
+  // Restore toggled-off datasets
+  profileChart.data.datasets.forEach((ds, i) => {
+    if (ds.label && hiddenByLabel[ds.label]) profileChart.hide(i);
+  });
+
   // Store missionDsIdx for highlightProfilePoint
   profileChart._missionDsIdx = missionDsIdx;
 }
