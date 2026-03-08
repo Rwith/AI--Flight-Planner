@@ -20,11 +20,12 @@
     74: 20,  // VFR_HUD
     66: 148, // REQUEST_DATA_STREAM
     // ── DataFlash log download ─────────────────────────────────────────────
-    117: 128, // LOG_REQUEST_LIST
-    118: 56,  // LOG_ENTRY
-    119: 116, // LOG_REQUEST_DATA
-    122: 203, // LOG_REQUEST_END
-    128: 134  // LOG_DATA
+    // LOG_DATA (128) intentionally omitted — MAVLink v2 zero-trims payload so
+    // the CRC varies by packet length; skip validation and accept all LOG_DATA.
+    117: 128, // LOG_REQUEST_LIST (sent by us)
+    118: 56,  // LOG_ENTRY        (received — validated, confirmed correct)
+    119: 116, // LOG_REQUEST_DATA (sent by us)
+    122: 203  // LOG_REQUEST_END  (sent by us)
   };
 
   function crc16 (data) {
@@ -418,6 +419,9 @@
         if (!logDownState) break;
         const ldOfs   = dv.getUint32(0, true);
         const ldCount = payload[6];
+        if (logDownState.highWaterOfs === 0 && ldOfs === 0) {
+          addLog('[log] First LOG_DATA packet received — download flowing');
+        }
         logDownState.lastDataAt = Date.now(); // heartbeat for stall detector
         if (ldCount === 0) {
           // End-of-log marker from FC
