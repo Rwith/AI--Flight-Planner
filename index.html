@@ -63,7 +63,7 @@
   /* PROFILE */
   #profile-wrap {
     background: var(--panel); border-top: 1px solid var(--border);
-    flex-shrink: 0; transition: height .2s;
+    flex-shrink: 0; transition: height .2s; overflow: hidden;
   }
   #profile-wrap.collapsed { height: 28px !important; }
   #profile-header {
@@ -294,7 +294,7 @@
   <button class="topbtn danger" onclick="clearMission()">Clear</button>
 </div>
 <!-- tile download progress bar -->
-<div id="tile-progress-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;height:22px;background:var(--panel);border-top:1px solid var(--border);z-index:9000;display:flex;align-items:center;padding:0 10px;gap:8px;font-size:11px;color:var(--sec)">
+<div id="tile-progress-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;height:22px;background:var(--panel);border-top:1px solid var(--border);z-index:9000;align-items:center;padding:0 10px;gap:8px;font-size:11px;color:var(--sec)">
   <span id="tile-progress-msg">Caching tiles…</span>
   <div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
     <div id="tile-progress-fill" style="height:100%;width:0%;background:var(--blue);transition:width .15s"></div>
@@ -1238,6 +1238,7 @@ function updateProfile() {
   const chartDatasets = [];
   if (terrainElevations && terrainElevations.length === waypoints.length) {
     chartDatasets.push({
+      label: 'Terrain',
       data: terrainElevations.map((e, i) => ({ x: xData[i], y: e })),
       borderColor: '#db6d28', backgroundColor: 'rgba(219,109,40,.25)',
       pointRadius: 0, fill: true, tension: 0.4, borderWidth: 1.5, order: 1
@@ -1245,6 +1246,7 @@ function updateProfile() {
     missionDsIdx = 1;
   }
   chartDatasets.push({
+    label: 'Mission',
     data: waypoints.map((w, i) => ({ x: xData[i], y: w.alt })),
     borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,.12)',
     pointBackgroundColor: pointColors, pointBorderColor: '#fff',
@@ -1273,7 +1275,7 @@ function updateProfile() {
       animation: false,
       plugins: {
         legend: {
-          display: liveAlt.length > 0,
+          display: liveAlt.length > 0 || (terrainElevations && terrainElevations.length > 0),
           labels: { color: '#8b949e', font: { size: 10 }, boxWidth: 14 }
         },
         tooltip: {
