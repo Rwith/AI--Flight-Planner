@@ -279,6 +279,12 @@
   .fwin-fly    { background:rgba(63,185,80,.12); border:1px solid rgba(63,185,80,.4); color:var(--green); }
   .fwin-caution{ background:rgba(210,153,34,.12); border:1px solid rgba(210,153,34,.4); color:var(--yellow); }
   .fwin-nofly  { background:rgba(248,81,73,.12);  border:1px solid rgba(248,81,73,.4);  color:var(--red); }
+  /* BLACKBOX DECODER */
+  .bb-stat-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin:8px 0; }
+  .bb-evt { font-size:10px; font-family:'SFMono-Regular',Consolas,monospace; color:var(--sec);
+    line-height:1.7; max-height:110px; overflow-y:auto; border:1px solid var(--border);
+    border-radius:5px; padding:5px 8px; background:var(--bg); margin-top:6px; }
+  .bb-path { animation: marchingAnts .65s linear infinite; }
 </style>
 </head>
 <body>
@@ -736,6 +742,48 @@
         <button class="btn primary" id="upload-btn" onclick="serialUploadWaypoints()"
                 disabled style="width:100%">Upload Waypoints to Flight Computer</button>
         <div id="upload-status" data-state=""></div>
+      </div>
+
+      <!-- ── Blackbox Decoder ───────────────────────────────────────────── -->
+      <div class="card">
+        <div class="card-title">Blackbox Decoder</div>
+        <div style="font-size:11px;color:var(--sec);margin-bottom:8px">
+          Import an ArduPilot <b>.log</b> (text) file from the plane's SD card, or
+          re-load a <b>.csv</b> telemetry export. Entries saved via "Finish Flight" also
+          appear in the logbook selector below.
+        </div>
+        <!-- Import row -->
+        <div class="btn-row" style="margin-bottom:6px">
+          <label class="btn" style="cursor:pointer;flex:1;text-align:center">
+            📂 Import SD Log (.log / .csv)
+            <input type="file" id="bb-file" accept=".log,.csv,.txt" style="display:none"
+                   onchange="bbImportFile(event)">
+          </label>
+          <button class="btn" onclick="bbLoadFromLogbook()" style="flex:1">📋 Load from Logbook</button>
+        </div>
+        <!-- Logbook entry selector (shown on demand) -->
+        <div id="bb-logbook-row" style="display:none;margin-bottom:6px">
+          <select id="bb-logbook-sel"
+            style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:5px 8px;font-size:12px;outline:none"
+            onchange="bbLoadEntry()"></select>
+        </div>
+        <!-- Decoded stats (hidden until data is loaded) -->
+        <div id="bb-stats" style="display:none">
+          <div class="bb-stat-grid">
+            <div class="stat-card"><div class="stat-val" id="bb-dist">--</div><div class="stat-label">Distance</div></div>
+            <div class="stat-card"><div class="stat-val" id="bb-dur">--</div><div class="stat-label">Duration</div></div>
+            <div class="stat-card"><div class="stat-val" id="bb-max-alt">--</div><div class="stat-label">Max Alt</div></div>
+            <div class="stat-card"><div class="stat-val" id="bb-max-spd">--</div><div class="stat-label">Max Speed</div></div>
+            <div class="stat-card"><div class="stat-val" id="bb-min-batt">--</div><div class="stat-label">Min Batt</div></div>
+            <div class="stat-card"><div class="stat-val" id="bb-pts">--</div><div class="stat-label">Log Points</div></div>
+          </div>
+          <div class="btn-row">
+            <button class="btn primary" onclick="bbShowOnMap()" style="flex:1">Show Path on Map</button>
+            <button class="btn" onclick="bbClearPath()" style="flex:1">Clear Path</button>
+            <button class="btn" onclick="bbExportCSV()" style="flex:1">Export CSV</button>
+          </div>
+          <div id="bb-events" class="bb-evt"></div>
+        </div>
       </div>
 
       <!-- ── Serial log ──────────────────────────────────────────────────── -->
@@ -1862,11 +1910,19 @@ function addLogEntry() {
     outcome: document.getElementById('log-outcome').value
   };
   logbookEntries.unshift(entry);
+  // If Finish Flight was called first, a pending telLog is waiting — attach it to this entry
+  const pending = window._pendingTelLog;
+  if (pending && pending.length) {
+    const header = 'time,lat,lon,alt_rel,alt_msl,hdg,roll,pitch,yaw,airspeed,gndspeed,climb,throttle,voltage,batt_pct,gps_fix,sats';
+    try { localStorage.setItem('tlog_' + entry.id, header + '\n' + pending.join('\n')); } catch {}
+    window._pendingTelLog = null;
+  }
   renderLogbook();
 }
 
 function deleteLogEntry(id) {
   logbookEntries = logbookEntries.filter(e => e.id !== id);
+  try { localStorage.removeItem('tlog_' + id); } catch {}
   renderLogbook();
 }
 
@@ -1878,7 +1934,10 @@ function renderLogbook() {
   document.getElementById('log-time').textContent = time;
   document.getElementById('log-success').textContent = success;
   const container = document.getElementById('log-entries');
-  container.innerHTML = logbookEntries.map(e => `
+  container.innerHTML = logbookEntries.map(e => {
+    let hasTel = false;
+    try { hasTel = !!localStorage.getItem('tlog_' + e.id); } catch {}
+    return `
     <div class="log-entry">
       <div class="log-entry-header">
         <span class="log-entry-title">${e.date} — ${e.aircraft}</span>
@@ -1886,9 +1945,12 @@ function renderLogbook() {
       </div>
       <div style="color:var(--sec);font-size:11px;margin-bottom:4px">${e.location} | ${e.duration} min</div>
       <div style="font-size:12px">${e.notes}</div>
-      <button class="btn danger" onclick="deleteLogEntry(${e.id})" style="margin-top:6px;padding:3px 8px;font-size:11px">Delete</button>
-    </div>
-  `).join('');
+      <div class="btn-row" style="margin-top:6px">
+        ${hasTel ? `<button class="btn primary" onclick="bbDecodeLogEntry(${e.id})" style="padding:3px 8px;font-size:11px">📊 Decode</button>` : ''}
+        <button class="btn danger" onclick="deleteLogEntry(${e.id})" style="padding:3px 8px;font-size:11px">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function exportLogCSV() {
@@ -3035,6 +3097,294 @@ function toggleConnMode() {
   } else {
     document.getElementById('conn-hint').textContent = 'Requires USB/serial cable (FTDI, Telemetry Radio) · Chrome / Edge 89+';
   }
+}
+
+// ====================== BLACKBOX DECODER ======================
+let bbDecoded  = null;
+let bbPathLayer = null;
+let bbMarkersLayer = [];
+
+/* ── File import entry point ── */
+function bbImportFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (file.name.toLowerCase().endsWith('.bin')) {
+    alert('Binary .BIN logs are not directly readable in the browser.\n\nTo decode:\n1. Open Mission Planner → DataFlash Logs → "Convert .BIN to .log"\n2. Import the resulting .log text file here.');
+    event.target.value = ''; return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const text = e.target.result;
+    let decoded = null;
+    // Detect ArduPilot text log vs our CSV
+    if (/^FMT,/m.test(text) || /\nGPS,/.test(text) || /\nATT,/.test(text)) {
+      decoded = _parseArduPilotLog(text);
+    } else {
+      decoded = _parseBlackboxCSV(text);
+    }
+    if (decoded && decoded.points.length > 0) {
+      bbDecoded = decoded;
+      _renderDecodedFlight(decoded);
+    } else {
+      alert('Could not parse flight log.\n\nSupported formats:\n• ArduPilot .log (text / SD card)\n• Mission Builder .csv telemetry export');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+/* ── Load from logbook dropdown ── */
+function bbLoadFromLogbook() {
+  const row = document.getElementById('bb-logbook-row');
+  const sel = document.getElementById('bb-logbook-sel');
+  if (!row || !sel) return;
+  const opts = logbookEntries.filter(e => { try { return !!localStorage.getItem('tlog_' + e.id); } catch { return false; } });
+  if (!opts.length) {
+    sel.innerHTML = '<option value="">No saved telemetry — connect FC and press "Finish Flight"</option>';
+  } else {
+    sel.innerHTML = '<option value="">— Select a logbook entry —</option>' +
+      opts.map(e => `<option value="${e.id}">${e.date} · ${e.aircraft} (${e.duration} min)</option>`).join('');
+  }
+  row.style.display = 'block';
+}
+
+function bbLoadEntry() {
+  const id = document.getElementById('bb-logbook-sel')?.value;
+  if (!id) return;
+  let csv = null;
+  try { csv = localStorage.getItem('tlog_' + id); } catch {}
+  if (!csv) { alert('No telemetry data for this entry'); return; }
+  const decoded = _parseBlackboxCSV(csv);
+  if (decoded?.points.length) { bbDecoded = decoded; _renderDecodedFlight(decoded); }
+  else alert('Could not parse saved telemetry');
+}
+
+/* Called from the Decode button inside each logbook entry */
+function bbDecodeLogEntry(id) {
+  let csv = null;
+  try { csv = localStorage.getItem('tlog_' + id); } catch {}
+  if (!csv) return;
+  const decoded = _parseBlackboxCSV(csv);
+  if (decoded?.points.length) { bbDecoded = decoded; closeLogbook(); _renderDecodedFlight(decoded); }
+}
+
+/* ── CSV parser (our own telemetry CSV format) ── */
+function _parseBlackboxCSV(csv) {
+  const lines = csv.trim().split('\n').filter(Boolean);
+  if (lines.length < 2) return null;
+  const header = lines[0].split(',').map(h => h.trim().toLowerCase());
+
+  const idx = (...names) => { for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; } return -1; };
+  const iLat  = idx('lat','latitude');
+  const iLon  = idx('lon','lng','longitude');
+  const iAlt  = idx('alt_rel','altitude','alt','relative_alt');
+  const iSpd  = idx('gndspeed','groundspeed','speed');
+  const iBatt = idx('batt_pct','battery_remaining','battery');
+  const iVolt = idx('voltage','volt');
+  const iHdg  = idx('hdg','heading','yaw');
+  const iTime = idx('time','timestamp');
+  const iRoll = idx('roll');
+  const iPitch= idx('pitch');
+  const iClimb= idx('climb','climbrate','climb_rate');
+
+  if (iLat < 0 || iLon < 0) return null;
+
+  const points = [];
+  for (const line of lines.slice(1)) {
+    const p = line.split(',');
+    const lat = parseFloat(p[iLat]), lon = parseFloat(p[iLon]);
+    if (!isFinite(lat) || !isFinite(lon) || (Math.abs(lat) < 0.0001 && Math.abs(lon) < 0.0001)) continue;
+    points.push({
+      time:  iTime  >= 0 ? p[iTime]?.trim()        : null,
+      lat, lon,
+      alt:   iAlt   >= 0 ? (parseFloat(p[iAlt])   || 0) : 0,
+      spd:   iSpd   >= 0 ? (parseFloat(p[iSpd])   || 0) : 0,
+      batt:  iBatt  >= 0 ? parseFloat(p[iBatt])          : null,
+      volt:  iVolt  >= 0 ? (parseFloat(p[iVolt])  || 0) : 0,
+      hdg:   iHdg   >= 0 ? (parseFloat(p[iHdg])   || 0) : 0,
+      roll:  iRoll  >= 0 ? (parseFloat(p[iRoll])  || 0) : 0,
+      pitch: iPitch >= 0 ? (parseFloat(p[iPitch]) || 0) : 0,
+      climb: iClimb >= 0 ? (parseFloat(p[iClimb]) || 0) : 0,
+    });
+  }
+  return points.length ? _bbSummarize(points, []) : null;
+}
+
+/* ── ArduPilot .log (text DataFlash) parser ── */
+function _parseArduPilotLog(text) {
+  // Build FMT column maps
+  const fmts = {};
+  const lines = text.split('\n');
+  for (const line of lines) {
+    const p = line.trim().split(/,\s*/);
+    if (p[0] !== 'FMT') continue;
+    const name = p[3]?.trim();
+    if (name) fmts[name] = p.slice(5).map(c => c.trim());
+  }
+  function toObj(name, parts) {
+    const cols = fmts[name] || [];
+    const o = {};
+    parts.forEach((v, i) => { if (cols[i]) o[cols[i]] = v?.trim(); });
+    return o;
+  }
+
+  const points = [], events = [];
+  let lastBatt = null;
+
+  for (const line of lines) {
+    const p = line.trim().split(/,\s*/);
+    const type = p[0];
+
+    if (type === 'GPS') {
+      const o = toObj('GPS', p.slice(1));
+      let lat = parseFloat(o.Lat ?? o.LAT ?? o.lat ?? o.Latitude);
+      let lon = parseFloat(o.Lng ?? o.LNG ?? o.Lon ?? o.lon ?? o.Long ?? o.Longitude);
+      let alt = parseFloat(o.Alt ?? o.ALT ?? o.alt ?? o.Altitude ?? '0');
+      // Older ArduPilot stores lat/lon as int×1e7, alt as mm
+      if (isFinite(lat) && Math.abs(lat) > 90)  lat /= 1e7;
+      if (isFinite(lon) && Math.abs(lon) > 180) lon /= 1e7;
+      if (isFinite(alt) && Math.abs(alt) > 10000) alt /= 1000;
+      const spd = parseFloat(o.Spd ?? o.Speed ?? o.SPD ?? '0') || 0;
+      const hdg = parseFloat(o.GCrs ?? o.Yaw  ?? o.HDG ?? '0') || 0;
+      if (isFinite(lat) && isFinite(lon) && Math.abs(lat) > 0.0001) {
+        points.push({ lat, lon, alt, spd, hdg, batt: lastBatt, roll: 0, pitch: 0, climb: 0 });
+      }
+    } else if (type === 'BAT' || type === 'BATT') {
+      const o = toObj(type, p.slice(1));
+      // ArduPilot stores Rem (0-1), Volt, Curr; try to get remaining %
+      const rem  = parseFloat(o.Rem);
+      const remP = isFinite(rem) && rem <= 1 ? rem * 100 : (isFinite(rem) ? rem : null);
+      if (remP != null && remP >= 0 && remP <= 100) lastBatt = remP;
+      if (points.length && lastBatt != null) points[points.length - 1].batt = lastBatt;
+    } else if (type === 'ATT') {
+      const o = toObj('ATT', p.slice(1));
+      if (points.length) {
+        const last = points[points.length - 1];
+        // Older logs store centidegrees (e.g. -340 = -3.4°)
+        let r = parseFloat(o.Roll ?? o.roll ?? '0');
+        let pi= parseFloat(o.Pitch ?? o.pitch ?? '0');
+        if (Math.abs(r) > 180) r /= 100;
+        if (Math.abs(pi) > 90) pi /= 100;
+        last.roll = r; last.pitch = pi;
+      }
+    } else if (type === 'BARO') {
+      const o = toObj('BARO', p.slice(1));
+      const cr = parseFloat(o.CRt ?? o.ClimbRate ?? o.VV ?? '0');
+      if (isFinite(cr) && points.length) points[points.length - 1].climb = cr;
+    } else if (type === 'MODE') {
+      const o = toObj('MODE', p.slice(1));
+      const mode = o.Mode ?? o.mode ?? p[2] ?? 'Unknown';
+      events.push({ type: 'mode', value: mode.trim() });
+    } else if (type === 'EV') {
+      const id = parseInt(p[2]);
+      if (id === 10) events.push({ type: 'armed' });
+      if (id === 11) events.push({ type: 'disarmed' });
+    } else if (type === 'MSG') {
+      const msg = p.slice(2).join(',').trim();
+      if (msg) events.push({ type: 'msg', value: msg });
+    }
+  }
+  return points.length ? _bbSummarize(points, events) : null;
+}
+
+/* ── Summarise decoded points into a result object ── */
+function _bbSummarize(points, events) {
+  let totalDist = 0;
+  for (let i = 1; i < points.length; i++) {
+    totalDist += haversine(points[i-1].lat, points[i-1].lon, points[i].lat, points[i].lon);
+  }
+  const maxAlt  = Math.max(...points.map(p => p.alt || 0));
+  const maxSpd  = Math.max(...points.map(p => p.spd || 0));
+  const battPts = points.filter(p => p.batt != null && isFinite(p.batt) && p.batt >= 0);
+  const minBatt = battPts.length ? Math.min(...battPts.map(p => p.batt)) : null;
+  let durationS = null;
+  const t0 = points[0]?.time, t1 = points[points.length - 1]?.time;
+  if (t0 && t1) {
+    const d0 = new Date(t0), d1 = new Date(t1);
+    if (!isNaN(d0) && !isNaN(d1) && d1 > d0) durationS = (d1 - d0) / 1000;
+  }
+  return { points, totalDist, maxAlt, maxSpd, minBatt, durationS, events: events || [] };
+}
+
+/* ── Render decoded flight in UI ── */
+function _renderDecodedFlight(d) {
+  switchTab('serial');
+  const statsEl = document.getElementById('bb-stats');
+  if (statsEl) statsEl.style.display = 'block';
+
+  const distStr = d.totalDist >= 1000 ? (d.totalDist/1000).toFixed(2)+' km' : Math.round(d.totalDist)+' m';
+  let durStr = '--';
+  if (d.durationS != null) {
+    if (d.durationS >= 3600) {
+      durStr = Math.floor(d.durationS/3600)+'h ' + Math.floor((d.durationS%3600)/60)+'m';
+    } else if (d.durationS >= 60) {
+      durStr = (d.durationS/60).toFixed(1)+' min';
+    } else {
+      durStr = Math.round(d.durationS)+'s';
+    }
+  }
+
+  document.getElementById('bb-dist').textContent     = distStr;
+  document.getElementById('bb-dur').textContent      = durStr;
+  document.getElementById('bb-max-alt').textContent  = d.maxAlt.toFixed(0)+' m';
+  document.getElementById('bb-max-spd').textContent  = d.maxSpd.toFixed(1)+' m/s';
+  document.getElementById('bb-min-batt').textContent = d.minBatt != null ? d.minBatt.toFixed(0)+'%' : '--';
+  document.getElementById('bb-pts').textContent      = d.points.length.toLocaleString();
+
+  // Events timeline
+  const evEl = document.getElementById('bb-events');
+  if (evEl) {
+    evEl.innerHTML = d.events.length
+      ? d.events.map(ev => {
+          if (ev.type === 'armed')    return `<div><span style="color:#f85149">⚡ Armed</span></div>`;
+          if (ev.type === 'disarmed') return `<div><span style="color:#3fb950">◎ Disarmed</span></div>`;
+          if (ev.type === 'mode')     return `<div><span style="color:#58a6ff">⟳ Mode → ${ev.value}</span></div>`;
+          if (ev.type === 'msg')      return `<div><span style="color:#8b949e">✉ ${ev.value}</span></div>`;
+          return '';
+        }).join('')
+      : '<div style="color:var(--sec)">No events recorded in this log</div>';
+  }
+
+  bbShowOnMap();
+}
+
+/* ── Map path display ── */
+function bbShowOnMap() {
+  if (!bbDecoded?.points.length) return;
+  bbClearPath();
+  const lls = bbDecoded.points.map(p => [p.lat, p.lon]);
+  bbPathLayer = L.polyline(lls, {
+    color: '#fd79a8', weight: 2.5, opacity: 0.9,
+    dashArray: '8,5', className: 'bb-path'
+  }).addTo(map);
+  // Start marker (green dot)
+  const sm = L.circleMarker(lls[0], { radius: 6, color: '#3fb950', fillColor: '#3fb950', fillOpacity: 1, weight: 2 })
+    .addTo(map).bindTooltip('Start', { permanent: false });
+  // End marker (red dot)
+  const em = L.circleMarker(lls[lls.length - 1], { radius: 6, color: '#f85149', fillColor: '#f85149', fillOpacity: 1, weight: 2 })
+    .addTo(map).bindTooltip('End', { permanent: false });
+  bbMarkersLayer = [sm, em];
+  try { map.fitBounds(L.latLngBounds(lls), { padding: [40, 40] }); } catch {}
+}
+
+function bbClearPath() {
+  if (bbPathLayer)     { map.removeLayer(bbPathLayer); bbPathLayer = null; }
+  bbMarkersLayer.forEach(m => map.removeLayer(m)); bbMarkersLayer = [];
+}
+
+/* ── Re-export decoded data as clean CSV ── */
+function bbExportCSV() {
+  if (!bbDecoded?.points.length) { alert('No decoded data to export'); return; }
+  const header = 'lat,lon,alt_m,speed_ms,batt_pct,heading_deg,roll_deg,pitch_deg,climb_ms';
+  const rows = bbDecoded.points.map(p =>
+    [p.lat.toFixed(6), p.lon.toFixed(6), (p.alt||0).toFixed(1),
+     (p.spd||0).toFixed(2), p.batt != null ? p.batt.toFixed(0) : '',
+     (p.hdg||0).toFixed(0), (p.roll||0).toFixed(1),
+     (p.pitch||0).toFixed(1), (p.climb||0).toFixed(2)].join(',')
+  );
+  const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'decoded_flight_' + new Date().toISOString().slice(0,10) + '.csv'; a.click();
 }
 </script>
 

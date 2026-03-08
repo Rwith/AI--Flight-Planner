@@ -756,6 +756,10 @@
     if (outcomeEl) outcomeEl.value = 'Successful';
 
     addLog('[flight] Finished — logbook pre-filled (' + durationMin + ' min)');
+
+    // Make the current telemetry log available for the logbook to attach to its entry.
+    // The main script reads window._pendingTelLog in addLogEntry() and clears it afterwards.
+    window._pendingTelLog = telLog.slice();
   }
 
   // ─── Expose to global scope ───────────────────────────────────────────────
@@ -766,5 +770,7 @@
   window.serialClearLog         = clearLog;
   window.serialToggleLogPause   = toggleLogPause;
   window.serialFinishFlight     = finishFlight;
+  // Allow external callers to inspect the current live log
+  window.serialGetTelLog        = () => telLog.slice();
 
 })();
