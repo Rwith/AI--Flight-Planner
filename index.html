@@ -349,15 +349,38 @@
             <label>Action</label>
             <select id="ed-action" onchange="updateSelectedWP()">
               <option value="waypoint">Waypoint</option>
-              <option value="loiter">Loiter</option>
+              <option value="spline">Spline WP</option>
+              <option value="loiter">Loiter (unlimited)</option>
+              <option value="loiter_time">Loiter (time)</option>
+              <option value="loiter_turns">Loiter (turns)</option>
               <option value="photo">Photo Trigger</option>
+              <option value="set_speed">Set Speed</option>
+              <option value="delay">Delay</option>
+              <option value="takeoff">Takeoff</option>
               <option value="land">Land</option>
+              <option value="rtl">RTL</option>
             </select>
           </div>
         </div>
         <div class="form-row" id="loiter-row" style="display:none">
           <label>Loiter Radius (m)</label>
           <input type="number" id="ed-loiter-r" value="20" min="5" max="500" onchange="updateSelectedWP()">
+        </div>
+        <div class="form-row" id="loiter-time-row" style="display:none">
+          <label>Loiter Time (s)</label>
+          <input type="number" id="ed-loiter-time" value="10" min="1" max="3600" onchange="updateSelectedWP()">
+        </div>
+        <div class="form-row" id="loiter-turns-row" style="display:none">
+          <label>Loiter Turns</label>
+          <input type="number" id="ed-loiter-turns" value="1" min="1" max="100" onchange="updateSelectedWP()">
+        </div>
+        <div class="form-row" id="speed-row" style="display:none">
+          <label>Speed (m/s)</label>
+          <input type="number" id="ed-speed" value="5" min="1" max="30" step="0.5" onchange="updateSelectedWP()">
+        </div>
+        <div class="form-row" id="delay-row" style="display:none">
+          <label>Delay (s)</label>
+          <input type="number" id="ed-delay" value="5" min="1" max="3600" onchange="updateSelectedWP()">
         </div>
         <div class="btn-row">
           <button class="btn danger" onclick="deleteSelectedWP()" style="flex:1">Delete</button>
@@ -707,7 +730,13 @@ let weatherData = null;
 let logbookEntries = [];
 let wpIdCounter = 0;
 
-const ACTION_COLORS = { waypoint: '#58a6ff', loiter: '#a29bfe', photo: '#00cec9', land: '#fd79a8' };
+const ACTION_COLORS = {
+  waypoint: '#58a6ff', spline: '#74b9ff',
+  loiter: '#a29bfe', loiter_time: '#a29bfe', loiter_turns: '#a29bfe',
+  photo: '#00cec9', set_speed: '#fdcb6e', delay: '#b2bec3',
+  takeoff: '#00b894', land: '#fd79a8', rtl: '#e17055'
+};
+const LOITER_ACTIONS = new Set(['loiter','loiter_time','loiter_turns']);
 let terrainElevations = null;
 let nfzEnabled = false;
 let nfzLayers = [];
@@ -886,14 +915,29 @@ function deselectWP() {
   renderWPList();
 }
 
+function _syncEditorRows(action) {
+  document.getElementById('loiter-row').style.display       = LOITER_ACTIONS.has(action) ? 'flex' : 'none';
+  document.getElementById('loiter-time-row').style.display  = action === 'loiter_time'   ? 'flex' : 'none';
+  document.getElementById('loiter-turns-row').style.display = action === 'loiter_turns'  ? 'flex' : 'none';
+  document.getElementById('speed-row').style.display        = action === 'set_speed'     ? 'flex' : 'none';
+  document.getElementById('delay-row').style.display        = action === 'delay'         ? 'flex' : 'none';
+  // Alt field is not relevant for RTL or set_speed/delay
+  const noAlt = action === 'rtl' || action === 'set_speed' || action === 'delay';
+  document.getElementById('ed-alt').closest('.form-row').style.opacity = noAlt ? '0.4' : '1';
+}
+
 function showEditor(wp, idx) {
   const ed = document.getElementById('wp-editor');
   ed.classList.add('visible');
   document.getElementById('editor-title').textContent = `Edit Waypoint ${idx + 1}`;
-  document.getElementById('ed-alt').value = wp.alt;
-  document.getElementById('ed-action').value = wp.action;
-  document.getElementById('ed-loiter-r').value = wp.loiterR || 20;
-  document.getElementById('loiter-row').style.display = wp.action === 'loiter' ? 'flex' : 'none';
+  document.getElementById('ed-alt').value          = wp.alt;
+  document.getElementById('ed-action').value       = wp.action;
+  document.getElementById('ed-loiter-r').value     = wp.loiterR    || 20;
+  document.getElementById('ed-loiter-time').value  = wp.loiterTime || 10;
+  document.getElementById('ed-loiter-turns').value = wp.loiterTurns|| 1;
+  document.getElementById('ed-speed').value        = wp.speed      || 5;
+  document.getElementById('ed-delay').value        = wp.delayTime  || 5;
+  _syncEditorRows(wp.action);
 }
 
 function updateEditorFields() {
@@ -904,10 +948,14 @@ function updateEditorFields() {
 function updateSelectedWP() {
   if (selectedIdx < 0 || selectedIdx >= waypoints.length) return;
   const wp = waypoints[selectedIdx];
-  wp.alt = parseFloat(document.getElementById('ed-alt').value) || 50;
-  wp.action = document.getElementById('ed-action').value;
-  wp.loiterR = parseFloat(document.getElementById('ed-loiter-r').value) || 20;
-  document.getElementById('loiter-row').style.display = wp.action === 'loiter' ? 'flex' : 'none';
+  wp.alt         = parseFloat(document.getElementById('ed-alt').value)          || 50;
+  wp.action      = document.getElementById('ed-action').value;
+  wp.loiterR     = parseFloat(document.getElementById('ed-loiter-r').value)     || 20;
+  wp.loiterTime  = parseFloat(document.getElementById('ed-loiter-time').value)  || 10;
+  wp.loiterTurns = parseFloat(document.getElementById('ed-loiter-turns').value) || 1;
+  wp.speed       = parseFloat(document.getElementById('ed-speed').value)        || 5;
+  wp.delayTime   = parseFloat(document.getElementById('ed-delay').value)        || 5;
+  _syncEditorRows(wp.action);
   wp.marker.setIcon(makeWPIcon(selectedIdx, wp.action, true));
   renderWPList();
   updateProfile();
@@ -945,11 +993,24 @@ function exportWaypoints() {
   lines.push(`0\t1\t0\t16\t0\t0\t0\t0\t${homeLat.toFixed(7)}\t${homeLon.toFixed(7)}\t${10}\t1`);
   let idx = 1;
   waypoints.forEach(wp => {
-    const cmd = wp.action === 'loiter' ? 17 : wp.action === 'land' ? 21 : 16;
-    const p3 = wp.action === 'loiter' ? wp.loiterR : 0;
-    lines.push(`${idx}\t0\t3\t${cmd}\t0\t0\t${p3}\t0\t${wp.lat.toFixed(7)}\t${wp.lon.toFixed(7)}\t${wp.alt}\t1`);
+    const a = wp.action;
+    // MAVLink cmd, p1..p4 overrides, lat, lon, alt
+    let cmd, p1=0, p2=0, p3=0, p4=0, lat=wp.lat, lon=wp.lon, alt=wp.alt;
+    if      (a === 'waypoint')      { cmd = 16; }
+    else if (a === 'spline')        { cmd = 82; }
+    else if (a === 'loiter')        { cmd = 17; p3 = wp.loiterR || 20; }
+    else if (a === 'loiter_time')   { cmd = 19; p1 = wp.loiterTime || 10; p3 = wp.loiterR || 20; }
+    else if (a === 'loiter_turns')  { cmd = 18; p1 = wp.loiterTurns || 1; p3 = wp.loiterR || 20; }
+    else if (a === 'photo')         { cmd = 16; }
+    else if (a === 'set_speed')     { cmd = 178; p1 = 1; p2 = wp.speed || 5; p3 = -1; lat=0; lon=0; alt=0; }
+    else if (a === 'delay')         { cmd = 93; p1 = wp.delayTime || 5; lat=0; lon=0; alt=0; }
+    else if (a === 'takeoff')       { cmd = 22; }
+    else if (a === 'land')          { cmd = 21; }
+    else if (a === 'rtl')           { cmd = 20; lat=0; lon=0; alt=0; }
+    else                            { cmd = 16; }
+    lines.push(`${idx}\t0\t3\t${cmd}\t${p1}\t${p2}\t${p3}\t${p4}\t${typeof lat==='number'?lat.toFixed(7):0}\t${typeof lon==='number'?lon.toFixed(7):0}\t${alt}\t1`);
     idx++;
-    if (wp.action === 'photo') {
+    if (a === 'photo') {
       lines.push(`${idx}\t0\t3\t203\t0\t0\t0\t1\t0\t0\t0\t1`);
       idx++;
     }
@@ -977,10 +1038,23 @@ function importWaypoints(event) {
       if (idx === 0) { homeLat = lat; homeLon = lon; homeMarker.setLatLng([lat, lon]); return; }
       if (cmd === 203) return; // skip digicam, handled by photo
       let action = 'waypoint';
-      if (cmd === 17) action = 'loiter';
-      else if (cmd === 21) action = 'land';
-      const loiterR = parseFloat(p[6]) || 20;
-      addWaypointSilent(lat, lon, alt, action, loiterR);
+      if      (cmd === 82)  action = 'spline';
+      else if (cmd === 17)  action = 'loiter';
+      else if (cmd === 19)  action = 'loiter_time';
+      else if (cmd === 18)  action = 'loiter_turns';
+      else if (cmd === 178) action = 'set_speed';
+      else if (cmd === 93)  action = 'delay';
+      else if (cmd === 22)  action = 'takeoff';
+      else if (cmd === 21)  action = 'land';
+      else if (cmd === 20)  action = 'rtl';
+      const extra = {
+        loiterR:     parseFloat(p[6]) || 20,
+        loiterTime:  action === 'loiter_time'  ? parseFloat(p[4]) || 10 : 10,
+        loiterTurns: action === 'loiter_turns' ? parseFloat(p[4]) || 1  : 1,
+        speed:       action === 'set_speed'    ? parseFloat(p[5]) || 5  : 5,
+        delayTime:   action === 'delay'        ? parseFloat(p[4]) || 5  : 5,
+      };
+      addWaypointSilent(lat, lon, alt, action, extra);
     });
     deselectWP(); updatePolyline(); updateProfile(); renderWPList();
   };
@@ -988,11 +1062,19 @@ function importWaypoints(event) {
   event.target.value = '';
 }
 
-function addWaypointSilent(lat, lon, alt, action, loiterR) {
+function addWaypointSilent(lat, lon, alt, action, extra) {
+  // extra can be a plain number (legacy loiterR) or an object with named params
+  const ex = (extra && typeof extra === 'object') ? extra : { loiterR: extra };
   const id = wpIdCounter++;
   const idx = waypoints.length;
   const marker = L.marker([lat, lon], { icon: makeWPIcon(idx, action, false), draggable: true, zIndexOffset: 500 }).addTo(map);
-  const wp = { lat, lon, alt, action, loiterR: loiterR || 20, marker, id };
+  const wp = { lat, lon, alt, action,
+    loiterR:     ex.loiterR     ?? 20,
+    loiterTime:  ex.loiterTime  ?? 10,
+    loiterTurns: ex.loiterTurns ?? 1,
+    speed:       ex.speed       ?? 5,
+    delayTime:   ex.delayTime   ?? 5,
+    marker, id };
   waypoints.push(wp);
   marker.on('click', e => { L.DomEvent.stopPropagation(e); selectWP(waypoints.indexOf(wp)); });
   marker.on('contextmenu', e => {
