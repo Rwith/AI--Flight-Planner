@@ -618,7 +618,7 @@
                   onclick="serialConnect()" style="flex:1">Connect</button>
         </div>
         <div id="conn-hint" style="margin-top:6px;font-size:10px;color:var(--sec)">
-          Requires USB/serial cable (FTDI, Telemetry Radio) · Chrome / Edge 89+
+          Detecting connection environment…
         </div>
       </div>
 
@@ -3075,6 +3075,9 @@ setTimeout(() => startPlane(true), 20000);
 window._serialGetWaypoints = () => waypoints;
 window._serialGetHome      = () => ({ lat: homeLat, lon: homeLon });
 
+// Set the initial USB hint once the DOM is ready.
+window.addEventListener('load', () => toggleConnMode());
+
 function toggleConnMode() {
   // Auto-disconnect whenever the user switches connection mode
   const btn = document.getElementById('serial-connect-btn');
@@ -3095,7 +3098,17 @@ function toggleConnMode() {
       ? 'Built-in bridge active — set Backpack IP, join its WiFi AP, then connect.'
       : 'Join the backpack WiFi AP, run: node mavlink-bridge.js, then connect here.';
   } else {
-    document.getElementById('conn-hint').textContent = 'Requires USB/serial cable (FTDI, Telemetry Radio) · Chrome / Edge 89+';
+    // USB / Serial — hint depends on runtime environment
+    const hint = document.getElementById('conn-hint');
+    if (window.electronBridge?.serial) {
+      hint.textContent = 'Electron desktop — click Connect to choose a COM / ttyUSB port.';
+    } else if ('serial' in navigator) {
+      hint.textContent = 'Web Serial API ready — click Connect and pick your USB/FTDI port from the browser dialog.';
+      hint.style.color = 'var(--green)';
+    } else {
+      hint.textContent = 'Web Serial not supported — use Chrome or Edge 89+, or the Electron desktop app.';
+      hint.style.color = 'var(--red)';
+    }
   }
 }
 

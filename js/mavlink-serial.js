@@ -516,6 +516,98 @@
     return null;
   }
 
+  // ─── Web Serial API connection (browser-native, Chrome/Edge 89+) ─────────
+  async function connectWebSerial () {
+    if (!('serial' in navigator)) {
+      addLog('[usb] Web Serial API not available — use Chrome / Edge 89+, or the Electron desktop app');
+      return;
+    }
+
+    // Let the user pick a port — triggers the browser's OS port-picker dialog.
+    let wsPort;
+    try {
+      wsPort = await navigator.serial.requestPort();
+    } catch (e) {
+      if (e.name !== 'NotFoundError') addLog('[usb] requestPort: ' + e.message);
+      return; // user cancelled
+    }
+
+    const baudVal   = document.getElementById('serial-baud')?.value ?? 'auto';
+    const baudsToTry = baudVal === 'auto' ? AUTO_BAUDS : [parseInt(baudVal, 10)];
+    let foundBaud   = null;
+
+    for (const baud of baudsToTry) {
+      addLog(`[baud] Trying ${baud}…`);
+      try { await wsPort.open({ baudRate: baud }); }
+      catch (e) { addLog('[baud] open: ' + e.message); break; }
+
+      // Fixed baud — no detection needed.
+      if (baudVal !== 'auto') { foundBaud = baud; break; }
+
+      // Auto-detect: listen for a MAVLink HEARTBEAT (msg 0) within 2.5 s.
+      let tempReader;
+      const detected = await new Promise(resolve => {
+        const tid = setTimeout(() => resolve(false), 2500);
+        const parser = new MAVParser(id => {
+          if (id === 0) { clearTimeout(tid); resolve(true); }
+        });
+        tempReader = wsPort.readable.getReader();
+        (async () => {
+          try {
+            while (true) {
+              const { value, done } = await tempReader.read();
+              if (done || !value) break;
+              parser.push(value);
+            }
+          } catch { /* cancelled or closed */ }
+        })();
+      });
+
+      // Release the temp reader before closing / continuing.
+      try { await tempReader.cancel();  } catch {}
+      try { tempReader.releaseLock();   } catch {}
+
+      if (detected) {
+        foundBaud = baud;
+        addLog(`[baud] Heartbeat detected at ${baud} baud`);
+        break;
+      }
+
+      try { await wsPort.close(); } catch {}
+      await new Promise(r => setTimeout(r, 120));
+    }
+
+    if (!foundBaud) {
+      addLog('[baud] Auto-detect failed — pick a baud rate manually and retry');
+      try { await wsPort.close(); } catch {}
+      return;
+    }
+
+    // ── Port is now open at foundBaud.  Wire up persistent I/O. ─────────────
+    port = wsPort;
+
+    const wsWriter = wsPort.writable.getWriter();
+    writer = {
+      write:       d  => wsWriter.write(d),
+      releaseLock: () => { try { wsWriter.releaseLock(); } catch {} }
+    };
+    reader = wsPort.readable.getReader();
+
+    // Physical unplug safety-net (fires before readLoop's catch)
+    wsPort.addEventListener('disconnect', () => {
+      if (port === wsPort) {
+        port = null; writer = null; reader = null;
+        setConnected(false);
+        addLog('[usb] Device unplugged');
+        removeDroneMarker();
+      }
+    });
+
+    setConnected(true);
+    addLog(`[usb] Web Serial connected at ${foundBaud} baud — waiting for heartbeat`);
+    readLoop(new MAVParser(onMessage));
+  }
+
   // ─── Electron IPC serial connection ──────────────────────────────────────
   async function connectIPC () {
     const s = window.electronBridge?.serial;
@@ -597,9 +689,15 @@
       return;
     }
 
-    // ── USB / Serial path (Electron IPC via serialport package) ────────────
+    // ── USB / Serial path ────────────────────────────────────────────────────
+    // Electron: full port list + native baud detection via serialport package.
+    // Browser:  Web Serial API (Chrome / Edge 89+) — native OS port-picker.
     if (writer) { await disconnect(); return; }
-    await connectIPC();
+    if (window.electronBridge?.serial) {
+      await connectIPC();
+    } else {
+      await connectWebSerial();
+    }
   }
 
   async function disconnect () {
