@@ -369,6 +369,8 @@
             const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
             liveAltLog.push({ dist, alt: tele.altRel });
             if (liveAltLog.length > 2000) liveAltLog.splice(0, 200); // cap at 2000 points
+            // Refresh the profile chart live overlay every 10 new points (~1–2 s)
+            if (liveAltLog.length % 10 === 0) window._refreshLiveAltOverlay?.();
           }
         }
         flightStartTime = flightStartTime || Date.now();
@@ -878,6 +880,8 @@
       Object.keys(tele).forEach(k => delete tele[k]);
       liveAltLog = [];
       renderTele();
+      // Remove Live dataset from profile chart so stale data doesn't persist
+      window._refreshLiveAltOverlay?.();
       setUploadStatus('', '');
     }
   }

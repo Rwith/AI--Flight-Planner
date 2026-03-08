@@ -1899,9 +1899,48 @@ function updateProfile() {
     if (ds.label && hiddenByLabel[ds.label]) profileChart.hide(i);
   });
 
-  // Store missionDsIdx for highlightProfilePoint
+  // Store missionDsIdx and scale for highlightProfilePoint / live overlay refresh
   profileChart._missionDsIdx = missionDsIdx;
+  profileChart._distScale    = scale;
 }
+
+// Called by mavlink-serial.js whenever new live altitude data arrives.
+// Updates (or adds) the Live dataset on the existing chart without a full rebuild.
+// Called by mavlink-serial.js to push live altitude data onto the profile chart.
+// Adds the Live dataset on first call; on subsequent calls just replaces its data.
+// Also called with empty liveAltLog on disconnect to remove the overlay.
+window._refreshLiveAltOverlay = function () {
+  if (!profileChart) return;
+  const scale    = profileChart._distScale ?? 1;
+  const liveAlt  = window._getLiveAltPoints?.() || [];
+  const dsIdx    = profileChart.data.datasets.findIndex(ds => ds.label === 'Live');
+
+  if (liveAlt.length === 0) {
+    // Disconnect: remove the Live dataset if present
+    if (dsIdx >= 0) {
+      profileChart.data.datasets.splice(dsIdx, 1);
+      const hasExtras = profileChart.data.datasets.some(ds => ds.label === 'Terrain');
+      profileChart.options.plugins.legend.display = hasExtras;
+      profileChart.update('none');
+    }
+    return;
+  }
+
+  const liveData = liveAlt.map(p => ({ x: parseFloat((p.dist / scale).toFixed(3)), y: p.alt }));
+  if (dsIdx >= 0) {
+    profileChart.data.datasets[dsIdx].data = liveData;
+  } else {
+    profileChart.data.datasets.push({
+      label: 'Live',
+      data: liveData,
+      borderColor: '#f85149', backgroundColor: 'rgba(248,81,73,0.15)',
+      borderWidth: 2, pointRadius: 1.5, fill: false, tension: 0.3,
+      borderDash: [5, 3], order: -1
+    });
+    profileChart.options.plugins.legend.display = true;
+  }
+  profileChart.update('none');
+};
 
 function highlightProfilePoint(idx) {
   if (!profileChart || idx < 0) return;
