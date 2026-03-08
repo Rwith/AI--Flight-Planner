@@ -18,7 +18,13 @@
     51: 196, // MISSION_REQUEST_INT
     73: 38,  // MISSION_ITEM_INT
     74: 20,  // VFR_HUD
-    66: 148  // REQUEST_DATA_STREAM
+    66: 148, // REQUEST_DATA_STREAM
+    // ── DataFlash log download ─────────────────────────────────────────────
+    117: 128, // LOG_REQUEST_LIST
+    118: 56,  // LOG_ENTRY
+    119: 116, // LOG_REQUEST_DATA
+    122: 203, // LOG_REQUEST_END
+    128: 134  // LOG_DATA
   };
 
   function crc16 (data) {
@@ -56,6 +62,11 @@
     return [...new Uint8Array(b)];
   }
   function u16 (v) { return [v & 0xFF, (v >> 8) & 0xFF]; }
+  function u32 (v) {
+    const b = new ArrayBuffer(4);
+    new DataView(b).setUint32(0, v >>> 0, true);
+    return [...new Uint8Array(b)];
+  }
   function i32 (v) {
     const b = new ArrayBuffer(4);
     new DataView(b).setInt32(0, v, true);
@@ -93,6 +104,22 @@
   // streamId: 2=EXTENDED_STATUS(SYS_STATUS/battery), 11=EXTRA2(VFR_HUD/speed)
   function buildRequestDataStream (streamId, rateHz, tSys, tComp) {
     return buildFrame(66, [...u16(rateHz), tSys, tComp, streamId, 1 /*start*/]);
+  }
+
+  // ─── DataFlash log download frames ───────────────────────────────────────
+  // LOG_REQUEST_LIST (117) — wire: start(u16), end(u16), tSys(u8), tComp(u8)
+  function buildLogRequestList (tSys, tComp) {
+    return buildFrame(117, [...u16(0), ...u16(0xFFFF), tSys, tComp]);
+  }
+
+  // LOG_REQUEST_DATA (119) — wire: ofs(u32), count(u32), id(u16), tSys(u8), tComp(u8)
+  function buildLogRequestData (logId, ofs, count, tSys, tComp) {
+    return buildFrame(119, [...u32(ofs), ...u32(count), ...u16(logId), tSys, tComp]);
+  }
+
+  // LOG_REQUEST_END (122) — wire: tSys(u8), tComp(u8)
+  function buildLogRequestEnd (tSys, tComp) {
+    return buildFrame(122, [tSys, tComp]);
   }
 
   function requestStreams (tSys, tComp) {
@@ -189,6 +216,8 @@
   let writer          = null;
   let reader          = null;
   let uploadState     = null;  // { wps, tSys, tComp, resolve, reject }
+  let logListState    = null;  // { entries[], numLogs, timer, resolve, reject }
+  let logDownState    = null;  // { buf, totalSize, bytesReceived, timer, resolve, reject }
   let wsConn          = null;  // active WebSocket (WiFi backpack mode)
   let flightStartTime = null;  // set on first position telemetry received
   let logPaused       = false;
@@ -367,6 +396,53 @@
           uploadState.reject(new Error('MISSION_ACK ' + mType));
         }
         uploadState = null;
+        break;
+      }
+      case 118: { // LOG_ENTRY — wire: time_utc(u32,0), size(u32,4), id(u16,8), num_logs(u16,10), last_log_num(u16,12)
+        if (!logListState) break;
+        const leTimeUtc  = payload.length >= 4 ? dv.getUint32(0, true) : 0;
+        const leSize     = payload.length >= 8 ? dv.getUint32(4, true) : 0;
+        const leId       = payload.length >= 10 ? dv.getUint16(8, true) : 0;
+        const leNumLogs  = payload.length >= 12 ? dv.getUint16(10, true) : 1;
+        logListState.entries.push({ id: leId, size: leSize, timeUtc: leTimeUtc });
+        addLog(`[log] Entry id=${leId} size=${leSize} numLogs=${leNumLogs}`);
+        if (logListState.entries.length >= leNumLogs) {
+          clearTimeout(logListState.timer);
+          const { entries, resolve: res } = logListState;
+          logListState = null;
+          res(entries);
+        }
+        break;
+      }
+      case 128: { // LOG_DATA — wire: ofs(u32,0), id(u16,4), count(u8,6), data[90](7..96)
+        if (!logDownState) break;
+        const ldOfs   = dv.getUint32(0, true);
+        const ldCount = payload[6];
+        if (ldCount === 0) {
+          // End-of-log marker
+          clearTimeout(logDownState.timer);
+          const resolveFn = logDownState.resolve;
+          const buf = logDownState.buf;
+          logDownState = null;
+          resolveFn(buf);
+          break;
+        }
+        const chunk = payload.slice(7, 7 + ldCount);
+        if (ldOfs + ldCount <= logDownState.totalSize) {
+          logDownState.buf.set(chunk, ldOfs);
+        }
+        logDownState.bytesReceived += ldCount;
+        const pct = Math.min(100, Math.round(logDownState.bytesReceived / logDownState.totalSize * 100));
+        document.dispatchEvent(new CustomEvent('bb-dl-progress', {
+          detail: { pct, bytes: logDownState.bytesReceived, total: logDownState.totalSize }
+        }));
+        if (logDownState.bytesReceived >= logDownState.totalSize) {
+          clearTimeout(logDownState.timer);
+          const resolveFn = logDownState.resolve;
+          const buf = logDownState.buf;
+          logDownState = null;
+          resolveFn(buf);
+        }
         break;
       }
     }
@@ -730,6 +806,8 @@
     }
     const upBtn = document.getElementById('upload-btn');
     if (upBtn) upBtn.disabled = !on;
+    const fetchBtn = document.getElementById('bb-fetch-list-btn');
+    if (fetchBtn) fetchBtn.disabled = !on;
     if (!on) {
       // Clear telemetry display, live map marker, and altitude track when disconnected.
       removeDroneMarker();
@@ -860,6 +938,68 @@
     window._pendingTelLog = telLog.slice();
   }
 
+  // ─── DataFlash log list + download ───────────────────────────────────────
+  async function requestLogList () {
+    if (!writer) { addLog('[log] Not connected'); return []; }
+    const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
+
+    return new Promise((resolve) => {
+      if (logListState) { clearTimeout(logListState.timer); logListState = null; }
+      logListState = {
+        entries: [],
+        resolve,
+        reject: resolve.bind(null, []),
+        timer: setTimeout(() => {
+          if (logListState) {
+            const { entries, resolve: res } = logListState;
+            logListState = null;
+            addLog('[log] Log list timeout — got ' + entries.length + ' entries');
+            res(entries);
+          }
+        }, 10000)
+      };
+      writer.write(buildLogRequestList(tSys, tComp)).catch(e => {
+        addLog('[log] ' + e.message);
+        clearTimeout(logListState?.timer);
+        logListState = null;
+        resolve([]);
+      });
+      addLog('[log] Requesting log list from FC…');
+    });
+  }
+
+  async function downloadLog (logId, totalSize) {
+    if (!writer) { addLog('[log] Not connected'); return null; }
+    const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
+
+    return new Promise((resolve) => {
+      if (logDownState) { clearTimeout(logDownState.timer); logDownState = null; }
+      const buf = new Uint8Array(totalSize);
+      const adaptiveTimeout = Math.max(30000, 15000 + Math.ceil(totalSize / 90) * 50);
+      logDownState = {
+        buf, totalSize, bytesReceived: 0,
+        resolve,
+        timer: setTimeout(() => {
+          if (logDownState) {
+            addLog('[log] Download timed out — returning partial data');
+            const { buf: partialBuf, resolve: res } = logDownState;
+            logDownState = null;
+            res(partialBuf);
+          }
+        }, adaptiveTimeout)
+      };
+      writer.write(buildLogRequestData(logId, 0, totalSize, tSys, tComp)).catch(e => {
+        addLog('[log] ' + e.message);
+        clearTimeout(logDownState?.timer);
+        logDownState = null;
+        resolve(null);
+      });
+      addLog(`[log] Downloading log id=${logId} (${(totalSize / 1024).toFixed(1)} KB)…`);
+    });
+  }
+
   // ─── Expose to global scope ───────────────────────────────────────────────
   window.serialConnect          = connect;
   window.serialDisconnect       = disconnect;
@@ -870,5 +1010,8 @@
   window.serialFinishFlight     = finishFlight;
   // Allow external callers to inspect the current live log
   window.serialGetTelLog        = () => telLog.slice();
+  // DataFlash log download via USB/serial
+  window.serialRequestLogList   = requestLogList;
+  window.serialDownloadLog      = downloadLog;
 
 })();

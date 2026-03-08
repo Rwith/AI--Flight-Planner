@@ -748,9 +748,8 @@
       <div class="card">
         <div class="card-title">Blackbox Decoder</div>
         <div style="font-size:11px;color:var(--sec);margin-bottom:8px">
-          Import an ArduPilot <b>.log</b> (text) file from the plane's SD card, or
-          re-load a <b>.csv</b> telemetry export. Entries saved via "Finish Flight" also
-          appear in the logbook selector below.
+          Import an ArduPilot <b>.log</b> file from the SD card, reload a <b>.csv</b>
+          telemetry export, or <b>download directly from the FC</b> over USB while connected.
         </div>
         <!-- Import row -->
         <div class="btn-row" style="margin-bottom:6px">
@@ -760,6 +759,24 @@
                    onchange="bbImportFile(event)">
           </label>
           <button class="btn" onclick="bbLoadFromLogbook()" style="flex:1">📋 Load from Logbook</button>
+        </div>
+        <!-- FC download row -->
+        <div class="btn-row" style="margin-bottom:6px">
+          <button class="btn" id="bb-fetch-list-btn" disabled onclick="bbFetchLogList()" style="flex:1">
+            🔌 Download from FC
+          </button>
+        </div>
+        <!-- FC log list (shown after fetching) -->
+        <div id="bb-fc-list" style="display:none;margin-bottom:6px">
+          <div style="font-size:11px;color:var(--sec);margin-bottom:4px">Logs on flight controller:</div>
+          <div id="bb-fc-entries"></div>
+        </div>
+        <!-- Download progress bar -->
+        <div id="bb-dl-wrap" style="display:none;margin-bottom:6px">
+          <div style="font-size:11px;color:var(--sec);margin-bottom:3px" id="bb-dl-label">Downloading…</div>
+          <div style="background:var(--border);border-radius:4px;height:8px;overflow:hidden">
+            <div id="bb-dl-bar" style="height:100%;width:0%;background:var(--green);transition:width .15s"></div>
+          </div>
         </div>
         <!-- Logbook entry selector (shown on demand) -->
         <div id="bb-logbook-row" style="display:none;margin-bottom:6px">
@@ -3398,6 +3415,202 @@ function bbExportCSV() {
   const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = 'decoded_flight_' + new Date().toISOString().slice(0,10) + '.csv'; a.click();
+}
+
+/* ── FC log list fetch (via USB/serial MAVLink log download protocol) ── */
+async function bbFetchLogList() {
+  if (!window.serialRequestLogList) return;
+  const btn       = document.getElementById('bb-fetch-list-btn');
+  const listWrap  = document.getElementById('bb-fc-list');
+  const entriesEl = document.getElementById('bb-fc-entries');
+
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Fetching…'; }
+  if (listWrap) listWrap.style.display = 'none';
+
+  const entries = await window.serialRequestLogList();
+
+  if (btn) { btn.disabled = false; btn.textContent = '🔌 Download from FC'; }
+
+  if (!entries || !entries.length) {
+    if (entriesEl) entriesEl.innerHTML = '<div style="font-size:11px;color:var(--sec)">No logs found on FC</div>';
+    if (listWrap) listWrap.style.display = 'block';
+    return;
+  }
+
+  entries.sort((a, b) => b.id - a.id); // newest first
+
+  if (entriesEl) {
+    entriesEl.innerHTML = entries.map(e => {
+      const dateStr = e.timeUtc > 0
+        ? new Date(e.timeUtc * 1000).toLocaleString()
+        : `Log #${e.id}`;
+      const sizeStr = e.size >= 1048576 ? (e.size/1048576).toFixed(1)+' MB'
+                    : e.size >= 1024    ? (e.size/1024).toFixed(1)+' KB'
+                    : e.size + ' B';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
+        <div style="flex:1;font-size:11px"><b>#${e.id}</b> · ${dateStr}</div>
+        <div style="font-size:10px;color:var(--sec)">${sizeStr}</div>
+        <button class="btn" style="font-size:10px;padding:2px 7px"
+          onclick="bbDownloadLog(${e.id},${e.size},${e.timeUtc})">Download</button>
+      </div>`;
+    }).join('');
+  }
+  if (listWrap) listWrap.style.display = 'block';
+}
+
+/* ── Download a specific log from FC and decode it ── */
+async function bbDownloadLog(id, size, timeUtc) {
+  if (!window.serialDownloadLog) return;
+  const wrap = document.getElementById('bb-dl-wrap');
+  const bar  = document.getElementById('bb-dl-bar');
+  const lbl  = document.getElementById('bb-dl-label');
+
+  if (wrap) wrap.style.display = 'block';
+  if (bar)  bar.style.width = '0%';
+  if (lbl)  lbl.textContent = `Downloading log #${id}…`;
+
+  const onProgress = ev => {
+    const { pct, bytes, total } = ev.detail;
+    if (bar) bar.style.width = pct + '%';
+    if (lbl) lbl.textContent = `Downloading log #${id}… ${pct}% (${(bytes/1024).toFixed(1)} / ${(total/1024).toFixed(1)} KB)`;
+  };
+  document.addEventListener('bb-dl-progress', onProgress);
+
+  const buf = await window.serialDownloadLog(id, size);
+  document.removeEventListener('bb-dl-progress', onProgress);
+  if (wrap) wrap.style.display = 'none';
+
+  if (!buf) { alert('Download failed or was cancelled'); return; }
+
+  // Try DataFlash binary first, then fall back to text
+  let decoded = parseDataFlashBin(buf);
+  if (!decoded || !decoded.points.length) {
+    const text = new TextDecoder('utf-8', { fatal: false }).decode(buf);
+    if (/^FMT,/m.test(text) || /\nGPS,/.test(text) || /\nATT,/.test(text)) {
+      decoded = _parseArduPilotLog(text);
+    }
+  }
+
+  if (decoded && decoded.points.length) {
+    bbDecoded = decoded;
+    _renderDecodedFlight(decoded);
+  } else {
+    alert('Log downloaded but could not be decoded.\n\nSupported formats: ArduPilot DataFlash binary and text (.log).');
+  }
+}
+
+/* ── ArduPilot DataFlash binary parser ── */
+function parseDataFlashBin(buffer) {
+  const data = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const dv   = new DataView(data.buffer, data.byteOffset, data.byteLength);
+
+  // Byte sizes for each DataFlash format character
+  const SZ = { b:1,B:1,M:1, h:2,H:2,c:2,C:2, i:4,I:4,f:4,e:4,E:4,L:4,n:4, d:8,q:8,Q:8, N:16, Z:64 };
+
+  // fmts: typeId → { name, format, labels[], length }
+  const fmts = {};
+  // Bootstrap: FMT itself (typeId=128) is always 89 bytes
+  // Payload: Type(B,1), Length(B,1), Name(n,4), Format(N,16), Columns(Z,64) = 86 bytes
+  fmts[128] = { name:'FMT', format:'BBnNZ', labels:['Type','Length','Name','Format','Columns'], length:89 };
+
+  const points = [], events = [];
+  let lastBatt = null;
+  let i = 0;
+
+  while (i < data.length - 2) {
+    if (data[i] !== 0xA3 || data[i+1] !== 0x95) { i++; continue; }
+    const typeId = data[i+2];
+    const fmt = fmts[typeId];
+    if (!fmt) { i++; continue; }
+
+    const msgEnd = i + fmt.length;
+    if (msgEnd > data.length) break;
+
+    // Parse fields from payload (offset i+3)
+    let off = i + 3;
+    const fields = {};
+    for (let fi = 0; fi < fmt.format.length; fi++) {
+      const fc  = fmt.format[fi];
+      const lbl = fmt.labels[fi] || ('_' + fi);
+      const sz  = SZ[fc];
+      if (!sz || off + sz > msgEnd) break;
+      let val = null;
+      switch (fc) {
+        case 'b': val = dv.getInt8(off); break;
+        case 'B': case 'M': val = data[off]; break;
+        case 'h': val = dv.getInt16(off, true); break;
+        case 'H': val = dv.getUint16(off, true); break;
+        case 'c': val = dv.getInt16(off, true) * 0.01; break;
+        case 'C': val = dv.getUint16(off, true) * 0.01; break;
+        case 'i': val = dv.getInt32(off, true); break;
+        case 'I': val = dv.getUint32(off, true); break;
+        case 'f': val = dv.getFloat32(off, true); break;
+        case 'e': val = dv.getInt32(off, true) * 0.01; break;
+        case 'E': val = dv.getUint32(off, true) * 0.01; break;
+        case 'L': val = dv.getInt32(off, true) * 1e-7; break;
+        case 'd': val = dv.getFloat64(off, true); break;
+        case 'q': try { val = Number(dv.getBigInt64(off, true));  } catch { val = 0; } break;
+        case 'Q': try { val = Number(dv.getBigUint64(off, true)); } catch { val = 0; } break;
+        case 'n': case 'N': case 'Z':
+          val = String.fromCharCode(...data.slice(off, off + sz)).replace(/\0[\s\S]*/,'').trim();
+          break;
+      }
+      fields[lbl] = val;
+      off += sz;
+    }
+
+    // ── Handle message types ──────────────────────────────────────────────
+    if (typeId === 128) {
+      // Register new message format
+      const t = fields.Type, l = fields.Length, nm = fields.Name, fm = fields.Format, co = fields.Columns;
+      if (t != null && l > 3 && nm && fm) {
+        fmts[t] = { name: nm, format: fm, labels: (co || '').split(',').map(s => s.trim()), length: l };
+      }
+    } else {
+      const name = fmt.name;
+      if (name === 'GPS') {
+        const lat = fields.Lat ?? fields.LAT ?? fields.Latitude;
+        const lon = fields.Lng ?? fields.LNG ?? fields.Lon ?? fields.Longitude;
+        const alt = fields.Alt ?? fields.ALT ?? 0;
+        const spd = fields.Spd ?? fields.Speed ?? 0;
+        const hdg = fields.GCrs ?? fields.Yaw ?? 0;
+        if (lat != null && lon != null && isFinite(lat) && isFinite(lon) && Math.abs(lat) > 0.0001) {
+          points.push({ lat, lon, alt: alt||0, spd: spd||0, hdg: hdg||0, batt: lastBatt, roll:0, pitch:0, climb:0 });
+        }
+      } else if (name === 'BAT' || name === 'BATT') {
+        const rem = fields.Rem ?? fields.BattRem;
+        if (rem != null && isFinite(rem)) {
+          lastBatt = rem <= 1 ? rem * 100 : rem;
+          if (points.length) points[points.length-1].batt = lastBatt;
+        }
+      } else if (name === 'ATT') {
+        if (points.length) {
+          let r = fields.Roll || 0, p = fields.Pitch || 0;
+          if (Math.abs(r) > 180) r /= 100;
+          if (Math.abs(p) > 90)  p /= 100;
+          const last = points[points.length-1];
+          last.roll = r; last.pitch = p;
+        }
+      } else if (name === 'BARO') {
+        const cr = fields.CRt ?? fields.ClimbRate ?? fields.VV;
+        if (cr != null && isFinite(cr) && points.length) points[points.length-1].climb = cr;
+      } else if (name === 'MODE') {
+        const mode = fields.Mode ?? fields.FlightMode ?? fields.mode;
+        if (mode != null) events.push({ type:'mode', value: String(mode) });
+      } else if (name === 'EV') {
+        const evId = fields.Id ?? fields.ID;
+        if (evId === 10) events.push({ type:'armed' });
+        if (evId === 11) events.push({ type:'disarmed' });
+      } else if (name === 'MSG') {
+        const msg = fields.Message ?? fields.Msg ?? fields.message;
+        if (msg) events.push({ type:'msg', value: String(msg) });
+      }
+    }
+
+    i += fmt.length;
+  }
+
+  return points.length ? _bbSummarize(points, events) : null;
 }
 </script>
 
