@@ -418,9 +418,11 @@
         if (!logDownState) break;
         const ldOfs   = dv.getUint32(0, true);
         const ldCount = payload[6];
+        logDownState.lastDataAt = Date.now(); // heartbeat for stall detector
         if (ldCount === 0) {
-          // End-of-log marker
+          // End-of-log marker from FC
           clearTimeout(logDownState.timer);
+          clearInterval(logDownState.retryInterval);
           const resolveFn = logDownState.resolve;
           const buf = logDownState.buf;
           logDownState = null;
@@ -431,13 +433,18 @@
         if (ldOfs + ldCount <= logDownState.totalSize) {
           logDownState.buf.set(chunk, ldOfs);
         }
+        // Advance high-water mark for gap-retry
+        if (ldOfs + ldCount > logDownState.highWaterOfs) {
+          logDownState.highWaterOfs = ldOfs + ldCount;
+        }
         logDownState.bytesReceived += ldCount;
-        const pct = Math.min(100, Math.round(logDownState.bytesReceived / logDownState.totalSize * 100));
+        const ldPct = Math.min(99, Math.round(logDownState.highWaterOfs / logDownState.totalSize * 100));
         document.dispatchEvent(new CustomEvent('bb-dl-progress', {
-          detail: { pct, bytes: logDownState.bytesReceived, total: logDownState.totalSize }
+          detail: { pct: ldPct, bytes: logDownState.highWaterOfs, total: logDownState.totalSize }
         }));
-        if (logDownState.bytesReceived >= logDownState.totalSize) {
+        if (logDownState.highWaterOfs >= logDownState.totalSize) {
           clearTimeout(logDownState.timer);
+          clearInterval(logDownState.retryInterval);
           const resolveFn = logDownState.resolve;
           const buf = logDownState.buf;
           logDownState = null;
@@ -975,14 +982,39 @@
     const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
 
     return new Promise((resolve) => {
-      if (logDownState) { clearTimeout(logDownState.timer); logDownState = null; }
+      if (logDownState) {
+        clearTimeout(logDownState.timer);
+        clearInterval(logDownState.retryInterval);
+        logDownState = null;
+      }
+
       const buf = new Uint8Array(totalSize);
-      const adaptiveTimeout = Math.max(30000, 15000 + Math.ceil(totalSize / 90) * 50);
+      // Timeout: at least 60s; add ~50ms per packet expected
+      const adaptiveTimeout = Math.max(60000, Math.ceil(totalSize / 90) * 55);
+
+      // ── Stall detector: if no data arrives for 4s, re-request from highWaterOfs ──
+      const retryInterval = setInterval(() => {
+        if (!logDownState) { clearInterval(retryInterval); return; }
+        const stalledMs = Date.now() - logDownState.lastDataAt;
+        if (stalledMs >= 4000 && logDownState.highWaterOfs < logDownState.totalSize) {
+          const remaining = logDownState.totalSize - logDownState.highWaterOfs;
+          addLog(`[log] Stall detected at ofs=${logDownState.highWaterOfs} — re-requesting ${(remaining/1024).toFixed(1)} KB`);
+          writer.write(buildLogRequestData(logId, logDownState.highWaterOfs, 0xFFFFFFFF, tSys, tComp))
+            .catch(() => {});
+          logDownState.lastDataAt = Date.now(); // reset so we don't spam
+        }
+      }, 4000);
+
       logDownState = {
-        buf, totalSize, bytesReceived: 0,
+        buf, totalSize,
+        bytesReceived: 0,
+        highWaterOfs:  0,
+        lastDataAt:    Date.now(),
+        retryInterval,
         resolve,
         timer: setTimeout(() => {
           if (logDownState) {
+            clearInterval(logDownState.retryInterval);
             addLog('[log] Download timed out — returning partial data');
             const { buf: partialBuf, resolve: res } = logDownState;
             logDownState = null;
@@ -990,14 +1022,27 @@
           }
         }, adaptiveTimeout)
       };
-      writer.write(buildLogRequestData(logId, 0, totalSize, tSys, tComp)).catch(e => {
-        addLog('[log] ' + e.message);
+
+      // Use 0xFFFFFFFF — tells ArduPilot to stream entire log from offset 0
+      writer.write(buildLogRequestData(logId, 0, 0xFFFFFFFF, tSys, tComp)).catch(e => {
+        addLog('[log] write: ' + e.message);
         clearTimeout(logDownState?.timer);
+        clearInterval(logDownState?.retryInterval);
         logDownState = null;
         resolve(null);
       });
-      addLog(`[log] Downloading log id=${logId} (${(totalSize / 1024).toFixed(1)} KB)…`);
+      addLog(`[log] Downloading log id=${logId} (${(totalSize / 1024).toFixed(1)} KB) — streaming…`);
     });
+  }
+
+  function cancelLogDownload () {
+    if (!logDownState) return;
+    clearTimeout(logDownState.timer);
+    clearInterval(logDownState.retryInterval);
+    const res = logDownState.resolve;
+    logDownState = null;
+    addLog('[log] Download cancelled by user');
+    res(null);
   }
 
   // ─── Expose to global scope ───────────────────────────────────────────────
@@ -1013,5 +1058,6 @@
   // DataFlash log download via USB/serial
   window.serialRequestLogList   = requestLogList;
   window.serialDownloadLog      = downloadLog;
+  window.serialCancelLogDownload = cancelLogDownload;
 
 })();
