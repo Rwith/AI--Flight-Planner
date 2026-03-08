@@ -264,34 +264,6 @@
   #serial-connect-btn[data-on="1"] { background: rgba(248,81,73,.15); border-color: var(--red); color: var(--red); }
 
   /* ── HUD ─────────────────────────────────────────────────────────────────── */
-  #hud {
-    position: absolute; inset: 0; pointer-events: none; z-index: 601;
-    font-family: 'SFMono-Regular', Consolas, monospace; font-size: 12px;
-    color: rgba(255,255,255,.92);
-  }
-  .hud-panel {
-    background: rgba(2,6,18,.58); border: 1px solid rgba(255,255,255,.12);
-    border-radius: 6px; padding: 7px 10px; backdrop-filter: blur(6px);
-  }
-  .hud-label {
-    font-size: 9px; color: rgba(255,255,255,.45);
-    text-transform: uppercase; letter-spacing: .9px; line-height: 1.4;
-  }
-  .hud-bignum {
-    font-size: 30px; font-weight: 700; line-height: 1.05; color: #fff;
-    font-variant-numeric: tabular-nums;
-  }
-  .hud-midnum {
-    font-size: 15px; font-weight: 600; color: #fff;
-    font-variant-numeric: tabular-nums;
-  }
-  .hud-unit { font-size: 10px; color: rgba(255,255,255,.4); }
-  .hud-dim  { font-size: 11px; color: rgba(255,255,255,.5); }
-  #hud-arm  {
-    padding: 2px 14px; border-radius: 4px; font-size: 11px; font-weight: 700;
-    letter-spacing: 1.2px; border: 1px solid rgba(255,255,255,.2);
-    background: rgba(0,0,0,.6);
-  }
   #hud-btn.hud-on { border-color: var(--blue); color: var(--blue); background: rgba(88,166,255,.12); }
 </style>
 </head>
@@ -335,73 +307,6 @@
   <!-- MAP AREA -->
   <div id="map-area">
     <div id="map"></div>
-
-    <!-- ── HUD overlay ───────────────────────────────────────────────────── -->
-    <div id="hud" style="display:none">
-
-      <!-- Top-left: GPS -->
-      <div class="hud-panel" style="position:absolute;top:10px;left:10px;min-width:90px">
-        <div class="hud-label">GPS</div>
-        <div style="display:flex;align-items:baseline;gap:4px;margin-top:2px">
-          <span id="hud-sats" class="hud-bignum" style="font-size:22px">--</span>
-          <span class="hud-unit">sats</span>
-        </div>
-        <div id="hud-fix"  class="hud-dim" style="margin-top:1px">--</div>
-        <div class="hud-dim">HDOP <span id="hud-hdop">--</span></div>
-      </div>
-
-      <!-- Top-center: Compass tape + ARM badge -->
-      <div style="position:absolute;top:10px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:5px">
-        <canvas id="hud-compass" width="300" height="42" style="display:block"></canvas>
-        <div id="hud-arm">DISARMED</div>
-      </div>
-
-      <!-- Top-right: Battery -->
-      <div class="hud-panel" style="position:absolute;top:10px;right:10px;text-align:right;min-width:90px">
-        <div class="hud-label">Battery</div>
-        <div style="display:flex;align-items:baseline;gap:4px;margin-top:2px;justify-content:flex-end">
-          <span id="hud-batt-pct" class="hud-bignum" style="font-size:22px">--%</span>
-        </div>
-        <div style="height:4px;background:rgba(255,255,255,.15);border-radius:2px;margin:4px 0;width:90px;margin-left:auto">
-          <div id="hud-batt-bar" style="height:100%;width:0%;border-radius:2px;background:#3fb950;transition:width .5s,background .5s"></div>
-        </div>
-        <div class="hud-dim"><span id="hud-volt">--V</span> · <span id="hud-curr">--A</span></div>
-      </div>
-
-      <!-- Mid-left: Speed (sits clear of the horizon below) -->
-      <div class="hud-panel" style="position:absolute;top:50%;left:10px;transform:translateY(-70%);text-align:center;min-width:74px">
-        <div class="hud-label">Gnd Spd</div>
-        <div id="hud-spd" class="hud-bignum">--</div>
-        <div class="hud-unit">m/s</div>
-        <div style="margin-top:8px" class="hud-label">Air Spd</div>
-        <div id="hud-aspd" class="hud-midnum">--</div>
-        <div class="hud-unit">m/s</div>
-        <div style="margin-top:8px" class="hud-label">Throttle</div>
-        <div style="height:5px;background:rgba(255,255,255,.15);border-radius:3px;margin-top:3px;width:60px">
-          <div id="hud-thr-fill" style="height:100%;width:0%;background:#58a6ff;border-radius:3px;transition:width .3s"></div>
-        </div>
-        <div id="hud-thr-pct" class="hud-dim" style="margin-top:2px">0%</div>
-      </div>
-
-      <!-- Mid-right: Altitude + climb -->
-      <div class="hud-panel" style="position:absolute;top:50%;right:10px;transform:translateY(-70%);text-align:center;min-width:74px">
-        <div class="hud-label">Alt AGL</div>
-        <div id="hud-alt" class="hud-bignum">--</div>
-        <div class="hud-unit">m</div>
-        <div style="margin-top:8px" class="hud-label">Alt MSL</div>
-        <div id="hud-alt-msl" class="hud-midnum">--</div>
-        <div class="hud-unit">m</div>
-        <div style="margin-top:8px" class="hud-label">Climb</div>
-        <div id="hud-climb" class="hud-midnum">--</div>
-        <div class="hud-unit">m/s</div>
-      </div>
-
-      <!-- Bottom-left: Artificial horizon (above the profile panel) -->
-      <div style="position:absolute;bottom:170px;left:10px">
-        <canvas id="hud-horizon" width="190" height="142" style="display:block"></canvas>
-      </div>
-
-    </div><!-- end #hud -->
 
     <div id="map-hint">Click to place waypoints • Drag to reposition</div>
     <div id="profile-wrap" style="height:160px">
@@ -590,6 +495,57 @@
         </div>
       </div>
 
+      <!-- ── HUD instruments ────────────────────────────────────────────── -->
+      <div class="card" id="hud-card" style="display:none;padding:8px">
+        <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          Instruments
+          <span id="hud-arm" style="padding:2px 10px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:1px;border:1px solid rgba(63,185,80,.4);color:#3fb950">DISARMED</span>
+        </div>
+        <!-- Artificial horizon -->
+        <canvas id="hud-horizon" width="318" height="180" style="display:block;width:100%;border-radius:6px"></canvas>
+        <!-- Compass tape -->
+        <canvas id="hud-compass" width="318" height="44" style="display:block;width:100%;margin-top:6px;border-radius:4px"></canvas>
+        <!-- Data row: speed | alt | battery -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px">
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
+            <div style="font-size:9px;color:var(--sec);text-transform:uppercase;letter-spacing:.6px">Gnd Spd</div>
+            <div id="hud-spd" style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text)">--</div>
+            <div style="font-size:9px;color:var(--sec)">m/s</div>
+            <div style="font-size:9px;color:var(--sec);margin-top:4px;text-transform:uppercase;letter-spacing:.6px">Air Spd</div>
+            <div id="hud-aspd" style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text)">--</div>
+            <div style="font-size:9px;color:var(--sec)">m/s</div>
+            <div style="margin-top:5px;height:4px;background:rgba(255,255,255,.1);border-radius:2px">
+              <div id="hud-thr-fill" style="height:100%;width:0%;background:#58a6ff;border-radius:2px;transition:width .3s"></div>
+            </div>
+            <div id="hud-thr-pct" style="font-size:9px;color:var(--sec);margin-top:1px">THR 0%</div>
+          </div>
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
+            <div style="font-size:9px;color:var(--sec);text-transform:uppercase;letter-spacing:.6px">Alt AGL</div>
+            <div id="hud-alt" style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text)">--</div>
+            <div style="font-size:9px;color:var(--sec)">m</div>
+            <div style="font-size:9px;color:var(--sec);margin-top:4px;text-transform:uppercase;letter-spacing:.6px">Alt MSL</div>
+            <div id="hud-alt-msl" style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text)">--</div>
+            <div style="font-size:9px;color:var(--sec)">m</div>
+            <div style="font-size:9px;color:var(--sec);margin-top:4px;text-transform:uppercase;letter-spacing:.6px">Climb</div>
+            <div id="hud-climb" style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums">--</div>
+            <div style="font-size:9px;color:var(--sec)">m/s</div>
+          </div>
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
+            <div style="font-size:9px;color:var(--sec);text-transform:uppercase;letter-spacing:.6px">Battery</div>
+            <div id="hud-batt-pct" style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:#3fb950">--%</div>
+            <div style="height:4px;background:rgba(255,255,255,.1);border-radius:2px;margin:4px 0">
+              <div id="hud-batt-bar" style="height:100%;width:0%;background:#3fb950;border-radius:2px;transition:width .5s,background .5s"></div>
+            </div>
+            <div style="font-size:9px;color:var(--sec)"><span id="hud-volt">--V</span></div>
+            <div style="font-size:9px;color:var(--sec)"><span id="hud-curr">--A</span></div>
+            <div style="font-size:9px;color:var(--sec);margin-top:4px;text-transform:uppercase;letter-spacing:.6px">GPS</div>
+            <div id="hud-sats" style="font-size:13px;font-weight:600;color:var(--text)">--</div>
+            <div id="hud-fix" style="font-size:9px;color:var(--sec)">--</div>
+            <div style="font-size:9px;color:var(--sec)">HDOP <span id="hud-hdop">--</span></div>
+          </div>
+        </div>
+      </div>
+
       <!-- ── Blackbox / Live Telemetry ──────────────────────────────────── -->
       <div class="card">
         <div class="card-title">Blackbox — Live Telemetry</div>
@@ -752,7 +708,7 @@ let insertHideTimer = null;
 let currentTileLayer = null;
 
 // ====================== MAP INIT ======================
-const map = L.map('map', { center: [-26.65, 153.06], zoom: 14, zoomControl: true });
+const map = L.map('map', { center: [-26.65, 153.06], zoom: 14, zoomControl: false });
 // CachedTileLayer is defined later in the script block but hoisted — use L.tileLayer here
 // then swap to CachedTileLayer once it's available (see INIT section).
 currentTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
@@ -2243,10 +2199,10 @@ let _hudVisible = false;
 
 function toggleHUD() {
   _hudVisible = !_hudVisible;
-  document.getElementById('hud').style.display = _hudVisible ? 'block' : 'none';
+  document.getElementById('hud-card').style.display = _hudVisible ? 'block' : 'none';
   document.getElementById('hud-btn').classList.toggle('hud-on', _hudVisible);
   document.getElementById('hud-btn').textContent = _hudVisible ? 'HUD ✓' : 'HUD';
-  if (_hudVisible) hudUpdate({}); // render blank state immediately
+  if (_hudVisible) { switchTab('serial'); hudUpdate({}); }
 }
 
 // Called from mavlink-serial.js renderTele() via window.hudUpdate
