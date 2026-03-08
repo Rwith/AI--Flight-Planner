@@ -268,6 +268,17 @@
 
   /* ── HUD ─────────────────────────────────────────────────────────────────── */
   #hud-btn.hud-on { border-color: var(--blue); color: var(--blue); background: rgba(88,166,255,.12); }
+  /* DRAG-TO-REORDER */
+  .wp-item { cursor: grab; }
+  .wp-item.drag-over { border-color: var(--yellow) !important; background: rgba(210,153,34,.1) !important; }
+  .wp-item.dragging  { opacity: 0.4; }
+  /* RALLY POINTS */
+  .rally-item { display:flex; align-items:center; gap:8px; background:var(--card); border:1px solid var(--border); border-radius:6px; padding:6px 10px; }
+  /* NO-FLY WINDOW */
+  .fwin-block { display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px; font-size:11px; margin-bottom:4px; }
+  .fwin-fly    { background:rgba(63,185,80,.12); border:1px solid rgba(63,185,80,.4); color:var(--green); }
+  .fwin-caution{ background:rgba(210,153,34,.12); border:1px solid rgba(210,153,34,.4); color:var(--yellow); }
+  .fwin-nofly  { background:rgba(248,81,73,.12);  border:1px solid rgba(248,81,73,.4);  color:var(--red); }
 </style>
 </head>
 <body>
@@ -280,6 +291,8 @@
   <label style="font-size:11px;color:var(--sec);white-space:nowrap">Default Alt (m):</label>
   <input id="default-alt" type="number" value="50" min="0" max="500" style="width:60px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 6px;font-size:12px;outline:none">
   <div class="spacer"></div>
+  <button class="topbtn" id="undo-btn" onclick="undo()" style="opacity:.4" disabled title="Undo (Ctrl+Z)">↩ Undo</button>
+  <button class="topbtn" id="redo-btn" onclick="redo()" style="opacity:.4" disabled title="Redo (Ctrl+Y)">↪ Redo</button>
   <button class="topbtn" onclick="exportWaypoints()">Export .waypoints</button>
   <button class="topbtn" onclick="exportKML()">Export KML</button>
   <label class="topbtn" style="cursor:pointer">Import <input type="file" id="import-file" accept=".waypoints,.txt" style="display:none" onchange="importWaypoints(event)"></label>
@@ -296,6 +309,8 @@
   <div class="ctx-item" id="ctx-dark"      onclick="ctxSetTile('dark')">Dark</div>
   <div class="ctx-item" id="ctx-satellite" onclick="ctxSetTile('satellite')">Satellite</div>
   <div class="ctx-item" id="ctx-topo"      onclick="ctxSetTile('topo')">Topography</div>
+  <div style="height:1px;background:var(--border);margin:4px 0"></div>
+  <div class="ctx-item"                    onclick="if(_ctxLatLng)addRallyPoint(_ctxLatLng.lat,_ctxLatLng.lng);closeMapCtx()">Add Rally Point</div>
   <div style="height:1px;background:var(--border);margin:4px 0"></div>
   <div class="ctx-item" id="ctx-nfz-item"  onclick="toggleNFZ();closeMapCtx()">NFZ</div>
   <div class="ctx-item"                    onclick="downloadTilesForView();closeMapCtx()">Cache Tiles</div>
@@ -470,8 +485,18 @@
           <div class="stat-card"><div class="stat-val" id="ms-range">0 m</div><div class="stat-label">Max Range</div></div>
         </div>
       </div>
+      <div id="loiter-overlap-warn" style="display:none;background:rgba(210,153,34,.12);border:1px solid rgba(210,153,34,.5);border-radius:6px;padding:7px 10px;font-size:11px;color:var(--yellow)"></div>
       <div id="no-wp">No waypoints yet.<br>Click the map to place them.</div>
       <div id="wp-list"></div>
+      <!-- RALLY POINTS -->
+      <div class="card" style="padding:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div class="card-title" style="margin:0">Rally Points</div>
+          <button class="btn" onclick="exportRallyPoints()" style="font-size:10px;padding:3px 8px">Export rally.txt</button>
+        </div>
+        <div style="font-size:10px;color:var(--sec);margin-bottom:6px">Right-click the map to add a rally point (ArduPilot RTL fallback target)</div>
+        <div id="rally-list"></div>
+      </div>
     </div>
 
     <!-- WEATHER TAB -->
@@ -532,6 +557,10 @@
       <div class="card">
         <div class="card-title">Sun &amp; Golden Hour</div>
         <div id="sun-content" style="color:var(--sec);font-size:12px;text-align:center">Awaiting weather data…</div>
+      </div>
+      <div class="card" id="flight-window-card" style="display:none">
+        <div class="card-title">Flight Windows — Next 12h</div>
+        <div id="flight-window-content"></div>
       </div>
       <button class="btn primary" onclick="fetchWeather()" style="width:100%">Refresh Weather</button>
     </div>
@@ -791,6 +820,14 @@ let profileCollapsed = false;
 let weatherData = null;
 let logbookEntries = [];
 let wpIdCounter = 0;
+// Undo/Redo
+let undoStack = [], redoStack = [];
+// Drag-to-reorder
+let _dragSrcIdx = -1;
+// Snap-to-bearing
+let _shiftHeld = false;
+// Rally points
+let rallyPoints = [];
 
 const ACTION_COLORS = {
   waypoint: '#58a6ff', spline: '#74b9ff',
@@ -855,6 +892,10 @@ map.on('click', e => {
   addWaypoint(e.latlng.lat, e.latlng.lng, alt, 'waypoint');
 });
 
+// Shift key tracking (for snap-to-bearing)
+document.addEventListener('keydown', e => { if (e.key === 'Shift') _shiftHeld = true; });
+document.addEventListener('keyup',   e => { if (e.key === 'Shift') _shiftHeld = false; });
+
 // ====================== WAYPOINT ICON ======================
 function makeWPIcon(idx, action, selected) {
   const col = ACTION_COLORS[action] || '#58a6ff';
@@ -868,8 +909,109 @@ function makeWPIcon(idx, action, selected) {
   });
 }
 
+// ====================== UNDO / REDO ======================
+function _snapshotWPs() {
+  return waypoints.map(wp => ({
+    lat:wp.lat,lon:wp.lon,alt:wp.alt,action:wp.action,
+    holdTime:wp.holdTime,loiterR:wp.loiterR,loiterTime:wp.loiterTime,
+    loiterTurns:wp.loiterTurns,speedType:wp.speedType,speed:wp.speed,
+    delayTime:wp.delayTime,yawHeading:wp.yawHeading,yawSpeed:wp.yawSpeed,
+    yawRel:wp.yawRel,jumpWP:wp.jumpWP,jumpRepeat:wp.jumpRepeat,
+    servoNum:wp.servoNum,servoPWM:wp.servoPWM,id:wp.id
+  }));
+}
+function pushUndo() {
+  undoStack.push({ wps: _snapshotWPs(), selIdx: selectedIdx });
+  if (undoStack.length > 60) undoStack.shift();
+  redoStack = [];
+  _updateUndoBtns();
+}
+function _updateUndoBtns() {
+  const u = document.getElementById('undo-btn'), r = document.getElementById('redo-btn');
+  if (u) { u.disabled = !undoStack.length; u.style.opacity = undoStack.length ? '1' : '0.4'; }
+  if (r) { r.disabled = !redoStack.length;  r.style.opacity = redoStack.length  ? '1' : '0.4'; }
+}
+function _restoreSnapshot(snap) {
+  waypoints.forEach(wp => map.removeLayer(wp.marker));
+  waypoints = []; selectedIdx = snap.selIdx;
+  snap.wps.forEach(d => addWaypointSilent(d.lat, d.lon, d.alt, d.action, d));
+  waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, i === selectedIdx)));
+  terrainElevations = null;
+  updatePolyline(); updateProfile(); renderWPList();
+  if (selectedIdx >= 0 && selectedIdx < waypoints.length) showEditor(waypoints[selectedIdx], selectedIdx);
+  else document.getElementById('wp-editor').classList.remove('visible');
+}
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push({ wps: _snapshotWPs(), selIdx: selectedIdx });
+  _restoreSnapshot(undoStack.pop());
+  _updateUndoBtns();
+}
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push({ wps: _snapshotWPs(), selIdx: selectedIdx });
+  _restoreSnapshot(redoStack.pop());
+  _updateUndoBtns();
+}
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && !e.shiftKey && e.key === 'z') { e.preventDefault(); undo(); }
+  if (e.ctrlKey && (e.key === 'y' || (e.shiftKey && e.key === 'Z'))) { e.preventDefault(); redo(); }
+});
+
+// ====================== SNAP TO BEARING ======================
+function _applyBearingSnap(wp, latlng) {
+  const i = waypoints.indexOf(wp);
+  if (i <= 0) return [latlng.lat, latlng.lng];
+  const prev = waypoints[i - 1];
+  const dlat = latlng.lat - prev.lat;
+  const dlon = (latlng.lng - prev.lng) * Math.cos(prev.lat * Math.PI / 180);
+  const rawBearing = Math.atan2(dlon, dlat) * 180 / Math.PI;
+  const snapped = Math.round(rawBearing / 45) * 45;
+  const dist = haversine(prev.lat, prev.lng ?? prev.lon, latlng.lat, latlng.lng);
+  const R = 6371000;
+  const snapRad = snapped * Math.PI / 180;
+  const lat1 = prev.lat * Math.PI / 180;
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(dist / R) + Math.cos(lat1) * Math.sin(dist / R) * Math.cos(snapRad));
+  const lon2 = (prev.lng ?? prev.lon) * Math.PI / 180 + Math.atan2(Math.sin(snapRad) * Math.sin(dist / R) * Math.cos(lat1), Math.cos(dist / R) - Math.sin(lat1) * Math.sin(lat2));
+  return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
+}
+
+// ====================== SHARED MARKER EVENT ATTACHMENT ======================
+function _attachMarkerEvents(marker, wp) {
+  marker.on('click', e => { L.DomEvent.stopPropagation(e); selectWP(waypoints.indexOf(wp)); });
+  marker.on('contextmenu', e => {
+    L.DomEvent.stopPropagation(e);
+    const i = waypoints.indexOf(wp);
+    L.popup().setLatLng(e.latlng)
+      .setContent(`<a class="wp-popup-del" onclick="deleteWPByIdx(${i});map.closePopup()">🗑 Delete WP${i + 1}</a>`)
+      .openOn(map);
+  });
+  marker.on('drag', e => {
+    let pos = e.target.getLatLng();
+    if (_shiftHeld) {
+      const [slat, slon] = _applyBearingSnap(wp, pos);
+      e.target.setLatLng([slat, slon]);
+      pos = { lat: slat, lng: slon };
+    }
+    updatePolyline();
+  });
+  marker.on('dragend', e => {
+    let p = e.target.getLatLng();
+    if (_shiftHeld) {
+      const [slat, slon] = _applyBearingSnap(wp, p);
+      e.target.setLatLng([slat, slon]);
+      p = { lat: slat, lng: slon };
+    }
+    wp.lat = p.lat; wp.lon = p.lng;
+    updatePolyline(); updateProfile();
+    const i = waypoints.indexOf(wp);
+    if (selectedIdx === i) updateEditorFields();
+  });
+}
+
 // ====================== ADD WAYPOINT ======================
 function addWaypoint(lat, lon, alt, action) {
+  pushUndo();
   const id = wpIdCounter++;
   const idx = waypoints.length;
   const marker = L.marker([lat, lon], {
@@ -877,27 +1019,15 @@ function addWaypoint(lat, lon, alt, action) {
     draggable: true,
     zIndexOffset: 500
   }).addTo(map);
-
-  const wp = { lat, lon, alt, action, loiterR: 20, marker, id };
+  const wp = {
+    lat, lon, alt, action, id, marker,
+    holdTime:0, loiterR:20, loiterTime:10, loiterTurns:1,
+    speedType:1, speed:5, delayTime:5,
+    yawHeading:0, yawSpeed:0, yawRel:0,
+    jumpWP:1, jumpRepeat:1, servoNum:9, servoPWM:1500
+  };
   waypoints.push(wp);
-
-  marker.on('click', e => { L.DomEvent.stopPropagation(e); selectWP(waypoints.indexOf(wp)); });
-  marker.on('contextmenu', e => {
-    L.DomEvent.stopPropagation(e);
-    const i = waypoints.indexOf(wp);
-    L.popup({ className: 'dark-popup' })
-      .setLatLng(e.latlng)
-      .setContent(`<a class="wp-popup-del" onclick="deleteWPByIdx(${i});map.closePopup()">🗑 Delete Waypoint ${i + 1}</a>`)
-      .openOn(map);
-  });
-  marker.on('dragend', e => {
-    const p = e.target.getLatLng();
-    wp.lat = p.lat; wp.lon = p.lng;
-    updatePolyline(); updateProfile();
-    if (selectedIdx === waypoints.indexOf(wp)) updateEditorFields();
-  });
-  marker.on('drag', () => { updatePolyline(); });
-
+  _attachMarkerEvents(marker, wp);
   selectWP(idx);
   updatePolyline();
   updateProfile();
@@ -932,23 +1062,125 @@ function updatePolyline() {
 }
 
 // ====================== WP LIST RENDER ======================
+function _fmtTime(s) {
+  if (s < 60) return Math.round(s) + 's';
+  return Math.floor(s / 60) + 'm ' + Math.round(s % 60) + 's';
+}
+function _legSpeed(i) {
+  // Find last set_speed before or at leg i
+  let spd = 15; // m/s default
+  for (let j = 0; j <= i; j++) {
+    if (waypoints[j].action === 'set_speed') spd = waypoints[j].speed || spd;
+  }
+  // Wind adjustment
+  if (weatherData && i > 0) {
+    const windSpd = weatherData.current_weather.windspeed / 3.6; // km/h → m/s
+    const windDir = weatherData.current_weather.winddirection;   // FROM direction
+    const prev = waypoints[i - 1], cur = waypoints[i];
+    const dlat = cur.lat - prev.lat;
+    const dlon = (cur.lon - prev.lon) * Math.cos(prev.lat * Math.PI / 180);
+    const legBear = Math.atan2(dlon, dlat) * 180 / Math.PI;
+    const windTo = (windDir + 180) % 360;
+    const relAngle = (windTo - legBear + 360) % 360;
+    const tailwind = windSpd * Math.cos(relAngle * Math.PI / 180);
+    spd = Math.max(2, spd + tailwind);
+  }
+  return spd;
+}
 function renderWPList() {
   updateMissionStats();
   const list = document.getElementById('wp-list');
   const noWP = document.getElementById('no-wp');
-  if (waypoints.length === 0) { list.innerHTML = ''; noWP.style.display = 'block'; return; }
+  if (waypoints.length === 0) { list.innerHTML = ''; noWP.style.display = 'block'; checkLoiterOverlaps(); return; }
   noWP.style.display = 'none';
+
+  // Pre-compute cumulative ETAs
+  const cumulETA = [0];
+  for (let i = 1; i < waypoints.length; i++) {
+    const d = haversine(waypoints[i-1].lat, waypoints[i-1].lon, waypoints[i].lat, waypoints[i].lon);
+    const spd = _legSpeed(i);
+    let extra = 0;
+    const wp = waypoints[i];
+    if (wp.action === 'loiter_time')  extra = wp.loiterTime  || 0;
+    if (wp.action === 'loiter_turns') extra = ((2 * Math.PI * (wp.loiterR || 20)) / spd) * (wp.loiterTurns || 1);
+    if (wp.action === 'delay')        extra = wp.delayTime   || 0;
+    if (wp.action === 'waypoint' || wp.action === 'spline') extra = wp.holdTime || 0;
+    cumulETA.push(cumulETA[i - 1] + d / spd + extra);
+  }
+
   list.innerHTML = waypoints.map((wp, i) => {
     const col = ACTION_COLORS[wp.action] || '#58a6ff';
-    return `<div class="wp-item${selectedIdx === i ? ' selected' : ''}" onclick="selectWP(${i})">
+    let legStr = '';
+    if (i > 0) {
+      const d = haversine(waypoints[i-1].lat, waypoints[i-1].lon, wp.lat, wp.lon);
+      const dStr = d >= 1000 ? (d/1000).toFixed(1)+'km' : Math.round(d)+'m';
+      legStr = ` · ${dStr} · +${_fmtTime(cumulETA[i] - cumulETA[i-1])} (Σ ${_fmtTime(cumulETA[i])})`;
+    }
+    return `<div class="wp-item${selectedIdx === i ? ' selected' : ''}"
+        onclick="selectWP(${i})" draggable="true"
+        ondragstart="wpDragStart(event,${i})"
+        ondragover="wpDragOver(event)"
+        ondragleave="wpDragLeave(event)"
+        ondrop="wpDrop(event,${i})"
+        ondragend="wpDragEnd(event)">
+      <span style="color:var(--sec);font-size:14px;cursor:grab;padding:0 2px">⠿</span>
       <div class="wp-dot" style="background:${col};color:#000">${i + 1}</div>
       <div class="wp-info">
         <div class="wp-num">WP${i + 1} — ${wp.action}</div>
-        <div class="wp-details">${wp.alt}m AGL &nbsp;|&nbsp; ${wp.lat.toFixed(5)}, ${wp.lon.toFixed(5)}</div>
+        <div class="wp-details">${wp.alt}m AGL${legStr}</div>
       </div>
       <span class="wp-del" onclick="event.stopPropagation();deleteWPByIdx(${i})">✕</span>
     </div>`;
   }).join('');
+
+  checkLoiterOverlaps();
+  renderRallyList();
+}
+
+// ====================== DRAG TO REORDER ======================
+function wpDragStart(e, idx) {
+  _dragSrcIdx = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  e.currentTarget.classList.add('dragging');
+}
+function wpDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drag-over');
+}
+function wpDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+function wpDragEnd(e)   { e.currentTarget.classList.remove('dragging'); }
+function wpDrop(e, targetIdx) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (_dragSrcIdx < 0 || _dragSrcIdx === targetIdx) { _dragSrcIdx = -1; return; }
+  pushUndo();
+  const [moved] = waypoints.splice(_dragSrcIdx, 1);
+  waypoints.splice(targetIdx, 0, moved);
+  // Adjust selectedIdx
+  if      (selectedIdx === _dragSrcIdx)                               selectedIdx = targetIdx;
+  else if (_dragSrcIdx < selectedIdx && targetIdx >= selectedIdx)    selectedIdx--;
+  else if (_dragSrcIdx > selectedIdx && targetIdx <= selectedIdx)    selectedIdx++;
+  _dragSrcIdx = -1;
+  terrainElevations = null;
+  waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, i === selectedIdx)));
+  updatePolyline(); updateProfile(); renderWPList();
+}
+
+// ====================== LOITER OVERLAP DETECTION ======================
+function checkLoiterOverlaps() {
+  const loiters = waypoints.filter(w => LOITER_ACTIONS.has(w.action));
+  let count = 0;
+  for (let a = 0; a < loiters.length; a++) {
+    for (let b = a + 1; b < loiters.length; b++) {
+      const dist = haversine(loiters[a].lat, loiters[a].lon, loiters[b].lat, loiters[b].lon);
+      if (dist < (loiters[a].loiterR || 20) + (loiters[b].loiterR || 20)) count++;
+    }
+  }
+  const el = document.getElementById('loiter-overlap-warn');
+  if (!el) return;
+  el.style.display = count ? 'block' : 'none';
+  if (count) el.textContent = `⚠ ${count} loiter zone overlap${count > 1 ? 's' : ''} — circles intersect, verify flight path`;
 }
 
 // ====================== SELECT / DESELECT ======================
@@ -1058,6 +1290,7 @@ function deleteSelectedWP() { if (selectedIdx >= 0) deleteWPByIdx(selectedIdx); 
 
 function deleteWPByIdx(idx) {
   if (idx < 0 || idx >= waypoints.length) return;
+  pushUndo();
   terrainElevations = null;
   map.removeLayer(waypoints[idx].marker);
   waypoints.splice(idx, 1);
@@ -1070,6 +1303,7 @@ function deleteWPByIdx(idx) {
 
 function clearMission() {
   if (!confirm('Clear all waypoints?')) return;
+  pushUndo();
   stopPlane();
   terrainElevations = null;
   waypoints.forEach(wp => map.removeLayer(wp.marker));
@@ -1191,17 +1425,7 @@ function addWaypointSilent(lat, lon, alt, action, extra) {
     servoPWM:    ex.servoPWM    ?? 1500,
     marker, id };
   waypoints.push(wp);
-  marker.on('click', e => { L.DomEvent.stopPropagation(e); selectWP(waypoints.indexOf(wp)); });
-  marker.on('contextmenu', e => {
-    L.DomEvent.stopPropagation(e);
-    const i = waypoints.indexOf(wp);
-    L.popup().setLatLng(e.latlng).setContent(`<a class="wp-popup-del" onclick="deleteWPByIdx(${i});map.closePopup()">🗑 Delete WP${i + 1}</a>`).openOn(map);
-  });
-  marker.on('dragend', e => {
-    const p = e.target.getLatLng(); wp.lat = p.lat; wp.lon = p.lng;
-    updatePolyline(); updateProfile();
-  });
-  marker.on('drag', () => updatePolyline());
+  _attachMarkerEvents(marker, wp);
 }
 
 // ====================== WIND PARTICLES ======================
@@ -1360,6 +1584,8 @@ function renderWeather(data) {
   setWindParticles(parseFloat(speed), dir);
   renderWindRose(data);
   const mc = map.getCenter(); renderSunCard(mc.lat, mc.lng);
+  renderFlightWindows(data);
+  updateMissionStats(); // refresh wind-adjusted ETA
 
   // Forecast strip - next 24 hours
   const strip = document.getElementById('forecast-strip');
@@ -1381,6 +1607,57 @@ function renderWeather(data) {
   }
 }
 
+// ====================== RALLY POINTS ======================
+function makeRallyIcon(idx) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:22px;height:22px;border-radius:4px;background:#ff922b;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:10px;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.6)">R${idx+1}</div>`,
+    iconSize: [22, 22], iconAnchor: [11, 11]
+  });
+}
+function addRallyPoint(lat, lon) {
+  const defaultAlt = parseInt(document.getElementById('default-alt').value) || 50;
+  const marker = L.marker([lat, lon], { icon: makeRallyIcon(rallyPoints.length), draggable: true, zIndexOffset: 600 }).addTo(map);
+  const rp = { lat, lon, alt: defaultAlt, marker };
+  rallyPoints.push(rp);
+  marker.on('dragend', e => { const p = e.target.getLatLng(); rp.lat = p.lat; rp.lon = p.lng; renderRallyList(); });
+  marker.on('click', e => L.DomEvent.stopPropagation(e));
+  renderRallyList();
+}
+function deleteRallyPoint(idx) {
+  map.removeLayer(rallyPoints[idx].marker);
+  rallyPoints.splice(idx, 1);
+  rallyPoints.forEach((rp, i) => rp.marker.setIcon(makeRallyIcon(i)));
+  renderRallyList();
+}
+function exportRallyPoints() {
+  if (!rallyPoints.length) { alert('No rally points set'); return; }
+  const lines = ['QGC WPL 110'];
+  lines.push(`0\t1\t0\t16\t0\t0\t0\t0\t${homeLat.toFixed(7)}\t${homeLon.toFixed(7)}\t0\t1`);
+  rallyPoints.forEach((rp, i) => {
+    lines.push(`${i+1}\t0\t0\t5100\t0\t0\t0\t0\t${rp.lat.toFixed(7)}\t${rp.lon.toFixed(7)}\t${rp.alt}\t1`);
+  });
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'rally.txt'; a.click();
+}
+function renderRallyList() {
+  const el = document.getElementById('rally-list');
+  if (!el) return;
+  if (!rallyPoints.length) {
+    el.innerHTML = '<div style="color:var(--sec);font-size:11px;text-align:center;padding:4px">None — right-click map to add</div>';
+    return;
+  }
+  el.innerHTML = rallyPoints.map((rp, i) => `
+    <div class="rally-item" style="margin-bottom:4px">
+      <div style="width:20px;height:20px;border-radius:3px;background:#ff922b;color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">R${i+1}</div>
+      <div style="flex:1;font-size:11px">
+        <div style="font-weight:600">Rally ${i+1}</div>
+        <div style="color:var(--sec)">${rp.lat.toFixed(5)}, ${rp.lon.toFixed(5)} · ${rp.alt}m</div>
+      </div>
+      <span style="color:var(--red);cursor:pointer;font-size:13px;padding:2px 4px" onclick="deleteRallyPoint(${i})">✕</span>
+    </div>`).join('');
+}
+
 // ====================== MISSION STATS ======================
 function updateMissionStats() {
   const card = document.getElementById('mission-stats-card');
@@ -1389,22 +1666,24 @@ function updateMissionStats() {
   card.style.display = 'block';
   noWP.style.display = waypoints.length === 0 ? 'block' : 'none';
 
-  let totalDist = 0;
-  let totalTime = 0;
+  let totalDist = 0, totalTime = 0;
   for (let i = 1; i < waypoints.length; i++) {
     const d = haversine(waypoints[i-1].lat, waypoints[i-1].lon, waypoints[i].lat, waypoints[i].lon);
     totalDist += d;
-    totalTime += d / 20.8; // estimate at 20.8 m/s (75 km/h)
+    totalTime += d / _legSpeed(i);
   }
-  const maxAlt = Math.max(...waypoints.map(w => w.alt));
+  const maxAlt   = Math.max(...waypoints.map(w => w.alt));
   const maxRange = Math.max(...waypoints.map(w => haversine(homeLat, homeLon, w.lat, w.lon)));
   const distStr  = totalDist >= 1000 ? (totalDist / 1000).toFixed(2) + ' km' : Math.round(totalDist) + ' m';
-  const timeStr  = totalTime >= 60 ? (totalTime / 60).toFixed(1) + ' min' : Math.round(totalTime) + ' s';
-  const rangeStr = maxRange >= 1000 ? (maxRange / 1000).toFixed(2) + ' km' : Math.round(maxRange) + ' m';
+  const timeStr  = totalTime >= 60   ? (totalTime / 60).toFixed(1) + ' min'  : Math.round(totalTime) + ' s';
+  const rangeStr = maxRange >= 1000  ? (maxRange / 1000).toFixed(2) + ' km'  : Math.round(maxRange) + ' m';
   document.getElementById('ms-dist').textContent = distStr;
-  document.getElementById('ms-time').textContent = timeStr;
-  document.getElementById('ms-alt').textContent = maxAlt + ' m';
+  document.getElementById('ms-time').textContent = timeStr + (weatherData ? ' ✦' : '');
+  document.getElementById('ms-alt').textContent  = maxAlt + ' m';
   document.getElementById('ms-range').textContent = rangeStr;
+  // Tooltip on time stat to explain wind adjustment
+  const timeCard = document.getElementById('ms-time').closest('.stat-card');
+  if (timeCard) timeCard.title = weatherData ? 'Wind-adjusted estimate (✦)' : 'Estimated at 15 m/s default speed';
 }
 
 // ====================== ALTITUDE PROFILE ======================
@@ -1676,25 +1955,19 @@ function showInsertMarker(segIdx) {
 
 function insertWaypointAt(segIdx, lat, lon) {
   clearInsertMarker();
+  pushUndo();
   const alt = Math.round((waypoints[segIdx].alt + waypoints[segIdx + 1].alt) / 2);
   const id  = wpIdCounter++;
   const marker = L.marker([lat, lon], { icon: makeWPIcon(segIdx + 1, 'waypoint', false), draggable: true, zIndexOffset: 500 }).addTo(map);
-  const wp = { lat, lon, alt, action: 'waypoint', loiterR: 20, marker, id };
+  const wp = {
+    lat, lon, alt, action: 'waypoint', id, marker,
+    holdTime:0, loiterR:20, loiterTime:10, loiterTurns:1,
+    speedType:1, speed:5, delayTime:5,
+    yawHeading:0, yawSpeed:0, yawRel:0,
+    jumpWP:1, jumpRepeat:1, servoNum:9, servoPWM:1500
+  };
   waypoints.splice(segIdx + 1, 0, wp);
-
-  marker.on('click', e => { L.DomEvent.stopPropagation(e); selectWP(waypoints.indexOf(wp)); });
-  marker.on('contextmenu', e => {
-    L.DomEvent.stopPropagation(e);
-    const i = waypoints.indexOf(wp);
-    L.popup().setLatLng(e.latlng).setContent(`<a class="wp-popup-del" onclick="deleteWPByIdx(${i});map.closePopup()">🗑 Delete WP${i + 1}</a>`).openOn(map);
-  });
-  marker.on('dragend', e => {
-    const p = e.target.getLatLng(); wp.lat = p.lat; wp.lon = p.lng;
-    updatePolyline(); updateProfile();
-    if (selectedIdx === waypoints.indexOf(wp)) updateEditorFields();
-  });
-  marker.on('drag', () => updatePolyline());
-
+  _attachMarkerEvents(marker, wp);
   waypoints.forEach((w, i) => w.marker.setIcon(makeWPIcon(i, w.action, i === selectedIdx)));
   terrainElevations = null;
   updatePolyline(); updateProfile(); renderWPList();
@@ -1850,6 +2123,49 @@ function onRoseHover(e) {
   tip.style.top  = ty + 'px';
 }
 
+// ====================== FLIGHT WINDOWS (No-fly detection) ======================
+function renderFlightWindows(data) {
+  const card = document.getElementById('flight-window-card');
+  const el   = document.getElementById('flight-window-content');
+  if (!card || !el) return;
+  card.style.display = 'block';
+
+  const hours  = data.hourly.time;
+  const speeds = data.hourly.windspeed_10m;
+  const now = new Date();
+  let startIdx = hours.findIndex(t => new Date(t) >= now);
+  if (startIdx < 0) startIdx = 0;
+
+  // Classify each hour into fly/caution/nofly and group into blocks
+  const blocks = [];
+  let cur = null;
+  const limit = Math.min(startIdx + 13, hours.length); // next 12 h
+  for (let i = startIdx; i < limit; i++) {
+    const spd = speeds[i] || 0;
+    const status = spd >= 46 ? 'nofly' : spd >= 28 ? 'caution' : 'fly';
+    if (!cur || cur.status !== status) {
+      if (cur) blocks.push(cur);
+      cur = { status, start: new Date(hours[i]), end: null, maxWind: spd };
+    } else {
+      cur.maxWind = Math.max(cur.maxWind, spd);
+    }
+    cur.end = new Date(new Date(hours[i]).getTime() + 3600000);
+  }
+  if (cur) blocks.push(cur);
+
+  const fmtT = d => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const labels = { fly: '✓ FLY', caution: '⚠ CAUTION', nofly: '✗ NO-FLY' };
+
+  el.innerHTML = blocks.map(b => {
+    const cls = `fwin-block fwin-${b.status}`;
+    return `<div class="${cls}">
+      <span style="font-weight:700;white-space:nowrap">${labels[b.status]}</span>
+      <span style="color:inherit;opacity:.8">${fmtT(b.start)} – ${fmtT(b.end)}</span>
+      <span style="margin-left:auto;opacity:.75">${b.maxWind.toFixed(0)} km/h</span>
+    </div>`;
+  }).join('') || '<div style="color:var(--sec);font-size:11px">No forecast available</div>';
+}
+
 // ====================== SUN & GOLDEN HOUR ======================
 function sunTimes(lat, lon) {
   const now = new Date();
@@ -1974,6 +2290,7 @@ async function fetchTerrainSilent() {
 
 async function runTerrainFollow() {
   if (waypoints.length === 0) { alert('Add waypoints first'); return; }
+  pushUndo();
   const btn = document.getElementById('terrain-btn');
   const status = document.getElementById('terrain-status');
   btn.disabled = true; btn.textContent = 'Fetching…';
@@ -2412,6 +2729,7 @@ function ctxSetTile(type) { switchMapTile(type); closeMapCtx(); }
 // ====================== REVERSE MISSION ======================
 function reverseMission() {
   if (waypoints.length < 2) return;
+  pushUndo();
   waypoints.reverse();
   waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, i === selectedIdx)));
   if (selectedIdx >= 0) selectedIdx = waypoints.length - 1 - selectedIdx;
