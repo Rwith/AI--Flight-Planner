@@ -467,7 +467,10 @@
           clearInterval(logDownState.retryInterval);
           const resolveFn = logDownState.resolve;
           const buf = logDownState.buf;
+          const { tSys: eofSys, tComp: eofComp } = logDownState;
           logDownState = null;
+          // Release FC channel lock cleanly so the next download can start immediately
+          writer?.write(buildLogRequestEnd(eofSys, eofComp)).catch(() => {});
           resolveFn(buf);
         }
         break;
@@ -1057,6 +1060,7 @@
         bytesReceived: 0,
         highWaterOfs:  0,
         lastDataAt:    Date.now(),
+        tSys, tComp,
         retryInterval,
         resolve,
         timer: setTimeout(() => {
@@ -1070,15 +1074,24 @@
         }, adaptiveTimeout)
       };
 
-      // Use 0xFFFFFFFF — tells ArduPilot to stream entire log from offset 0
-      writer.write(buildLogRequestData(logId, 0, 0xFFFFFFFF, tSys, tComp)).catch(e => {
-        addLog('[log] write: ' + e.message);
-        clearTimeout(logDownState?.timer);
-        clearInterval(logDownState?.retryInterval);
-        logDownState = null;
-        resolve(null);
-      });
-      addLog(`[log] Downloading log id=${logId} (${(totalSize / 1024).toFixed(1)} KB) — streaming…`);
+      // Send LOG_REQUEST_END first to release any stale channel lock on the FC.
+      // ArduPilot keeps _log_sending_link set after a cancelled/interrupted transfer
+      // and silently rejects new LOG_REQUEST_DATA until the lock is cleared.
+      writer.write(buildLogRequestEnd(tSys, tComp)).catch(() => {});
+
+      // Brief pause to let the FC process the end before starting a new request
+      setTimeout(() => {
+        if (!logDownState) return; // was cancelled during the pause
+        writer.write(buildLogRequestData(logId, 0, 0xFFFFFFFF, tSys, tComp)).catch(e => {
+          addLog('[log] write: ' + e.message);
+          clearTimeout(logDownState?.timer);
+          clearInterval(logDownState?.retryInterval);
+          logDownState = null;
+          resolve(null);
+        });
+        addLog(`[log] Downloading log id=${logId} (${(totalSize / 1024).toFixed(1)} KB) — streaming…`);
+      }, 300);
+      addLog(`[log] Clearing any stale FC lock, then requesting log id=${logId} (${(totalSize / 1024).toFixed(1)} KB)…`);
     });
   }
 
