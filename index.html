@@ -46,6 +46,9 @@
   }
   .topbtn:hover { background: var(--border); }
   .topbtn.danger { border-color: var(--red); color: var(--red); }
+  .ctx-item { padding: 6px 14px; cursor: pointer; color: var(--text); }
+  .ctx-item:hover { background: var(--border); }
+  .ctx-item.ctx-active { color: var(--blue); }
   .topbtn.primary { border-color: var(--blue); color: var(--blue); }
   .spacer { flex: 1; }
   /* MAIN LAYOUT */
@@ -281,17 +284,21 @@
   <button class="topbtn" onclick="exportKML()">Export KML</button>
   <label class="topbtn" style="cursor:pointer">Import <input type="file" id="import-file" accept=".waypoints,.txt" style="display:none" onchange="importWaypoints(event)"></label>
   <button class="topbtn" onclick="reverseMission()">↩ Reverse</button>
-  <select class="topbtn" id="map-tile-select" onchange="switchMapTile(this.value)" style="cursor:pointer;padding:4px 8px">
-    <option value="dark">Dark</option>
-    <option value="satellite">Satellite</option>
-    <option value="topo">Topo</option>
-  </select>
   <button class="topbtn" id="view3d-btn" onclick="toggle3DView()">3D View</button>
   <button class="topbtn" onclick="openLogbook()">Logbook</button>
   <button class="topbtn" id="hud-btn" onclick="toggleHUD()">HUD</button>
-  <button class="topbtn" id="nfz-btn" onclick="toggleNFZ()">NFZ Off</button>
-  <button class="topbtn" id="cache-btn" onclick="downloadTilesForView()" title="Download map tiles for current view for offline use">Cache Tiles</button>
+  <button class="topbtn" id="nfz-btn" style="display:none" onclick="toggleNFZ()">NFZ Off</button>
   <button class="topbtn danger" onclick="clearMission()">Clear</button>
+</div>
+<!-- map right-click context menu -->
+<div id="map-ctx" style="display:none;position:fixed;z-index:8000;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:4px 0;min-width:170px;box-shadow:0 6px 20px rgba(0,0,0,.6);font-size:12px">
+  <div style="padding:4px 12px 2px;font-size:10px;color:var(--sec);text-transform:uppercase;letter-spacing:.7px">Map Style</div>
+  <div class="ctx-item" id="ctx-dark"      onclick="ctxSetTile('dark')">Dark</div>
+  <div class="ctx-item" id="ctx-satellite" onclick="ctxSetTile('satellite')">Satellite</div>
+  <div class="ctx-item" id="ctx-topo"      onclick="ctxSetTile('topo')">Topography</div>
+  <div style="height:1px;background:var(--border);margin:4px 0"></div>
+  <div class="ctx-item" id="ctx-nfz-item"  onclick="toggleNFZ();closeMapCtx()">NFZ</div>
+  <div class="ctx-item"                    onclick="downloadTilesForView();closeMapCtx()">Cache Tiles</div>
 </div>
 <!-- tile download progress bar -->
 <div id="tile-progress-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;height:22px;background:var(--panel);border-top:1px solid var(--border);z-index:9000;align-items:center;padding:0 10px;gap:8px;font-size:11px;color:var(--sec)">
@@ -499,7 +506,10 @@
       <div class="card" id="hud-card" style="display:none;padding:8px">
         <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           Instruments
-          <span id="hud-arm" style="padding:2px 10px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:1px;border:1px solid rgba(63,185,80,.4);color:#3fb950">DISARMED</span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span id="hud-flight-time" style="font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.5px;color:rgba(255,255,255,.45)">--:--</span>
+            <span id="hud-arm" style="padding:2px 10px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:1px;border:1px solid rgba(63,185,80,.4);color:#3fb950">DISARMED</span>
+          </div>
         </div>
         <!-- Artificial horizon -->
         <canvas id="hud-horizon" width="318" height="180" style="display:block;width:100%;border-radius:6px"></canvas>
@@ -1800,6 +1810,12 @@ async function runTerrainFollow() {
 }
 
 // ====================== NFZ OVERLAY ======================
+function _syncNFZCtx() {
+  const btn = document.getElementById('nfz-btn');
+  const ctx = document.getElementById('ctx-nfz-item');
+  if (ctx) ctx.textContent = btn ? btn.textContent : (nfzEnabled ? 'NFZ On' : 'NFZ Off');
+  if (ctx) ctx.classList.toggle('ctx-active', nfzEnabled);
+}
 async function toggleNFZ() {
   const btn = document.getElementById('nfz-btn');
   if (nfzEnabled) {
@@ -1808,9 +1824,9 @@ async function toggleNFZ() {
     nfzEnabled = false;
     btn.textContent = 'NFZ Off';
     btn.classList.remove('nfz-on');
-    return;
+    _syncNFZCtx(); return;
   }
-  btn.textContent = 'Loading…';
+  btn.textContent = 'Loading…'; _syncNFZCtx();
   const c = map.getCenter();
   try {
     await loadNFZLayers(c.lat, c.lng);
@@ -1821,6 +1837,7 @@ async function toggleNFZ() {
     btn.textContent = 'NFZ Off';
     alert('NFZ load failed: ' + err.message);
   }
+  _syncNFZCtx();
 }
 
 async function loadNFZLayers(lat, lon) {
@@ -1932,8 +1949,8 @@ function getMLStyle() {
     layers: [{ id: 'sat', type: 'raster', source: 'sat' }]
   };
   return {
-    version: 8, sources: { topo: { type: 'raster', tileSize: 256, attribution: '© OpenTopoMap',
-      tiles: ['https://a.tile.opentopomap.org/{z}/{x}/{y}.png'] } },
+    version: 8, sources: { topo: { type: 'raster', tileSize: 256, attribution: '© Esri',
+      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}'] } },
     layers: [{ id: 'topo', type: 'raster', source: 'topo' }]
   };
 }
@@ -2152,15 +2169,48 @@ async function downloadTilesForView() {
 const TILE_LAYERS = {
   dark: { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', attr: '&copy; OpenStreetMap &copy; CARTO' },
   satellite: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri' },
-  topo: { url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', attr: '&copy; OpenTopoMap' }
+  topo: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri', subdomains: '' }
 };
 
+let _currentTileType = 'dark';
 function switchMapTile(type) {
   if (currentTileLayer) map.removeLayer(currentTileLayer);
   const cfg = TILE_LAYERS[type] || TILE_LAYERS.dark;
-  currentTileLayer = new CachedTileLayer(cfg.url, { attribution: cfg.attr, subdomains: 'abcd', maxZoom: 20 }).addTo(map);
+  const subdomains = cfg.subdomains || 'abc';
+  currentTileLayer = new CachedTileLayer(cfg.url, { attribution: cfg.attr, subdomains, maxZoom: 20 }).addTo(map);
   currentTileLayer.bringToBack();
+  _currentTileType = type;
+  // Sync active highlight in context menu
+  ['dark','satellite','topo'].forEach(k => {
+    const el = document.getElementById('ctx-' + k);
+    if (el) el.classList.toggle('ctx-active', k === type);
+  });
 }
+
+// ====================== MAP CONTEXT MENU ======================
+let _ctxLatLng = null;
+map.on('contextmenu', e => {
+  L.DomEvent.preventDefault(e.originalEvent);
+  _ctxLatLng = e.latlng;
+  const menu = document.getElementById('map-ctx');
+  _syncNFZCtx();
+  // Position & show
+  const vw = window.innerWidth, vh = window.innerHeight;
+  let x = e.originalEvent.clientX, y = e.originalEvent.clientY;
+  menu.style.display = 'block';
+  if (x + menu.offsetWidth  > vw) x = vw - menu.offsetWidth  - 4;
+  if (y + menu.offsetHeight > vh) y = vh - menu.offsetHeight - 4;
+  menu.style.left = x + 'px'; menu.style.top = y + 'px';
+  // Sync active tile
+  ['dark','satellite','topo'].forEach(k => {
+    const el = document.getElementById('ctx-' + k);
+    if (el) el.classList.toggle('ctx-active', k === _currentTileType);
+  });
+});
+document.addEventListener('click', closeMapCtx);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMapCtx(); });
+function closeMapCtx() { document.getElementById('map-ctx').style.display = 'none'; }
+function ctxSetTile(type) { switchMapTile(type); closeMapCtx(); }
 
 // ====================== REVERSE MISSION ======================
 function reverseMission() {
@@ -2210,6 +2260,7 @@ function exportKML() {
 
 // ====================== HUD ======================
 let _hudVisible = false;
+let _armTime = null, _flightTimerInterval = null;
 
 function toggleHUD() {
   _hudVisible = !_hudVisible;
@@ -2243,13 +2294,31 @@ function hudUpdate(tele) {
   document.getElementById('hud-volt').textContent = tele.voltageMv != null ? (tele.voltageMv / 1000).toFixed(1) + 'V' : '--V';
   document.getElementById('hud-curr').textContent = tele.currentCa != null ? (tele.currentCa / 100).toFixed(1) + 'A' : '--A';
 
-  // ARM
+  // ARM + flight timer
   const armEl = document.getElementById('hud-arm');
+  const ftEl  = document.getElementById('hud-flight-time');
   if (tele.baseMode != null) {
     const armed = !!(tele.baseMode & 0x80);
     armEl.textContent = armed ? 'ARMED' : 'DISARMED';
     armEl.style.color = armed ? '#f85149' : '#3fb950';
     armEl.style.borderColor = armed ? 'rgba(248,81,73,.5)' : 'rgba(63,185,80,.35)';
+    // Flight timer
+    if (armed && !_armTime) {
+      _armTime = Date.now();
+      _flightTimerInterval = setInterval(() => {
+        if (!_armTime) return;
+        const s = Math.floor((Date.now() - _armTime) / 1000);
+        const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+        const ftEl2 = document.getElementById('hud-flight-time');
+        if (ftEl2) ftEl2.textContent = h > 0
+          ? `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
+          : `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+      }, 1000);
+    } else if (!armed && _armTime) {
+      clearInterval(_flightTimerInterval); _armTime = null; _flightTimerInterval = null;
+      ftEl.textContent = '--:--'; ftEl.style.color = 'rgba(255,255,255,.45)';
+    }
+    if (armed) ftEl.style.color = '#f85149';
   } else {
     armEl.textContent = '--'; armEl.style.color = 'rgba(255,255,255,.4)'; armEl.style.borderColor = 'rgba(255,255,255,.2)';
   }
