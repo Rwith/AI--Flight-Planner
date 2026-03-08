@@ -435,16 +435,11 @@
         if (!logDownState) break;
         const ldOfs   = dv.getUint32(0, true);
         const ldCount = payload[6];
-        if (logDownState.highWaterOfs === 0 && ldOfs === 0) {
-          addLog('[log] First LOG_DATA packet received — download flowing');
-        }
-        logDownState.lastDataAt = Date.now(); // heartbeat for stall detector
 
-        // ArduPilot EOF conditions (from AP_Logger_MAVLinkLogTransfer.cpp):
-        //   1. count == 0  — explicit EOF / read error
-        //   2. count < 90  — short/partial packet = end of file reached
-        //   3. highWaterOfs >= totalSize — all bytes accounted for
-        const isEof = ldCount === 0 || ldCount < 90 || (ldOfs + ldCount >= logDownState.totalSize);
+        if (logDownState.highWaterOfs === 0 && ldOfs === 0 && ldCount > 0) {
+          addLog('[log] First LOG_DATA packet — download flowing');
+        }
+        logDownState.lastDataAt = Date.now();
 
         if (ldCount > 0) {
           const chunk = payload.slice(7, 7 + ldCount);
@@ -454,24 +449,36 @@
           if (ldOfs + ldCount > logDownState.highWaterOfs) {
             logDownState.highWaterOfs = ldOfs + ldCount;
           }
-          logDownState.bytesReceived += ldCount;
-          const ldPct = Math.min(isEof ? 100 : 99, Math.round(logDownState.highWaterOfs / logDownState.totalSize * 100));
+          const pct = Math.round(logDownState.highWaterOfs / logDownState.totalSize * 100);
           document.dispatchEvent(new CustomEvent('bb-dl-progress', {
-            detail: { pct: ldPct, bytes: logDownState.highWaterOfs, total: logDownState.totalSize }
+            detail: { pct: Math.min(99, pct), bytes: logDownState.highWaterOfs, total: logDownState.totalSize }
           }));
         }
 
-        if (isEof) {
-          addLog(`[log] EOF — ${logDownState.highWaterOfs} / ${logDownState.totalSize} bytes received`);
-          clearTimeout(logDownState.timer);
-          clearInterval(logDownState.retryInterval);
-          const resolveFn = logDownState.resolve;
-          const buf = logDownState.buf;
-          const { tSys: eofSys, tComp: eofComp } = logDownState;
+        // File done: explicit EOF (count=0) or all bytes received
+        const fileDone = ldCount === 0 || logDownState.highWaterOfs >= logDownState.totalSize;
+        // Chunk done: received all bytes for this chunk (but file continues)
+        const chunkDone = !fileDone && logDownState.highWaterOfs >= logDownState.chunkEnd;
+
+        if (fileDone) {
+          addLog(`[log] Complete — ${logDownState.highWaterOfs} / ${logDownState.totalSize} bytes`);
+          document.dispatchEvent(new CustomEvent('bb-dl-progress', {
+            detail: { pct: 100, bytes: logDownState.highWaterOfs, total: logDownState.totalSize }
+          }));
+          clearTimeout(logDownState.overallTimer);
+          clearTimeout(logDownState.chunkTimer);
+          const { resolve: res, buf, tSys: s, tComp: c } = logDownState;
           logDownState = null;
-          // Release FC channel lock cleanly so the next download can start immediately
-          writer?.write(buildLogRequestEnd(eofSys, eofComp)).catch(() => {});
-          resolveFn(buf);
+          writer?.write(buildLogRequestEnd(s, c)).catch(() => {}); // release FC lock
+          res(buf);
+        } else if (chunkDone) {
+          // Chunk complete — advance window and request the next chunk immediately.
+          // ArduPilot already cleared _log_sending_link after sending this chunk,
+          // so LOG_REQUEST_DATA will be accepted without a preceding LOG_REQUEST_END.
+          clearTimeout(logDownState.chunkTimer);
+          logDownState.chunkOfs = logDownState.highWaterOfs;
+          logDownState.chunkEnd = Math.min(logDownState.highWaterOfs + CHUNK_SIZE, logDownState.totalSize);
+          logDownState.sendChunk();
         }
         break;
       }
@@ -847,9 +854,9 @@
     clearInterval(_heartbeatTimer);
     _heartbeatTimer = null;
     if (on) {
-      const hb = buildHeartbeat();
       _heartbeatTimer = setInterval(() => {
-        writer?.write(hb).catch(() => {});
+        // Rebuild each time so every frame gets a fresh sequence number
+        writer?.write(buildHeartbeat()).catch(() => {});
       }, 1000);
     }
 
@@ -861,8 +868,8 @@
         logListState = null;
       }
       if (logDownState) {
-        clearTimeout(logDownState.timer);
-        clearInterval(logDownState.retryInterval);
+        clearTimeout(logDownState.overallTimer);
+        clearTimeout(logDownState.chunkTimer);
         logDownState.resolve(null);
         logDownState = null;
       }
@@ -1026,79 +1033,100 @@
     });
   }
 
+  // ArduPilot's LOG_REQUEST_DATA is chunk-by-chunk: the FC sends exactly `count`
+  // bytes then calls end_log_transfer() (clearing _log_sending_link).  Any new
+  // LOG_REQUEST_DATA sent WHILE _log_sending_link is set is silently rejected.
+  // We must wait for the current chunk to finish (detected by highWaterOfs reaching
+  // chunkEnd) before issuing the next request.  CHUNK_SIZE is 100 × 90 = 9000 bytes
+  // so each chunk is exactly 100 MAVLink packets (no short-packet ambiguity on chunk
+  // boundaries — short packets only appear at true end-of-file).
+  const CHUNK_SIZE = 90 * 100; // 9000 bytes
+
   async function downloadLog (logId, totalSize) {
     if (!writer) { addLog('[log] Not connected'); return null; }
     const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
     const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
 
+    // Abort any previous in-flight download
+    if (logDownState) {
+      clearTimeout(logDownState.overallTimer);
+      clearTimeout(logDownState.chunkTimer);
+      logDownState = null;
+    }
+
     return new Promise((resolve) => {
-      if (logDownState) {
-        clearTimeout(logDownState.timer);
-        clearInterval(logDownState.retryInterval);
-        logDownState = null;
-      }
-
       const buf = new Uint8Array(totalSize);
-      // Timeout: at least 60s; add ~50ms per packet expected
-      const adaptiveTimeout = Math.max(60000, Math.ceil(totalSize / 90) * 55);
-
-      // ── Stall detector: if no data arrives for 4s, re-request from highWaterOfs ──
-      const retryInterval = setInterval(() => {
-        if (!logDownState) { clearInterval(retryInterval); return; }
-        const stalledMs = Date.now() - logDownState.lastDataAt;
-        if (stalledMs >= 4000 && logDownState.highWaterOfs < logDownState.totalSize) {
-          const remaining = logDownState.totalSize - logDownState.highWaterOfs;
-          addLog(`[log] Stall detected at ofs=${logDownState.highWaterOfs} — re-requesting ${(remaining/1024).toFixed(1)} KB`);
-          writer.write(buildLogRequestData(logId, logDownState.highWaterOfs, 0xFFFFFFFF, tSys, tComp))
-            .catch(() => {});
-          logDownState.lastDataAt = Date.now(); // reset so we don't spam
-        }
-      }, 4000);
+      // Overall safety net: ~3 s per chunk + 30 s headroom
+      const overallTimeout = Math.max(120000, Math.ceil(totalSize / CHUNK_SIZE) * 3000 + 30000);
 
       logDownState = {
-        buf, totalSize,
-        bytesReceived: 0,
-        highWaterOfs:  0,
-        lastDataAt:    Date.now(),
+        buf, totalSize, logId,
+        highWaterOfs: 0,
+        chunkOfs:     0,
+        chunkEnd:     Math.min(CHUNK_SIZE, totalSize),
+        lastDataAt:   Date.now(),
         tSys, tComp,
-        retryInterval,
+        chunkTimer:   null,
+        overallTimer: setTimeout(() => {
+          if (!logDownState) return;
+          addLog('[log] Download timed out — returning partial data');
+          const { buf: b, resolve: res } = logDownState;
+          clearTimeout(logDownState.chunkTimer);
+          logDownState = null;
+          res(b);
+        }, overallTimeout),
         resolve,
-        timer: setTimeout(() => {
-          if (logDownState) {
-            clearInterval(logDownState.retryInterval);
-            addLog('[log] Download timed out — returning partial data');
-            const { buf: partialBuf, resolve: res } = logDownState;
-            logDownState = null;
-            res(partialBuf);
-          }
-        }, adaptiveTimeout)
+        sendChunk: null // filled in below
       };
 
-      // Send LOG_REQUEST_END first to release any stale channel lock on the FC.
-      // ArduPilot keeps _log_sending_link set after a cancelled/interrupted transfer
-      // and silently rejects new LOG_REQUEST_DATA until the lock is cleared.
-      writer.write(buildLogRequestEnd(tSys, tComp)).catch(() => {});
+      function scheduleChunkStallTimer () {
+        clearTimeout(logDownState?.chunkTimer);
+        if (!logDownState) return;
+        logDownState.chunkTimer = setTimeout(() => {
+          if (!logDownState) return;
+          // Only retry if no data arrived recently
+          if (Date.now() - logDownState.lastDataAt < 4500) {
+            scheduleChunkStallTimer(); // still flowing — extend
+            return;
+          }
+          addLog(`[log] Chunk stall at ofs=${logDownState.chunkOfs} — retrying`);
+          // Clear any stale FC lock, then re-request the same chunk
+          writer?.write(buildLogRequestEnd(logDownState.tSys, logDownState.tComp)).catch(() => {});
+          setTimeout(() => {
+            if (!logDownState) return;
+            logDownState.lastDataAt = Date.now();
+            logDownState.sendChunk();
+          }, 300);
+        }, 5000);
+      }
 
-      // Brief pause to let the FC process the end before starting a new request
-      setTimeout(() => {
-        if (!logDownState) return; // was cancelled during the pause
-        writer.write(buildLogRequestData(logId, 0, 0xFFFFFFFF, tSys, tComp)).catch(e => {
+      function sendChunk () {
+        if (!logDownState) return;
+        const { chunkOfs, totalSize: ts, tSys: s, tComp: c, logId: id } = logDownState;
+        const count = Math.min(CHUNK_SIZE, ts - chunkOfs);
+        writer.write(buildLogRequestData(id, chunkOfs, count, s, c)).catch(e => {
           addLog('[log] write: ' + e.message);
-          clearTimeout(logDownState?.timer);
-          clearInterval(logDownState?.retryInterval);
-          logDownState = null;
-          resolve(null);
         });
-        addLog(`[log] Downloading log id=${logId} (${(totalSize / 1024).toFixed(1)} KB) — streaming…`);
+        scheduleChunkStallTimer();
+      }
+
+      logDownState.sendChunk = sendChunk;
+
+      // Clear any stale FC lock before the first chunk
+      writer.write(buildLogRequestEnd(tSys, tComp)).catch(() => {});
+      setTimeout(() => {
+        if (!logDownState) return;
+        addLog(`[log] Downloading log id=${logId} (${(totalSize / 1024).toFixed(1)} KB) — chunk-based`);
+        sendChunk();
       }, 300);
-      addLog(`[log] Clearing any stale FC lock, then requesting log id=${logId} (${(totalSize / 1024).toFixed(1)} KB)…`);
+      addLog(`[log] Clearing FC lock, then downloading log id=${logId} (${(totalSize / 1024).toFixed(1)} KB)…`);
     });
   }
 
   function cancelLogDownload () {
     if (!logDownState) return;
-    clearTimeout(logDownState.timer);
-    clearInterval(logDownState.retryInterval);
+    clearTimeout(logDownState.overallTimer);
+    clearTimeout(logDownState.chunkTimer);
     const res = logDownState.resolve;
     logDownState = null;
     addLog('[log] Download cancelled by user');
