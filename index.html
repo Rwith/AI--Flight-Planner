@@ -2271,7 +2271,7 @@ function drawHUDCompass(canvas, rawHdg, armed) {
   const W = canvas.width, H = canvas.height, ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, W, H);
   const cx = W / 2;
-  const hdg = ((rawHdg % 360) + 360) % 360;
+  const hdg = ((( isFinite(rawHdg) ? rawHdg : 0) % 360) + 360) % 360;
   const PX_PER_DEG = 2.4;
 
   // Background
