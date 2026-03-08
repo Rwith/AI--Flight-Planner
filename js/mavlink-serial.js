@@ -74,6 +74,22 @@
     return [...new Uint8Array(b)];
   }
 
+  // ─── HEARTBEAT (id=0) — GCS keepalive ────────────────────────────────────
+  // ArduPilot's log-download code checks last_heartbeat_time < 3000 ms.
+  // If we don't send one, it stops streaming LOG_DATA after ~3 seconds.
+  // Wire (sorted by size): custom_mode(u32), type(u8), autopilot(u8),
+  //   base_mode(u8), system_status(u8), mavlink_version(u8)  → 9 bytes
+  function buildHeartbeat () {
+    return buildFrame(0, [
+      ...u32(0), // custom_mode
+      6,         // MAV_TYPE_GCS
+      0,         // MAV_AUTOPILOT_GENERIC
+      0,         // base_mode
+      0,         // MAV_STATE_UNINIT
+      3          // mavlink_version
+    ]);
+  }
+
   // ─── MISSION_COUNT (id=44) ────────────────────────────────────────────────
   // Wire: count(u16), target_system(u8), target_component(u8)
   function buildMissionCount (count, tSys, tComp) {
@@ -423,30 +439,30 @@
           addLog('[log] First LOG_DATA packet received — download flowing');
         }
         logDownState.lastDataAt = Date.now(); // heartbeat for stall detector
-        if (ldCount === 0) {
-          // End-of-log marker from FC
-          clearTimeout(logDownState.timer);
-          clearInterval(logDownState.retryInterval);
-          const resolveFn = logDownState.resolve;
-          const buf = logDownState.buf;
-          logDownState = null;
-          resolveFn(buf);
-          break;
+
+        // ArduPilot EOF conditions (from AP_Logger_MAVLinkLogTransfer.cpp):
+        //   1. count == 0  — explicit EOF / read error
+        //   2. count < 90  — short/partial packet = end of file reached
+        //   3. highWaterOfs >= totalSize — all bytes accounted for
+        const isEof = ldCount === 0 || ldCount < 90 || (ldOfs + ldCount >= logDownState.totalSize);
+
+        if (ldCount > 0) {
+          const chunk = payload.slice(7, 7 + ldCount);
+          if (ldOfs + ldCount <= logDownState.totalSize) {
+            logDownState.buf.set(chunk, ldOfs);
+          }
+          if (ldOfs + ldCount > logDownState.highWaterOfs) {
+            logDownState.highWaterOfs = ldOfs + ldCount;
+          }
+          logDownState.bytesReceived += ldCount;
+          const ldPct = Math.min(isEof ? 100 : 99, Math.round(logDownState.highWaterOfs / logDownState.totalSize * 100));
+          document.dispatchEvent(new CustomEvent('bb-dl-progress', {
+            detail: { pct: ldPct, bytes: logDownState.highWaterOfs, total: logDownState.totalSize }
+          }));
         }
-        const chunk = payload.slice(7, 7 + ldCount);
-        if (ldOfs + ldCount <= logDownState.totalSize) {
-          logDownState.buf.set(chunk, ldOfs);
-        }
-        // Advance high-water mark for gap-retry
-        if (ldOfs + ldCount > logDownState.highWaterOfs) {
-          logDownState.highWaterOfs = ldOfs + ldCount;
-        }
-        logDownState.bytesReceived += ldCount;
-        const ldPct = Math.min(99, Math.round(logDownState.highWaterOfs / logDownState.totalSize * 100));
-        document.dispatchEvent(new CustomEvent('bb-dl-progress', {
-          detail: { pct: ldPct, bytes: logDownState.highWaterOfs, total: logDownState.totalSize }
-        }));
-        if (logDownState.highWaterOfs >= logDownState.totalSize) {
+
+        if (isEof) {
+          addLog(`[log] EOF — ${logDownState.highWaterOfs} / ${logDownState.totalSize} bytes received`);
           clearTimeout(logDownState.timer);
           clearInterval(logDownState.retryInterval);
           const resolveFn = logDownState.resolve;
@@ -804,6 +820,8 @@
     addLog('Disconnected');
   }
 
+  let _heartbeatTimer = null;
+
   function setConnected (on) {
     const btn = document.getElementById('serial-connect-btn');
     if (btn) {
@@ -819,7 +837,32 @@
     if (upBtn) upBtn.disabled = !on;
     const fetchBtn = document.getElementById('bb-fetch-list-btn');
     if (fetchBtn) fetchBtn.disabled = !on;
+
+    // ── Heartbeat keepalive ───────────────────────────────────────────────
+    // ArduPilot stops streaming LOG_DATA if no GCS heartbeat arrives within 3 s.
+    // We also need it for general MAVLink compliance (FC uses it to detect GCS).
+    clearInterval(_heartbeatTimer);
+    _heartbeatTimer = null;
+    if (on) {
+      const hb = buildHeartbeat();
+      _heartbeatTimer = setInterval(() => {
+        writer?.write(hb).catch(() => {});
+      }, 1000);
+    }
+
     if (!on) {
+      // Abort any in-progress log transfer cleanly
+      if (logListState) {
+        clearTimeout(logListState.timer);
+        logListState.resolve([]);
+        logListState = null;
+      }
+      if (logDownState) {
+        clearTimeout(logDownState.timer);
+        clearInterval(logDownState.retryInterval);
+        logDownState.resolve(null);
+        logDownState = null;
+      }
       // Clear telemetry display, live map marker, and altitude track when disconnected.
       removeDroneMarker();
       Object.keys(tele).forEach(k => delete tele[k]);
