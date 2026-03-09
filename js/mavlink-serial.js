@@ -438,8 +438,8 @@
         const ldOfs   = dv.getUint32(0, true);
         const ldCount = payload[6];
 
-        if (logDownState.highWaterOfs === 0 && ldOfs === 0 && ldCount > 0) {
-          addLog('[log] First LOG_DATA packet — download flowing');
+        if (logDownState.highWaterOfs === 0 && ldCount > 0) {
+          addLog(`[log] First LOG_DATA — ofs=${ldOfs} count=${ldCount} (download flowing)`);
         }
         logDownState.lastDataAt = Date.now();
 
@@ -853,9 +853,12 @@
     // ── Heartbeat keepalive ───────────────────────────────────────────────
     // ArduPilot stops streaming LOG_DATA if no GCS heartbeat arrives within 3 s.
     // We also need it for general MAVLink compliance (FC uses it to detect GCS).
+    // Send one immediately on connect so the FC sees us as an active GCS even
+    // if the user triggers a log download before the first interval fires.
     clearInterval(_heartbeatTimer);
     _heartbeatTimer = null;
     if (on) {
+      writer?.write(buildHeartbeat()).catch(() => {});
       _heartbeatTimer = setInterval(() => {
         // Rebuild each time so every frame gets a fresh sequence number
         writer?.write(buildHeartbeat()).catch(() => {});
@@ -1050,12 +1053,12 @@
   // WiFi/backpack links have higher latency and packet loss than USB serial.
   // LOG_REQUEST_END must reach the FC and clear _log_sending_link BEFORE
   // LOG_REQUEST_DATA arrives, or ArduPilot silently drops the request.
-  // We also re-send LOG_REQUEST_END three times (200 ms apart) to survive
-  // individual packet loss on a lossy wireless channel.
+  // We re-send LOG_REQUEST_END multiple times to survive packet loss (WiFi)
+  // or a stale lock left from a previous session (cable).
   function isWifi () { return !!wsConn; }
-  const STALL_MS      = () => isWifi() ? 12000 : 5000; // stall detection window
-  const PRE_REQ_MS    = () => isWifi() ?   900 :  300; // delay after LOG_REQUEST_END
-  const END_REPEATS   = () => isWifi() ?     3 :    1; // how many times to send END
+  const STALL_MS      = () => isWifi() ? 12000 : 6000; // stall detection window
+  const PRE_REQ_MS    = () => isWifi() ?   900 :  500; // delay after LOG_REQUEST_END
+  const END_REPEATS   = () => isWifi() ?     3 :    2; // how many times to send END
   const END_REPEAT_MS = 200; // interval between repeated END frames
 
   // Send LOG_REQUEST_END `n` times (200 ms apart) then call `cb` after PRE_REQ_MS.
@@ -1125,23 +1128,23 @@
           }
           const hw = logDownState.highWaterOfs;
           logDownState.retryCount++;
-          const partial = hw > 0 ? ` (${hw} bytes received so far)` : ' (no LOG_DATA received — backpack may not forward msg 128)';
+          const partial = hw > 0
+            ? ` (${hw} bytes received, stalled before chunkEnd=${logDownState.chunkEnd})`
+            : ' (no LOG_DATA received — FC may have ignored request)';
           addLog(`[log] Chunk stall at ofs=${logDownState.chunkOfs}${partial} — retry #${logDownState.retryCount}`);
 
-          // Clear the FC lock (repeated on WiFi to survive packet loss),
-          // then re-request the same chunk.
+          // Clear the FC lock, then re-request the same chunk.
+          // Also re-send LOG_REQUEST_DATA 2 s later if still silent (covers the case
+          // where the FC accepted the lock-clear but the first DATA packet was missed).
           clearLockThenDo(logDownState.tSys, logDownState.tComp, () => {
             if (!logDownState) return;
             logDownState.lastDataAt = Date.now();
             logDownState.sendChunk();
-            // On WiFi, re-send LOG_REQUEST_DATA once more after 1 s if still silent.
-            if (isWifi()) {
-              setTimeout(() => {
-                if (!logDownState || logDownState.highWaterOfs > hw) return;
-                addLog('[log] Re-sending LOG_REQUEST_DATA (no response after 1 s)');
-                logDownState.sendChunk();
-              }, 1000);
-            }
+            setTimeout(() => {
+              if (!logDownState || logDownState.highWaterOfs > hw) return;
+              addLog('[log] Re-sending LOG_REQUEST_DATA (still no response after 2 s)');
+              logDownState.sendChunk();
+            }, 2000);
           });
         }, STALL_MS());
       }
@@ -1150,6 +1153,7 @@
         if (!logDownState) return;
         const { chunkOfs, totalSize: ts, tSys: s, tComp: c, logId: id } = logDownState;
         const count = Math.min(CHUNK_SIZE, ts - chunkOfs);
+        addLog(`[log] → LOG_REQUEST_DATA id=${id} ofs=${chunkOfs} count=${count} tSys=${s} tComp=${c}`);
         writer.write(buildLogRequestData(id, chunkOfs, count, s, c)).catch(e => {
           addLog('[log] write: ' + e.message);
         });
