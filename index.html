@@ -423,8 +423,8 @@
           </select>
         </div>
         <div class="form-row" id="speed-row" style="display:none">
-          <label>Speed (m/s)</label>
-          <input type="number" id="ed-speed" value="5" min="0" max="50" step="0.5" onchange="updateSelectedWP()">
+          <label id="ed-speed-unit-label">Speed (km/h)</label>
+          <input type="number" id="ed-speed" value="18" min="3" max="290" step="1" onchange="updateSelectedWP()">
         </div>
         <!-- DO — Delay (p1) -->
         <div class="form-row" id="delay-row" style="display:none">
@@ -496,7 +496,12 @@
           <input type="number" id="cruise-airspeed" value="15" min="1" max="80" step="0.5"
             style="width:58px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px;outline:none"
             oninput="renderWPList()">
-          <span style="color:var(--sec);font-size:11px">m/s</span>
+          <select id="speed-unit-sel" onchange="changeSpeedUnit(this.value)"
+            style="background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--sec);padding:2px 4px;font-size:11px;outline:none;cursor:pointer">
+            <option value="kmh">km/h</option>
+            <option value="kts">kts</option>
+            <option value="mph">mph</option>
+          </select>
           <span id="ms-gs-note" style="color:var(--sec);font-size:10px;margin-left:4px"></span>
         </div>
       </div>
@@ -523,7 +528,7 @@
           <div class="weather-grid">
             <div>
               <div class="weather-label">Wind</div>
-              <div class="weather-val"><span id="w-speed">--</span> <span style="font-size:13px">km/h</span></div>
+              <div class="weather-val"><span id="w-speed">--</span> <span id="w-speed-unit" style="font-size:13px">km/h</span></div>
               <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
                 <span id="wind-arrow">↑</span>
                 <span id="w-dir-label" style="color:var(--sec);font-size:12px">--</span>
@@ -531,7 +536,7 @@
             </div>
             <div>
               <div class="weather-label">Gusts</div>
-              <div class="weather-val"><span id="w-gust">--</span> <span style="font-size:13px">km/h</span></div>
+              <div class="weather-val"><span id="w-gust">--</span> <span id="w-gust-unit" style="font-size:13px">km/h</span></div>
               <div class="weather-label" style="margin-top:4px">Temp: <span id="w-temp">--</span>°C</div>
             </div>
             <div>
@@ -650,10 +655,10 @@
           <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
             <div style="font-size:9px;color:var(--sec);text-transform:uppercase;letter-spacing:.6px">Gnd Spd</div>
             <div id="hud-spd" style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text)">--</div>
-            <div style="font-size:9px;color:var(--sec)">m/s</div>
+            <div id="hud-spd-unit" style="font-size:9px;color:var(--sec)">km/h</div>
             <div style="font-size:9px;color:var(--sec);margin-top:4px;text-transform:uppercase;letter-spacing:.6px">Air Spd</div>
             <div id="hud-aspd" style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text)">--</div>
-            <div style="font-size:9px;color:var(--sec)">m/s</div>
+            <div id="hud-aspd-unit" style="font-size:9px;color:var(--sec)">km/h</div>
             <div style="margin-top:5px;height:4px;background:rgba(255,255,255,.1);border-radius:2px">
               <div id="hud-thr-fill" style="height:100%;width:0%;background:#58a6ff;border-radius:2px;transition:width .3s"></div>
             </div>
@@ -668,7 +673,7 @@
             <div style="font-size:9px;color:var(--sec)">m</div>
             <div style="font-size:9px;color:var(--sec);margin-top:4px;text-transform:uppercase;letter-spacing:.6px">Climb</div>
             <div id="hud-climb" style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums">--</div>
-            <div style="font-size:9px;color:var(--sec)">m/s</div>
+            <div id="hud-climb-unit" style="font-size:9px;color:var(--sec)">km/h</div>
           </div>
           <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
             <div style="font-size:9px;color:var(--sec);text-transform:uppercase;letter-spacing:.6px">Battery</div>
@@ -904,6 +909,70 @@ let missionPolyline = null;
 let profileChart = null;
 let profileCollapsed = false;
 let weatherData = null;
+
+// ====================== SPEED UNITS ======================
+let speedUnit = (() => { try { return localStorage.getItem('speedUnit') || 'kmh'; } catch { return 'kmh'; } })();
+const _SPD_FACTOR = { kmh: 3.6,     kts: 1.94384, mph: 2.23694 };
+const _SPD_LABEL  = { kmh: 'km/h',  kts: 'kts',   mph: 'mph'   };
+// Input constraints per unit (equivalent ranges of 1–80 m/s)
+const _SPD_CFG = {
+  kmh: { min: 3,   max: 290, step: 1,   def: 54  },
+  kts: { min: 2,   max: 157, step: 0.5, def: 29  },
+  mph: { min: 2,   max: 179, step: 0.5, def: 34  },
+};
+function msToDisp(ms)   { return ms  * _SPD_FACTOR[speedUnit]; }
+function kmhToDisp(kmh) { return kmh * _SPD_FACTOR[speedUnit] / 3.6; }
+function dispToMs(v)    { return v   / _SPD_FACTOR[speedUnit]; }
+function spdLabel()     { return _SPD_LABEL[speedUnit]; }
+function roseBandLabels() {
+  const f = _SPD_FACTOR[speedUnit] / 3.6; // km/h → display
+  const l = spdLabel();
+  const [a, b, c] = [15, 28, 46].map(x => Math.round(x * f));
+  return [`Calm (<${a} ${l})`, `Breeze (${a}–${b} ${l})`, `Strong (${b}–${c} ${l})`, `High (≥${c} ${l})`];
+}
+
+function _applySpeedUnitLabels() {
+  const l = spdLabel();
+  const lEl = document.getElementById('ed-speed-unit-label');
+  if (lEl) lEl.textContent = `Speed (${l})`;
+  ['hud-spd-unit','hud-aspd-unit','hud-climb-unit'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.textContent = l;
+  });
+  const wsu = document.getElementById('w-speed-unit'); if (wsu) wsu.textContent = l;
+  const wgu = document.getElementById('w-gust-unit');  if (wgu) wgu.textContent = l;
+  const su  = document.getElementById('speed-unit-sel'); if (su && su.value !== speedUnit) su.value = speedUnit;
+}
+
+function changeSpeedUnit(u) {
+  const cruiseEl = document.getElementById('cruise-airspeed');
+  const currentMs = cruiseEl ? _cruiseAirspeed() : 15;
+  speedUnit = u;
+  try { localStorage.setItem('speedUnit', u); } catch {}
+  const cfg = _SPD_CFG[u];
+  if (cruiseEl) {
+    cruiseEl.min = cfg.min; cruiseEl.max = cfg.max; cruiseEl.step = cfg.step;
+    cruiseEl.value = +msToDisp(currentMs).toFixed(1);
+  }
+  // Update set_speed editor if open
+  const edSpeedEl = document.getElementById('ed-speed');
+  if (edSpeedEl && selectedIdx >= 0 && waypoints[selectedIdx]?.action === 'set_speed') {
+    const ms = waypoints[selectedIdx].speed || 5;
+    edSpeedEl.min = cfg.min; edSpeedEl.max = cfg.max; edSpeedEl.step = cfg.step;
+    edSpeedEl.value = +msToDisp(ms).toFixed(1);
+  }
+  _applySpeedUnitLabels();
+  renderWPList(); updateMissionStats();
+}
+
+function initSpeedUnit() {
+  const cfg = _SPD_CFG[speedUnit];
+  const cruiseEl = document.getElementById('cruise-airspeed');
+  if (cruiseEl) {
+    cruiseEl.min = cfg.min; cruiseEl.max = cfg.max; cruiseEl.step = cfg.step;
+    cruiseEl.value = +msToDisp(15).toFixed(1); // 15 m/s default
+  }
+  _applySpeedUnitLabels();
+}
 let logbookEntries = [];
 let wpIdCounter = 0;
 // Undo/Redo
@@ -1153,7 +1222,9 @@ function _fmtTime(s) {
   return Math.floor(s / 60) + 'm ' + Math.round(s % 60) + 's';
 }
 function _cruiseAirspeed() {
-  return Math.max(1, parseFloat(document.getElementById('cruise-airspeed')?.value) || 15);
+  const raw = parseFloat(document.getElementById('cruise-airspeed')?.value);
+  const ms  = dispToMs(isFinite(raw) ? raw : _SPD_CFG[speedUnit].def);
+  return Math.max(1, ms);
 }
 
 function _legSpeed(i) {
@@ -1206,7 +1277,7 @@ function renderWPList() {
       const dStr = d >= 1000 ? (d/1000).toFixed(1)+'km' : Math.round(d)+'m';
       const gs   = _legSpeed(i);
       const gsStr = gs.toFixed(1);
-      legStr = ` · ${dStr} · GS ${gsStr}m/s · +${_fmtTime(cumulETA[i] - cumulETA[i-1])} (Σ ${_fmtTime(cumulETA[i])})`;
+      legStr = ` · ${dStr} · GS ${msToDisp(gs).toFixed(1)}${spdLabel()} · +${_fmtTime(cumulETA[i] - cumulETA[i-1])} (Σ ${_fmtTime(cumulETA[i])})`;
     }
     return `<div class="wp-item${selectedIdx === i ? ' selected' : ''}"
         onclick="selectWP(${i})" draggable="true"
@@ -1336,7 +1407,10 @@ function showEditor(wp, idx) {
   document.getElementById('ed-loiter-time').value    = wp.loiterTime  ?? 10;
   document.getElementById('ed-loiter-turns').value   = wp.loiterTurns ?? 1;
   document.getElementById('ed-speed-type').value     = wp.speedType   ?? 1;
-  document.getElementById('ed-speed').value          = wp.speed       ?? 5;
+  const _edSpd = document.getElementById('ed-speed');
+  const _cfg = _SPD_CFG[speedUnit];
+  _edSpd.min = _cfg.min; _edSpd.max = _cfg.max; _edSpd.step = _cfg.step;
+  _edSpd.value = +msToDisp(wp.speed ?? 5).toFixed(1);
   document.getElementById('ed-delay').value          = wp.delayTime   ?? 5;
   document.getElementById('ed-yaw-heading').value    = wp.yawHeading  ?? 0;
   document.getElementById('ed-yaw-speed').value      = wp.yawSpeed    ?? 0;
@@ -1363,7 +1437,7 @@ function updateSelectedWP() {
   wp.loiterTime  = parseFloat(document.getElementById('ed-loiter-time').value)    || 10;
   wp.loiterTurns = parseFloat(document.getElementById('ed-loiter-turns').value)   || 1;
   wp.speedType   = parseInt(document.getElementById('ed-speed-type').value)       ?? 1;
-  wp.speed       = parseFloat(document.getElementById('ed-speed').value)          || 5;
+  wp.speed       = dispToMs(parseFloat(document.getElementById('ed-speed').value) || _SPD_CFG[speedUnit].def);
   wp.delayTime   = parseFloat(document.getElementById('ed-delay').value)          || 5;
   wp.yawHeading  = parseFloat(document.getElementById('ed-yaw-heading').value)    || 0;
   wp.yawSpeed    = parseFloat(document.getElementById('ed-yaw-speed').value)      || 0;
@@ -1645,7 +1719,7 @@ function renderWeather(data) {
   const cw = data.current_weather;
   const speed = cw.windspeed.toFixed(1);
   const dir = cw.winddirection;
-  document.getElementById('w-speed').textContent = speed;
+  document.getElementById('w-speed').textContent = kmhToDisp(parseFloat(speed)).toFixed(1);
   document.getElementById('w-dir-label').textContent = bearingToCompass(dir);
   document.getElementById('wind-arrow').style.transform = `rotate(${dir + 180}deg)`;
 
@@ -1657,7 +1731,7 @@ function renderWeather(data) {
   hours.forEach((t, i) => { const d = Math.abs(new Date(t) - now); if (d < bestDiff) { bestDiff = d; bestIdx = i; } });
 
   const gustVal = data.hourly.windgusts_10m[bestIdx];
-  document.getElementById('w-gust').textContent = gustVal != null ? parseFloat(gustVal).toFixed(1) : '--';
+  document.getElementById('w-gust').textContent = gustVal != null ? kmhToDisp(parseFloat(gustVal)).toFixed(1) : '--';
   document.getElementById('w-temp').textContent = cw.temperature.toFixed(1);
   document.getElementById('w-cloud').textContent = data.hourly.cloudcover[bestIdx] || '--';
   document.getElementById('w-precip').textContent = data.hourly.precipitation_probability[bestIdx] || '0';
@@ -1672,7 +1746,7 @@ function renderWeather(data) {
   else if (spd >= 28) { status = 'CAUTION'; statusBg = '#d29922'; statusColor = '#000'; }
   const badge = document.getElementById('fly-status');
   badge.textContent = status; badge.style.background = statusBg; badge.style.color = statusColor;
-  document.getElementById('weather-summary').textContent = `${speed}km/h ${bearingToCompass(dir)} | ${cw.temperature.toFixed(0)}°C | ${getWMODescription(cw.weathercode)}`;
+  document.getElementById('weather-summary').textContent = `${kmhToDisp(parseFloat(speed)).toFixed(1)}${spdLabel()} ${bearingToCompass(dir)} | ${cw.temperature.toFixed(0)}°C | ${getWMODescription(cw.weathercode)}`;
   setWindParticles(parseFloat(speed), dir);
   renderWindRose(data);
   const mc = map.getCenter(); renderSunCard(mc.lat, mc.lng);
@@ -1694,7 +1768,7 @@ function renderWeather(data) {
     else if (fcWind >= 28) windCol = 'var(--yellow)';
     const card = document.createElement('div');
     card.className = 'fc-card';
-    card.innerHTML = `<div class="fc-time">${hLabel}</div><div class="fc-icon">${fcPrec > 50 ? '🌧️' : fcWind >= 37 ? '💨' : '🌤️'}</div><div class="fc-wind" style="color:${windCol}">${fcWind}km/h</div><div style="color:var(--sec)">${fcPrec}%</div>`;
+    card.innerHTML = `<div class="fc-time">${hLabel}</div><div class="fc-icon">${fcPrec > 50 ? '🌧️' : fcWind >= 37 ? '💨' : '🌤️'}</div><div class="fc-wind" style="color:${windCol}">${kmhToDisp(parseFloat(fcWind)).toFixed(1)}${spdLabel()}</div><div style="color:var(--sec)">${fcPrec}%</div>`;
     strip.appendChild(card);
   }
 }
@@ -1780,14 +1854,14 @@ function updateMissionStats() {
     const gsMin = Math.min(...gsList).toFixed(1);
     const gsMax = Math.max(...gsList).toFixed(1);
     gsNote.textContent = weatherData
-      ? `Wind-adj GS: ${gsMin}–${gsMax} m/s ✦`
+      ? `Wind-adj GS: ${msToDisp(parseFloat(gsMin)).toFixed(1)}–${msToDisp(parseFloat(gsMax)).toFixed(1)} ${spdLabel()} ✦`
       : `GS = airspeed (no wind data)`;
   } else if (gsNote) {
     gsNote.textContent = '';
   }
   // Tooltip on time stat to explain wind adjustment
   const timeCard = document.getElementById('ms-time').closest('.stat-card');
-  if (timeCard) timeCard.title = weatherData ? 'Wind-adjusted ground speed estimate (✦)' : `Estimated at ${_cruiseAirspeed()} m/s airspeed`;
+  if (timeCard) timeCard.title = weatherData ? 'Wind-adjusted ground speed estimate (✦)' : `Estimated at ${msToDisp(_cruiseAirspeed()).toFixed(1)} ${spdLabel()} airspeed`;
 }
 
 // ====================== ALTITUDE PROFILE ======================
@@ -2259,7 +2333,6 @@ function renderWindRose(data) {
 }
 
 const ROSE_DIR_LABELS  = ['N','NE','E','SE','S','SW','W','NW'];
-const ROSE_BAND_LABELS = ['Calm (<15 km/h)','Breeze (15–28 km/h)','Strong (28–46 km/h)','High (≥46 km/h)'];
 const ROSE_BAND_COLORS = ['#3fb950','#58a6ff','#d29922','#f85149'];
 
 function onRoseHover(e) {
@@ -2288,14 +2361,14 @@ function onRoseHover(e) {
     html += `<div style="color:var(--sec)">No wind from this direction</div>`;
   } else {
     const avg = (bin.speedSum / bin.speedN).toFixed(0);
-    html += `<div style="color:var(--sec);margin-bottom:4px">Avg ${avg} km/h`;
-    if (bin.maxGust > 0) html += ` · Max gust <span style="color:#f85149;font-weight:700">${bin.maxGust.toFixed(0)} km/h</span>`;
+    html += `<div style="color:var(--sec);margin-bottom:4px">Avg ${kmhToDisp(bin.speedSum / bin.speedN).toFixed(1)} ${spdLabel()}`;
+    if (bin.maxGust > 0) html += ` · Max gust <span style="color:#f85149;font-weight:700">${kmhToDisp(bin.maxGust).toFixed(1)} ${spdLabel()}</span>`;
     html += `</div>`;
     bin.counts.forEach((c, bi) => {
       if (c === 0) return;
       html += `<div style="display:flex;align-items:center;gap:5px;margin:2px 0">
         <span style="width:8px;height:8px;border-radius:2px;flex-shrink:0;background:${ROSE_BAND_COLORS[bi]}"></span>
-        <span style="color:var(--text)">${ROSE_BAND_LABELS[bi]}: <b>${c}</b>hr</span>
+        <span style="color:var(--text)">${roseBandLabels()[bi]}: <b>${c}</b>hr</span>
       </div>`;
     });
   }
@@ -2335,8 +2408,8 @@ function renderFlightWindows(data) {
   function _reasons(spd, gust, rain, status) {
     const r = [];
     if (status !== 'fly') {
-      if (spd  >= 28) r.push(`wind ${spd.toFixed(0)} km/h`);
-      if (gust >= 38) r.push(`gusts ${gust.toFixed(0)} km/h`);
+      if (spd  >= 28) r.push(`wind ${kmhToDisp(spd).toFixed(1)} ${spdLabel()}`);
+      if (gust >= 38) r.push(`gusts ${kmhToDisp(gust).toFixed(1)} ${spdLabel()}`);
       if (rain >= 30) r.push(`precip ${rain.toFixed(0)}%`);
     }
     return r.join(' · ');
@@ -3049,8 +3122,8 @@ function hudUpdate(tele) {
   }
 
   // Speed
-  document.getElementById('hud-spd').textContent  = tele.groundspeed != null ? parseFloat(tele.groundspeed).toFixed(1) : '--';
-  document.getElementById('hud-aspd').textContent = tele.airspeed    != null ? parseFloat(tele.airspeed).toFixed(1)    : '--';
+  document.getElementById('hud-spd').textContent  = tele.groundspeed != null ? msToDisp(parseFloat(tele.groundspeed)).toFixed(1) : '--';
+  document.getElementById('hud-aspd').textContent = tele.airspeed    != null ? msToDisp(parseFloat(tele.airspeed)).toFixed(1)    : '--';
 
   // Throttle
   const thr = tele.throttle;
@@ -3065,7 +3138,8 @@ function hudUpdate(tele) {
   const crEl = document.getElementById('hud-climb');
   if (tele.climbRate != null) {
     const cr = parseFloat(tele.climbRate);
-    crEl.textContent  = (cr >= 0 ? '+' : '') + cr.toFixed(1);
+    const crD = msToDisp(cr);
+    crEl.textContent  = (crD >= 0 ? '+' : '') + crD.toFixed(1);
     crEl.style.color  = cr > 0.3 ? '#3fb950' : cr < -0.3 ? '#f85149' : 'rgba(255,255,255,.75)';
   } else { crEl.textContent = '--'; crEl.style.color = 'rgba(255,255,255,.4)'; }
 
@@ -3224,7 +3298,7 @@ window._serialGetWaypoints = () => waypoints;
 window._serialGetHome      = () => ({ lat: homeLat, lon: homeLon });
 
 // Set the initial USB hint once the DOM is ready.
-window.addEventListener('load', () => toggleConnMode());
+window.addEventListener('load', () => { toggleConnMode(); initSpeedUnit(); });
 
 function toggleConnMode() {
   // Auto-disconnect whenever the user switches connection mode
@@ -3508,7 +3582,7 @@ function _renderDecodedFlight(d) {
   document.getElementById('bb-dist').textContent     = distStr;
   document.getElementById('bb-dur').textContent      = durStr;
   document.getElementById('bb-max-alt').textContent  = d.maxAlt.toFixed(0)+' m';
-  document.getElementById('bb-max-spd').textContent  = d.maxSpd.toFixed(1)+' m/s';
+  document.getElementById('bb-max-spd').textContent  = msToDisp(d.maxSpd).toFixed(1)+' '+spdLabel();
   document.getElementById('bb-min-batt').textContent = d.minBatt != null ? d.minBatt.toFixed(0)+'%' : '--';
   document.getElementById('bb-pts').textContent      = d.points.length.toLocaleString();
 
