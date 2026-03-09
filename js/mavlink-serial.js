@@ -20,7 +20,7 @@
     74: 20,  // VFR_HUD
     66: 148, // REQUEST_DATA_STREAM
     // ── DataFlash log download ─────────────────────────────────────────────
-    // LOG_DATA (128) intentionally omitted — MAVLink v2 zero-trims payload so
+    // LOG_DATA (120) intentionally omitted — MAVLink v2 zero-trims payload so
     // the CRC varies by packet length; skip validation and accept all LOG_DATA.
     117: 128, // LOG_REQUEST_LIST (sent by us)
     118: 56,  // LOG_ENTRY        (received — validated, confirmed correct)
@@ -433,7 +433,7 @@
         }
         break;
       }
-      case 128: { // LOG_DATA — wire: ofs(u32,0), id(u16,4), count(u8,6), data[90](7..96)
+      case 120: { // LOG_DATA — wire: ofs(u32,0), id(u16,4), count(u8,6), data[90](7..96)
         if (!logDownState) break;
         const ldOfs   = dv.getUint32(0, true);
         const ldCount = payload[6];
