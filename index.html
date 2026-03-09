@@ -296,6 +296,13 @@
   <span id="weather-summary">Fetching weather…</span>
   <label style="font-size:11px;color:var(--sec);white-space:nowrap">Default Alt (m):</label>
   <input id="default-alt" type="number" value="50" min="0" max="500" style="width:60px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 6px;font-size:12px;outline:none">
+  <select id="speed-unit-sel" onchange="changeSpeedUnit(this.value)" title="Speed units"
+    style="background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 6px;font-size:12px;outline:none;cursor:pointer">
+    <option value="kmh">km/h</option>
+    <option value="kts">kts</option>
+    <option value="mph">mph</option>
+    <option value="ms">m/s</option>
+  </select>
   <div class="spacer"></div>
   <button class="topbtn" id="undo-btn" onclick="undo()" style="opacity:.4" disabled title="Undo (Ctrl+Z)">↩ Undo</button>
   <button class="topbtn" id="redo-btn" onclick="redo()" style="opacity:.4" disabled title="Redo (Ctrl+Y)">↪ Redo</button>
@@ -496,13 +503,7 @@
           <input type="number" id="cruise-airspeed" value="15" min="1" max="80" step="0.5"
             style="width:58px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px;outline:none"
             oninput="renderWPList()">
-          <select id="speed-unit-sel" onchange="changeSpeedUnit(this.value)"
-            style="background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--sec);padding:2px 4px;font-size:11px;outline:none;cursor:pointer">
-            <option value="kmh">km/h</option>
-            <option value="kts">kts</option>
-            <option value="mph">mph</option>
-            <option value="ms">m/s</option>
-          </select>
+          <span id="cruise-spd-unit" style="color:var(--sec);font-size:11px">km/h</span>
           <span id="ms-gs-note" style="color:var(--sec);font-size:10px;margin-left:4px"></span>
         </div>
       </div>
@@ -940,8 +941,9 @@ function _applySpeedUnitLabels() {
   ['hud-spd-unit','hud-aspd-unit','hud-climb-unit'].forEach(id => {
     const el = document.getElementById(id); if (el) el.textContent = l;
   });
-  const wsu = document.getElementById('w-speed-unit'); if (wsu) wsu.textContent = l;
-  const wgu = document.getElementById('w-gust-unit');  if (wgu) wgu.textContent = l;
+  const wsu = document.getElementById('w-speed-unit');   if (wsu) wsu.textContent = l;
+  const wgu = document.getElementById('w-gust-unit');    if (wgu) wgu.textContent = l;
+  const csu = document.getElementById('cruise-spd-unit'); if (csu) csu.textContent = l;
   const su  = document.getElementById('speed-unit-sel'); if (su && su.value !== speedUnit) su.value = speedUnit;
 }
 

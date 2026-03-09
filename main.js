@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path   = require('path');
 const dgram  = require('dgram');
 const net    = require('net');
@@ -146,6 +146,7 @@ function createWindow () {
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   startWSServer();
   startUDP();
   createWindow();
