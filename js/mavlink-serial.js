@@ -101,12 +101,12 @@
   // Wire (sorted by field size, large→small):
   //   param1–4(f32×4), x=lat*1e7(i32), y=lon*1e7(i32), z=alt(f32),
   //   seq(u16), command(u16), target_sys, target_comp, frame, current, autocontinue
-  function buildMissionItemInt (seq, lat, lon, alt, cmd, frame, current, autoCont, tSys, tComp) {
+  function buildMissionItemInt (seq, lat, lon, alt, cmd, p1, p2, p3, p4, frame, current, autoCont, tSys, tComp) {
     const payload = [
-      ...f32(0),                           // param1 hold time (s)
-      ...f32(5),                           // param2 acceptance radius (m)
-      ...f32(0),                           // param3 pass radius
-      ...f32(NaN),                         // param4 yaw (NaN = auto)
+      ...f32(p1),                          // param1
+      ...f32(p2),                          // param2
+      ...f32(p3),                          // param3
+      ...f32(p4),                          // param4
       ...i32(Math.round(lat * 1e7)),       // x = lat ×1e7
       ...i32(Math.round(lon * 1e7)),       // y = lon ×1e7
       ...f32(alt),                         // z = altitude (m)
@@ -509,15 +509,39 @@
     const { wps, tSys, tComp } = uploadState;
     if (seq >= wps.length) return;
     const wp = wps[seq];
-    // seq=0 = home point (command=16 / NAV_WAYPOINT, frame=GLOBAL absolute)
-    // rest = MAV_FRAME_GLOBAL_RELATIVE_ALT (3)
-    const cmd   = seq === 0 ? 16 : (wp.action === 'loiter' ? 17 : wp.action === 'land' ? 21 : 16);
-    const frame = seq === 0 ? 0 : 3;
+    const a = wp.action;
+    let cmd, p1=0, p2=0, p3=0, p4=0, lat=wp.lat, lon=wp.lon, alt=wp.alt, frame;
+
+    if (seq === 0 || a === 'home') {
+      // Home: NAV_WAYPOINT in absolute frame
+      cmd=16; frame=0;
+    } else {
+      frame=3; // MAV_FRAME_GLOBAL_RELATIVE_ALT for all mission items
+      if      (a === 'waypoint')     { cmd=16;  p1=wp.holdTime||0; }
+      else if (a === 'spline')       { cmd=82;  p1=wp.holdTime||0; }
+      else if (a === 'loiter')       { cmd=17;  p3=wp.loiterR||20; }
+      else if (a === 'loiter_time')  { cmd=19;  p1=wp.loiterTime||10; p3=wp.loiterR||20; }
+      else if (a === 'loiter_turns') { cmd=18;  p1=wp.loiterTurns||1; p3=wp.loiterR||20; }
+      else if (a === 'loiter_to_alt'){ cmd=31;  p2=wp.loiterR||20; }
+      else if (a === 'photo')        { cmd=16; }  // DO_DIGICAM_CONTROL follows as next seq
+      else if (a === '_digicam')     { cmd=203; p4=1; lat=0; lon=0; alt=0; }
+      else if (a === 'set_speed')    { cmd=178; p1=wp.speedType??1; p2=wp.speed||5; p3=-1; lat=0; lon=0; alt=0; }
+      else if (a === 'delay')        { cmd=93;  p1=wp.delayTime||5; lat=0; lon=0; alt=0; }
+      else if (a === 'cond_yaw')     { cmd=115; p1=wp.yawHeading||0; p2=wp.yawSpeed||0; p3=0; p4=wp.yawRel||0; lat=0; lon=0; alt=0; }
+      else if (a === 'do_jump')      { cmd=177; p1=wp.jumpWP||1; p2=wp.jumpRepeat||1; lat=0; lon=0; alt=0; }
+      else if (a === 'set_roi')      { cmd=201; p1=3; }
+      else if (a === 'set_servo')    { cmd=183; p1=wp.servoNum||9; p2=wp.servoPWM||1500; lat=0; lon=0; alt=0; }
+      else if (a === 'takeoff')      { cmd=22; }
+      else if (a === 'land')         { cmd=21; }
+      else if (a === 'rtl')          { cmd=20;  lat=0; lon=0; alt=0; }
+      else                           { cmd=16; }
+    }
+
     const current = (seq === 1) ? 1 : 0;
-    const frame_ = buildMissionItemInt(seq, wp.lat, wp.lon, wp.alt, cmd, frame, current, 1, tSys, tComp);
+    const frame_ = buildMissionItemInt(seq, lat, lon, alt, cmd, p1, p2, p3, p4, frame, current, 1, tSys, tComp);
     writer.write(frame_).catch(e => addLog('[write] ' + e.message));
     setUploadStatus(`Uploading WP ${seq} / ${wps.length - 1}…`, 'info');
-    addLog(`[upload] Sent MISSION_ITEM_INT seq=${seq} lat=${wp.lat.toFixed(5)} alt=${wp.alt}m cmd=${cmd}`);
+    addLog(`[upload] Sent MISSION_ITEM_INT seq=${seq} cmd=${cmd} lat=${lat} alt=${alt}`);
   }
 
   // ─── Telemetry rendering ──────────────────────────────────────────────────
@@ -917,10 +941,13 @@
 
     const home = window._serialGetHome?.() ?? { lat: wps[0].lat, lon: wps[0].lon };
     const hLat = home.lat, hLon = home.lon;
-    const list = [
-      { lat: hLat, lon: hLon, alt: 0, action: 'home' },
-      ...wps
-    ];
+    // Expand photo waypoints: each 'photo' wp is followed by a DO_DIGICAM_CONTROL item,
+    // mirroring what exportWaypoints() writes to the .waypoints file.
+    const list = [{ lat: hLat, lon: hLon, alt: 0, action: 'home' }];
+    for (const wp of wps) {
+      list.push(wp);
+      if (wp.action === 'photo') list.push({ lat: 0, lon: 0, alt: 0, action: '_digicam' });
+    }
 
     const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
     const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
