@@ -816,6 +816,10 @@
             <button class="btn" onclick="bbClearPath()" style="flex:1">Clear Path</button>
             <button class="btn" onclick="bbExportCSV()" style="flex:1">Export CSV</button>
           </div>
+          <div id="bb-wp-row" style="display:none;margin-top:4px">
+            <button class="btn primary" id="bb-wp-btn" style="width:100%"
+              onclick="bbLoadWaypoints()">📍 Load Waypoints into Planner</button>
+          </div>
           <div id="bb-events" class="bb-evt"></div>
         </div>
       </div>
@@ -3364,7 +3368,7 @@ function _parseBlackboxCSV(csv) {
       climb: iClimb >= 0 ? (parseFloat(p[iClimb]) || 0) : 0,
     });
   }
-  return points.length ? _bbSummarize(points, []) : null;
+  return points.length ? _bbSummarize(points, [], []) : null;
 }
 
 /* ── ArduPilot .log (text DataFlash) parser ── */
@@ -3385,7 +3389,7 @@ function _parseArduPilotLog(text) {
     return o;
   }
 
-  const points = [], events = [];
+  const points = [], events = [], cmds = [];
   let lastBatt = null;
 
   for (const line of lines) {
@@ -3442,13 +3446,25 @@ function _parseArduPilotLog(text) {
     } else if (type === 'MSG') {
       const msg = p.slice(2).join(',').trim();
       if (msg) events.push({ type: 'msg', value: msg });
+    } else if (type === 'CMD') {
+      const o = toObj('CMD', p.slice(1));
+      const cId  = parseInt(o.CId  ?? o.Cmd  ?? '0') || 0;
+      const lat  = parseFloat(o.Lat ?? '0') || 0;
+      const lon  = parseFloat(o.Lng ?? o.Lon ?? '0') || 0;
+      const alt  = parseFloat(o.Alt ?? '0') || 0;
+      const p1   = parseFloat(o.Prm1 ?? o.P1 ?? '0') || 0;
+      const p2   = parseFloat(o.Prm2 ?? o.P2 ?? '0') || 0;
+      const p3   = parseFloat(o.Prm3 ?? o.P3 ?? '0') || 0;
+      const p4   = parseFloat(o.Prm4 ?? o.P4 ?? '0') || 0;
+      const cNum = parseInt(o.CNum ?? '0') || 0;
+      if (cId > 0) cmds.push({ cId, lat, lon, alt, p1, p2, p3, p4, cNum });
     }
   }
-  return points.length ? _bbSummarize(points, events) : null;
+  return points.length ? _bbSummarize(points, events, cmds) : null;
 }
 
 /* ── Summarise decoded points into a result object ── */
-function _bbSummarize(points, events) {
+function _bbSummarize(points, events, cmds) {
   let totalDist = 0;
   for (let i = 1; i < points.length; i++) {
     totalDist += haversine(points[i-1].lat, points[i-1].lon, points[i].lat, points[i].lon);
@@ -3468,7 +3484,7 @@ function _bbSummarize(points, events) {
     const us0 = points[0]?.timeUs, us1 = points[points.length - 1]?.timeUs;
     if (us0 != null && us1 != null && us1 > us0) durationS = (us1 - us0) / 1e6;
   }
-  return { points, totalDist, maxAlt, maxSpd, minBatt, durationS, events: events || [] };
+  return { points, totalDist, maxAlt, maxSpd, minBatt, durationS, events: events || [], cmds: cmds || [] };
 }
 
 /* ── Render decoded flight in UI ── */
@@ -3496,6 +3512,13 @@ function _renderDecodedFlight(d) {
   document.getElementById('bb-min-batt').textContent = d.minBatt != null ? d.minBatt.toFixed(0)+'%' : '--';
   document.getElementById('bb-pts').textContent      = d.points.length.toLocaleString();
 
+  // Waypoint import button
+  const wpRow = document.getElementById('bb-wp-row');
+  const wpBtn = document.getElementById('bb-wp-btn');
+  const navCount = (d.cmds || []).filter(c => _LOG_CMD_MAP[c.cId]).length;
+  if (wpRow) wpRow.style.display = navCount > 0 ? 'block' : 'none';
+  if (wpBtn) wpBtn.textContent = `📍 Load ${navCount} Waypoint${navCount !== 1 ? 's' : ''} into Planner`;
+
   // Events timeline
   const evEl = document.getElementById('bb-events');
   if (evEl) {
@@ -3511,6 +3534,64 @@ function _renderDecodedFlight(d) {
   }
 
   bbShowOnMap();
+}
+
+/* ── Load CMD waypoints from decoded log into the mission planner ── */
+const _LOG_CMD_MAP = {
+  16:'waypoint', 82:'spline', 17:'loiter', 19:'loiter_time',
+  18:'loiter_turns', 31:'loiter_to_alt', 178:'set_speed', 93:'delay',
+  115:'cond_yaw', 177:'do_jump', 201:'set_roi', 183:'set_servo',
+  22:'takeoff', 21:'land', 20:'rtl'
+};
+// Nav commands that carry a geographic position
+const _NAV_CMDS = new Set([16,82,17,19,18,31,22,21,20]);
+
+function bbLoadWaypoints() {
+  const cmds = bbDecoded?.cmds;
+  if (!cmds?.length) return;
+
+  // Filter to mission items that are either nav (have valid coords) or do-commands
+  const navItems = cmds.filter(c => {
+    const action = _LOG_CMD_MAP[c.cId];
+    if (!action) return false;
+    if (_NAV_CMDS.has(c.cId)) return Math.abs(c.lat) > 0.0001 || Math.abs(c.lon) > 0.0001 || c.cId === 20; // RTL has 0/0
+    return true; // do-commands (set_speed, delay, etc.) are always included
+  });
+
+  if (!navItems.length) { alert('No valid waypoints found in this log.'); return; }
+
+  if (waypoints.length > 0 &&
+      !confirm(`Replace the current ${waypoints.length} waypoint(s) with ${navItems.length} from the log?`)) return;
+
+  // Clear existing mission
+  waypoints.forEach(wp => map.removeLayer(wp.marker));
+  waypoints = [];
+  updatePolyline();
+
+  // Re-use the same extra-param logic as the QGC importer
+  navItems.forEach(c => {
+    const action = _LOG_CMD_MAP[c.cId] || 'waypoint';
+    const extra = {
+      holdTime:    ['waypoint','spline'].includes(action) ? c.p1 : 0,
+      loiterR:     c.p3 || 20,
+      loiterTime:  action === 'loiter_time'  ? c.p1 : 10,
+      loiterTurns: action === 'loiter_turns' ? c.p1 : 1,
+      speedType:   action === 'set_speed'    ? c.p1 : 1,
+      speed:       action === 'set_speed'    ? c.p2 : 5,
+      delayTime:   action === 'delay'        ? c.p1 : 5,
+      yawHeading:  action === 'cond_yaw'     ? c.p1 : 0,
+      yawSpeed:    action === 'cond_yaw'     ? c.p2 : 0,
+      yawRel:      action === 'cond_yaw'     ? c.p4 : 0,
+      jumpWP:      action === 'do_jump'      ? c.p1 : 1,
+      jumpRepeat:  action === 'do_jump'      ? c.p2 : 1,
+      servoNum:    action === 'set_servo'    ? c.p1 : 9,
+      servoPWM:    action === 'set_servo'    ? c.p2 : 1500,
+    };
+    addWaypointSilent(c.lat, c.lon, c.alt, action, extra);
+  });
+
+  deselectWP(); updatePolyline(); updateProfile(); renderWPList(); updateMissionStats();
+  switchTab('mission');
 }
 
 /* ── Close / clear decoded data ── */
@@ -3656,7 +3737,7 @@ function parseDataFlashBin(buffer) {
   // Payload: Type(B,1), Length(B,1), Name(n,4), Format(N,16), Columns(Z,64) = 86 bytes
   fmts[128] = { name:'FMT', format:'BBnNZ', labels:['Type','Length','Name','Format','Columns'], length:89 };
 
-  const points = [], events = [];
+  const points = [], events = [], cmds = [];
   let lastBatt = null;
   let i = 0;
 
@@ -3749,13 +3830,24 @@ function parseDataFlashBin(buffer) {
       } else if (name === 'MSG') {
         const msg = fields.Message ?? fields.Msg ?? fields.message;
         if (msg) events.push({ type:'msg', value: String(msg) });
+      } else if (name === 'CMD') {
+        const cId  = fields.CId  ?? fields.Cmd  ?? 0;
+        const lat  = fields.Lat  ?? fields.LAT  ?? 0;
+        const lon  = fields.Lng  ?? fields.LNG  ?? fields.Lon ?? 0;
+        const alt  = fields.Alt  ?? fields.ALT  ?? 0;
+        const p1   = fields.Prm1 ?? fields.P1   ?? 0;
+        const p2   = fields.Prm2 ?? fields.P2   ?? 0;
+        const p3   = fields.Prm3 ?? fields.P3   ?? 0;
+        const p4   = fields.Prm4 ?? fields.P4   ?? 0;
+        const cNum = fields.CNum ?? 0;
+        if (cId > 0) cmds.push({ cId, lat: lat||0, lon: lon||0, alt: alt||0, p1: p1||0, p2: p2||0, p3: p3||0, p4: p4||0, cNum });
       }
     }
 
     i += fmt.length;
   }
 
-  return points.length ? _bbSummarize(points, events) : null;
+  return points.length ? _bbSummarize(points, events, cmds) : null;
 }
 </script>
 
