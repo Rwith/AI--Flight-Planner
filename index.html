@@ -2234,8 +2234,8 @@ function renderWindRose(data) {
   const gusts  = (data.hourly.windgusts_10m || []).slice(startIdx, startIdx + 24);
 
   const N = 8;
-  // Each bin: speed band counts, speed sum/n for avg, max gust per direction
-  const bins = Array.from({length: N}, () => ({ counts: [0, 0, 0, 0], speedSum: 0, speedN: 0, maxGust: 0 }));
+  // Each bin: speed band counts, speed sum/n for avg, max gust per direction, hour offsets
+  const bins = Array.from({length: N}, () => ({ counts: [0, 0, 0, 0], speedSum: 0, speedN: 0, maxGust: 0, offsets: [] }));
   speeds.forEach((spd, i) => {
     if (spd == null || dirs[i] == null) return;
     const bin  = Math.round(dirs[i] / (360 / N)) % N;
@@ -2243,6 +2243,7 @@ function renderWindRose(data) {
     bins[bin].counts[band >= 0 ? band : 3]++;
     bins[bin].speedSum += spd;
     bins[bin].speedN++;
+    bins[bin].offsets.push(i);
     if (gusts[i] != null && gusts[i] > bins[bin].maxGust) bins[bin].maxGust = gusts[i];
   });
 
@@ -2361,11 +2362,18 @@ function onRoseHover(e) {
   const bin   = bins[idx];
   const total = bin.counts.reduce((s, c) => s + c, 0);
 
-  let html = `<div style="font-weight:700;margin-bottom:5px;color:var(--text)">${ROSE_DIR_LABELS[idx]} — ${total} hr${total !== 1 ? 's' : ''}</div>`;
+  // Format hour offsets: 0 = "now", n = "+Nh"
+  const _fmtOff = n => n === 0 ? 'now' : `+${n}h`;
+  const MAX_SHOW = 8;
+  const offLabels = bin.offsets.slice(0, MAX_SHOW).map(_fmtOff);
+  if (bin.offsets.length > MAX_SHOW) offLabels.push(`+${bin.offsets.length - MAX_SHOW} more`);
+  const offStr = offLabels.join(' · ');
+
+  let html = `<div style="font-weight:700;margin-bottom:4px;color:var(--text)">${ROSE_DIR_LABELS[idx]} — ${total} hr${total !== 1 ? 's' : ''}</div>`;
+  html += `<div style="color:#58a6ff;font-size:10px;margin-bottom:5px;line-height:1.5">${offStr}</div>`;
   if (total === 0) {
     html += `<div style="color:var(--sec)">No wind from this direction</div>`;
   } else {
-    const avg = (bin.speedSum / bin.speedN).toFixed(0);
     html += `<div style="color:var(--sec);margin-bottom:4px">Avg ${kmhToDisp(bin.speedSum / bin.speedN).toFixed(1)} ${spdLabel()}`;
     if (bin.maxGust > 0) html += ` · Max gust <span style="color:#f85149;font-weight:700">${kmhToDisp(bin.maxGust).toFixed(1)} ${spdLabel()}</span>`;
     html += `</div>`;
