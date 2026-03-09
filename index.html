@@ -3570,6 +3570,12 @@ function bbLoadWaypoints() {
 
   // Re-use the same extra-param logic as the QGC importer
   navItems.forEach(c => {
+    // cNum 0 is the ArduPilot home/launch point — move the home marker, not a waypoint
+    if (c.cNum === 0 && (Math.abs(c.lat) > 0.0001 || Math.abs(c.lon) > 0.0001)) {
+      homeLat = c.lat; homeLon = c.lon;
+      homeMarker.setLatLng([homeLat, homeLon]);
+      return;
+    }
     const action = _LOG_CMD_MAP[c.cId] || 'waypoint';
     const extra = {
       holdTime:    ['waypoint','spline'].includes(action) ? c.p1 : 0,
