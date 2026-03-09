@@ -1046,6 +1046,35 @@
   // boundaries — short packets only appear at true end-of-file).
   const CHUNK_SIZE = 90 * 100; // 9000 bytes
 
+  // ── Wireless-aware timing constants ─────────────────────────────────────────
+  // WiFi/backpack links have higher latency and packet loss than USB serial.
+  // LOG_REQUEST_END must reach the FC and clear _log_sending_link BEFORE
+  // LOG_REQUEST_DATA arrives, or ArduPilot silently drops the request.
+  // We also re-send LOG_REQUEST_END three times (200 ms apart) to survive
+  // individual packet loss on a lossy wireless channel.
+  function isWifi () { return !!wsConn; }
+  const STALL_MS      = () => isWifi() ? 12000 : 5000; // stall detection window
+  const PRE_REQ_MS    = () => isWifi() ?   900 :  300; // delay after LOG_REQUEST_END
+  const END_REPEATS   = () => isWifi() ?     3 :    1; // how many times to send END
+  const END_REPEAT_MS = 200; // interval between repeated END frames
+
+  // Send LOG_REQUEST_END `n` times (200 ms apart) then call `cb` after PRE_REQ_MS.
+  function clearLockThenDo (tSys, tComp, cb) {
+    const n = END_REPEATS();
+    let i = 0;
+    function sendOne () {
+      if (!logDownState && cb !== null) return; // cancelled mid-sequence
+      writer?.write(buildLogRequestEnd(tSys, tComp)).catch(() => {});
+      i++;
+      if (i < n) {
+        setTimeout(sendOne, END_REPEAT_MS);
+      } else {
+        setTimeout(() => { if (logDownState || cb === null) cb?.(); }, PRE_REQ_MS());
+      }
+    }
+    sendOne();
+  }
+
   async function downloadLog (logId, totalSize) {
     if (!writer) { addLog('[log] Not connected'); return null; }
     const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
@@ -1060,8 +1089,8 @@
 
     return new Promise((resolve) => {
       const buf = new Uint8Array(totalSize);
-      // Overall safety net: ~3 s per chunk + 30 s headroom
-      const overallTimeout = Math.max(120000, Math.ceil(totalSize / CHUNK_SIZE) * 3000 + 30000);
+      // Overall safety net: ~3 s per chunk + 60 s headroom (more for WiFi)
+      const overallTimeout = Math.max(120000, Math.ceil(totalSize / CHUNK_SIZE) * (isWifi() ? 15000 : 3000) + 60000);
 
       logDownState = {
         buf, totalSize, logId,
@@ -1070,6 +1099,7 @@
         chunkEnd:     Math.min(CHUNK_SIZE, totalSize),
         lastDataAt:   Date.now(),
         tSys, tComp,
+        retryCount:   0,
         chunkTimer:   null,
         overallTimer: setTimeout(() => {
           if (!logDownState) return;
@@ -1088,20 +1118,32 @@
         if (!logDownState) return;
         logDownState.chunkTimer = setTimeout(() => {
           if (!logDownState) return;
-          // Only retry if no data arrived recently
-          if (Date.now() - logDownState.lastDataAt < 4500) {
-            scheduleChunkStallTimer(); // still flowing — extend
+          // Still flowing — just extend the window.
+          if (Date.now() - logDownState.lastDataAt < STALL_MS() - 500) {
+            scheduleChunkStallTimer();
             return;
           }
-          addLog(`[log] Chunk stall at ofs=${logDownState.chunkOfs} — retrying`);
-          // Clear any stale FC lock, then re-request the same chunk
-          writer?.write(buildLogRequestEnd(logDownState.tSys, logDownState.tComp)).catch(() => {});
-          setTimeout(() => {
+          const hw = logDownState.highWaterOfs;
+          logDownState.retryCount++;
+          const partial = hw > 0 ? ` (${hw} bytes received so far)` : ' (no LOG_DATA received — backpack may not forward msg 128)';
+          addLog(`[log] Chunk stall at ofs=${logDownState.chunkOfs}${partial} — retry #${logDownState.retryCount}`);
+
+          // Clear the FC lock (repeated on WiFi to survive packet loss),
+          // then re-request the same chunk.
+          clearLockThenDo(logDownState.tSys, logDownState.tComp, () => {
             if (!logDownState) return;
             logDownState.lastDataAt = Date.now();
             logDownState.sendChunk();
-          }, 300);
-        }, 5000);
+            // On WiFi, re-send LOG_REQUEST_DATA once more after 1 s if still silent.
+            if (isWifi()) {
+              setTimeout(() => {
+                if (!logDownState || logDownState.highWaterOfs > hw) return;
+                addLog('[log] Re-sending LOG_REQUEST_DATA (no response after 1 s)');
+                logDownState.sendChunk();
+              }, 1000);
+            }
+          });
+        }, STALL_MS());
       }
 
       function sendChunk () {
@@ -1116,14 +1158,14 @@
 
       logDownState.sendChunk = sendChunk;
 
-      // Clear any stale FC lock before the first chunk
-      writer.write(buildLogRequestEnd(tSys, tComp)).catch(() => {});
-      setTimeout(() => {
+      // Clear any stale FC lock before the first chunk, then start the download.
+      const connType = isWifi() ? 'wireless' : 'serial';
+      addLog(`[log] Clearing FC lock (${connType}), then downloading log id=${logId} (${(totalSize / 1024).toFixed(1)} KB)…`);
+      clearLockThenDo(tSys, tComp, () => {
         if (!logDownState) return;
         addLog(`[log] Downloading log id=${logId} (${(totalSize / 1024).toFixed(1)} KB) — chunk-based`);
         sendChunk();
-      }, 300);
-      addLog(`[log] Clearing FC lock, then downloading log id=${logId} (${(totalSize / 1024).toFixed(1)} KB)…`);
+      });
     });
   }
 
