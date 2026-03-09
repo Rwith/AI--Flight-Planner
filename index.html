@@ -2327,7 +2327,7 @@ function renderWindRose(data) {
   ctx.fillStyle = '#8b949e'; ctx.fill();
 
   // Store hover state and attach listener once
-  canvas._roseMeta = { bins, cx, cy, maxR, N };
+  canvas._roseMeta = { bins, cx, cy, maxR, N, hours, startIdx };
   if (!canvas._roseListening) {
     canvas._roseListening = true;
     canvas.style.cursor = 'crosshair';
@@ -2347,7 +2347,7 @@ function onRoseHover(e) {
   const tip   = document.getElementById('rose-tooltip');
   if (!meta || !tip) return;
 
-  const { bins, cx, cy, maxR, N } = meta;
+  const { bins, cx, cy, maxR, N, hours, startIdx } = meta;
   const rect = canvas.getBoundingClientRect();
   const dx = e.clientX - rect.left - cx;
   const dy = e.clientY - rect.top  - cy;
@@ -2362,15 +2362,26 @@ function onRoseHover(e) {
   const bin   = bins[idx];
   const total = bin.counts.reduce((s, c) => s + c, 0);
 
-  // Format hour offsets: 0 = "now", n = "+Nh"
-  const _fmtOff = n => n === 0 ? 'now' : `+${n}h`;
-  const MAX_SHOW = 8;
-  const offLabels = bin.offsets.slice(0, MAX_SHOW).map(_fmtOff);
-  if (bin.offsets.length > MAX_SHOW) offLabels.push(`+${bin.offsets.length - MAX_SHOW} more`);
-  const offStr = offLabels.join(' · ');
+  // Build compact clock-range string: consecutive offsets → "19:00–22:00", gaps stay separate
+  const _fmtHour = i => {
+    const t = new Date(hours[startIdx + i]);
+    return t.getHours().toString().padStart(2, '0') + ':00';
+  };
+  function _rangeStr(offsets) {
+    if (!offsets.length) return '';
+    const groups = [];
+    let gs = offsets[0], ge = offsets[0];
+    for (let j = 1; j < offsets.length; j++) {
+      if (offsets[j] === offsets[j - 1] + 1) { ge = offsets[j]; }
+      else { groups.push([gs, ge]); gs = ge = offsets[j]; }
+    }
+    groups.push([gs, ge]);
+    return groups.map(([s, e]) => s === e ? _fmtHour(s) : `${_fmtHour(s)}–${_fmtHour(e)}`).join(' · ');
+  }
+  const timeStr = _rangeStr(bin.offsets);
 
   let html = `<div style="font-weight:700;margin-bottom:4px;color:var(--text)">${ROSE_DIR_LABELS[idx]} — ${total} hr${total !== 1 ? 's' : ''}</div>`;
-  html += `<div style="color:#58a6ff;font-size:10px;margin-bottom:5px;line-height:1.5">${offStr}</div>`;
+  if (timeStr) html += `<div style="color:#58a6ff;font-size:10px;margin-bottom:5px;line-height:1.5">${timeStr}</div>`;
   if (total === 0) {
     html += `<div style="color:var(--sec)">No wind from this direction</div>`;
   } else {
