@@ -657,6 +657,10 @@
             background:rgba(0,0,0,.82);color:#fff;font:bold 13px monospace;
             padding:1px 8px;border-radius:0 0 5px 5px;letter-spacing:.5px;pointer-events:none">000°</div>
         </div>
+        <!-- Status text toast (PreArm / FC messages) -->
+        <div id="hud-statustext" style="display:none;margin-top:5px;padding:4px 8px;border-radius:4px;
+          font-size:11px;font-weight:600;font-family:monospace;letter-spacing:.3px;
+          border-left:3px solid currentColor;background:rgba(0,0,0,.55);line-height:1.4"></div>
         <!-- Data row: speed | alt | battery -->
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px">
           <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
@@ -703,8 +707,10 @@
         <div class="card-title">Blackbox — Live Telemetry</div>
 
         <div class="tele-section-title">Status</div>
-        <div style="display:flex;gap:8px;align-items:center">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <span class="arm-badge" id="tele-armed" style="color:var(--sec)">--</span>
+          <span id="tele-statustext" style="display:none;font-size:11px;font-weight:600;font-family:monospace;
+            border-left:3px solid currentColor;padding-left:6px;line-height:1.4"></span>
         </div>
 
         <div class="tele-section-title">Position</div>
@@ -3177,6 +3183,51 @@ function hudUpdate(tele) {
   drawHUDHorizon(document.getElementById('hud-horizon'), parseFloat(tele.roll) || 0, parseFloat(tele.pitch) || 0);
 }
 window.hudUpdate = hudUpdate;
+
+// ── STATUSTEXT display (MAVLink msgid 253) ────────────────────────────────
+// severity: 0=EMERGENCY … 3=ERROR, 4=WARNING, 5=NOTICE, 6=INFO, 7=DEBUG
+const STATUSTEXT_COLOR = ['#f85149','#f85149','#f85149','#f85149','#e3b341','#58a6ff','rgba(255,255,255,.65)','rgba(255,255,255,.35)'];
+let _stToast = null; // auto-hide timer
+
+window.showStatusText = function (severity, text) {
+  const color = STATUSTEXT_COLOR[Math.min(severity, 7)];
+
+  // ── HUD toast ────────────────────────────────────────────────────────────
+  const hudEl = document.getElementById('hud-statustext');
+  if (hudEl) {
+    hudEl.textContent = text;
+    hudEl.style.color = color;
+    hudEl.style.display = 'block';
+    clearTimeout(_stToast);
+    // PreArm / Arm messages stay until cleared; INFO/DEBUG auto-hide after 6 s
+    if (severity >= 5) {
+      _stToast = setTimeout(() => { hudEl.style.display = 'none'; }, 6000);
+    } else {
+      // For warnings/errors, keep until next message or arm event clears it
+      _stToast = setTimeout(() => { hudEl.style.display = 'none'; }, 15000);
+    }
+  }
+
+  // ── Telemetry panel badge ────────────────────────────────────────────────
+  const teleEl = document.getElementById('tele-statustext');
+  if (teleEl) {
+    teleEl.textContent = text;
+    teleEl.style.color = color;
+    teleEl.style.display = 'inline';
+  }
+};
+
+// Clear status text when drone arms (no more pre-arm messages needed)
+const _origHudUpdate = window.hudUpdate;
+window.hudUpdate = function (tele) {
+  _origHudUpdate(tele);
+  if (tele.baseMode & 0x80) { // armed → clear any pre-arm messages
+    const hudEl  = document.getElementById('hud-statustext');
+    const teleEl = document.getElementById('tele-statustext');
+    if (hudEl  && hudEl.style.display  !== 'none') { clearTimeout(_stToast); hudEl.style.display  = 'none'; }
+    if (teleEl && teleEl.style.display !== 'none') teleEl.style.display = 'none';
+  }
+};
 
 function drawHUDCompass(canvas, rawHdg, armed) {
   const W = canvas.width, H = canvas.height, ctx = canvas.getContext('2d');

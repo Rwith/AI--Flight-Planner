@@ -19,6 +19,7 @@
     73: 38,  // MISSION_ITEM_INT
     74: 20,  // VFR_HUD
     66: 148, // REQUEST_DATA_STREAM
+    253: 83, // STATUSTEXT
     // ── DataFlash log download ─────────────────────────────────────────────
     // LOG_DATA (120) intentionally omitted — MAVLink v2 zero-trims payload so
     // the CRC varies by packet length; skip validation and accept all LOG_DATA.
@@ -482,6 +483,22 @@
           logDownState.chunkEnd = Math.min(logDownState.highWaterOfs + CHUNK_SIZE, logDownState.totalSize);
           logDownState.sendChunk();
         }
+        break;
+      }
+      case 253: { // STATUSTEXT — severity + 50-char text
+        // Wire: severity(u8,0), text(char[50],1..50)
+        if (payload.length < 2) break;
+        const severity = payload[0];
+        // Read until null terminator or end of field
+        let text = '';
+        for (let i = 1; i < Math.min(payload.length, 51); i++) {
+          if (payload[i] === 0) break;
+          text += String.fromCharCode(payload[i]);
+        }
+        text = text.trim();
+        if (!text) break;
+        addLog(`[fc] ${text}`);
+        window.showStatusText?.(severity, text);
         break;
       }
     }
