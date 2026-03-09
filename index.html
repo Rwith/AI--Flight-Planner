@@ -799,6 +799,10 @@
         </div>
         <!-- Decoded stats (hidden until data is loaded) -->
         <div id="bb-stats" style="display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <div style="font-size:11px;color:var(--sec);font-weight:600;letter-spacing:.05em">FLIGHT DATA</div>
+            <button class="btn danger" style="font-size:10px;padding:2px 8px" onclick="bbCloseStats()">✕ Close</button>
+          </div>
           <div class="bb-stat-grid">
             <div class="stat-card"><div class="stat-val" id="bb-dist">--</div><div class="stat-label">Distance</div></div>
             <div class="stat-card"><div class="stat-val" id="bb-dur">--</div><div class="stat-label">Duration</div></div>
@@ -3399,14 +3403,17 @@ function _parseArduPilotLog(text) {
       if (isFinite(alt) && Math.abs(alt) > 10000) alt /= 1000;
       const spd = parseFloat(o.Spd ?? o.Speed ?? o.SPD ?? '0') || 0;
       const hdg = parseFloat(o.GCrs ?? o.Yaw  ?? o.HDG ?? '0') || 0;
+      const tus = parseFloat(o.TimeUS);
       if (isFinite(lat) && isFinite(lon) && Math.abs(lat) > 0.0001) {
-        points.push({ lat, lon, alt, spd, hdg, batt: lastBatt, roll: 0, pitch: 0, climb: 0 });
+        points.push({ lat, lon, alt, spd, hdg, batt: lastBatt, roll: 0, pitch: 0, climb: 0,
+          timeUs: isFinite(tus) ? tus : undefined });
       }
     } else if (type === 'BAT' || type === 'BATT') {
       const o = toObj(type, p.slice(1));
-      // ArduPilot stores Rem (0-1), Volt, Curr; try to get remaining %
-      const rem  = parseFloat(o.Rem);
-      const remP = isFinite(rem) && rem <= 1 ? rem * 100 : (isFinite(rem) ? rem : null);
+      // ArduPilot stores RemPct (0-100) in newer versions, Rem (0-1) in older
+      const rawRem = o.RemPct ?? o.Rem ?? o.BattRem;
+      const rem = parseFloat(rawRem);
+      const remP = isFinite(rem) && rem <= 1 ? rem * 100 : (isFinite(rem) && rem <= 100 ? rem : null);
       if (remP != null && remP >= 0 && remP <= 100) lastBatt = remP;
       if (points.length && lastBatt != null) points[points.length - 1].batt = lastBatt;
     } else if (type === 'ATT') {
@@ -3456,6 +3463,11 @@ function _bbSummarize(points, events) {
     const d0 = new Date(t0), d1 = new Date(t1);
     if (!isNaN(d0) && !isNaN(d1) && d1 > d0) durationS = (d1 - d0) / 1000;
   }
+  // Fallback: use TimeUS (µs since boot) when no calendar timestamps
+  if (durationS == null) {
+    const us0 = points[0]?.timeUs, us1 = points[points.length - 1]?.timeUs;
+    if (us0 != null && us1 != null && us1 > us0) durationS = (us1 - us0) / 1e6;
+  }
   return { points, totalDist, maxAlt, maxSpd, minBatt, durationS, events: events || [] };
 }
 
@@ -3499,6 +3511,14 @@ function _renderDecodedFlight(d) {
   }
 
   bbShowOnMap();
+}
+
+/* ── Close / clear decoded data ── */
+function bbCloseStats() {
+  bbDecoded = null;
+  const el = document.getElementById('bb-stats');
+  if (el) el.style.display = 'none';
+  bbClearPath();
 }
 
 /* ── Map path display ── */
@@ -3697,11 +3717,13 @@ function parseDataFlashBin(buffer) {
         const alt = fields.Alt ?? fields.ALT ?? 0;
         const spd = fields.Spd ?? fields.Speed ?? 0;
         const hdg = fields.GCrs ?? fields.Yaw ?? 0;
+        const tus = fields.TimeUS;
         if (lat != null && lon != null && isFinite(lat) && isFinite(lon) && Math.abs(lat) > 0.0001) {
-          points.push({ lat, lon, alt: alt||0, spd: spd||0, hdg: hdg||0, batt: lastBatt, roll:0, pitch:0, climb:0 });
+          points.push({ lat, lon, alt: alt||0, spd: spd||0, hdg: hdg||0, batt: lastBatt, roll:0, pitch:0, climb:0,
+            timeUs: (tus != null && isFinite(tus)) ? tus : undefined });
         }
       } else if (name === 'BAT' || name === 'BATT') {
-        const rem = fields.Rem ?? fields.BattRem;
+        const rem = fields.Rem ?? fields.BattRem ?? fields.RemPct;
         if (rem != null && isFinite(rem)) {
           lastBatt = rem <= 1 ? rem * 100 : rem;
           if (points.length) points[points.length-1].batt = lastBatt;
