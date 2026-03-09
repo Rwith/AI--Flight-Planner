@@ -3611,9 +3611,9 @@ function bbShowOnMap() {
     color: '#fd79a8', weight: 2.5, opacity: 0.9,
     renderer: L.canvas(), smoothFactor: 1.5
   }).addTo(map);
-  // Start marker (green dot)
-  const sm = L.circleMarker(lls[0], { radius: 6, color: '#3fb950', fillColor: '#3fb950', fillOpacity: 1, weight: 2 })
-    .addTo(map).bindTooltip('Start', { permanent: false });
+  // Home / launch-point marker (same style as mission builder)
+  const sm = L.marker(lls[0], { icon: createHomeIcon(), zIndexOffset: 1000, interactive: false })
+    .addTo(map).bindTooltip('Home (launch)', { permanent: false });
   // End marker (red dot)
   const em = L.circleMarker(lls[lls.length - 1], { radius: 6, color: '#f85149', fillColor: '#f85149', fillOpacity: 1, weight: 2 })
     .addTo(map).bindTooltip('End', { permanent: false });
