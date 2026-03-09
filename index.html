@@ -3182,40 +3182,67 @@ function drawHUDCompass(canvas, rawHdg, armed) {
   const W = canvas.width, H = canvas.height, ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, W, H);
   const cx = W / 2;
-  const hdg = ((( isFinite(rawHdg) ? rawHdg : 0) % 360) + 360) % 360;
-  const PX_PER_DEG = 2.4;
+  const hdg = (((isFinite(rawHdg) ? rawHdg : 0) % 360) + 360) % 360;
+  const PX_PER_DEG = 3.0;   // pixels per degree — controls tape stretch
+  const CARD = { 0:'N', 45:'NE', 90:'E', 135:'SE', 180:'S', 225:'SW', 270:'W', 315:'NW' };
 
   // Background
-  ctx.fillStyle = 'rgba(2,6,18,.62)';
+  ctx.fillStyle = 'rgba(2,6,18,.88)';
   ctx.fillRect(0, 0, W, H);
 
-  // Tick marks
-  for (let d = -65; d <= 65; d += 5) {
-    const deg = ((hdg + d) % 360 + 360) % 360;
-    const x = cx + d * PX_PER_DEG;
-    const isCard = deg % 90 === 0, isMajor = deg % 30 === 0;
-    const tickH = isCard ? 14 : isMajor ? 10 : 6;
-    ctx.beginPath(); ctx.moveTo(x, H - 1); ctx.lineTo(x, H - 1 - tickH);
-    ctx.strokeStyle = isMajor ? 'rgba(255,255,255,.8)' : 'rgba(255,255,255,.3)';
-    ctx.lineWidth = isCard ? 1.5 : 1; ctx.stroke();
+  // ── Clipped tape region ────────────────────────────────────────────────────
+  // Ticks are positioned by ABSOLUTE compass degree so they scroll smoothly
+  // as heading changes by fractional degrees (no 5° notching).
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+
+  const margin   = 15;                              // extra degrees past each edge
+  const leftDeg  = hdg - W / (2 * PX_PER_DEG) - margin;
+  const rightDeg = hdg + W / (2 * PX_PER_DEG) + margin;
+  const firstTick = Math.ceil(leftDeg / 5) * 5;    // first multiple of 5° on-screen
+
+  ctx.textAlign   = 'center';
+  ctx.textBaseline = 'alphabetic';
+
+  for (let deg = firstTick; deg <= rightDeg; deg += 5) {
+    const x       = cx + (deg - hdg) * PX_PER_DEG;
+    const normDeg = ((deg % 360) + 360) % 360;
+    const isCard  = CARD[normDeg] !== undefined;
+    const isMajor = normDeg % 10 === 0;
+
+    // Tick mark
+    const tickH = isCard ? 14 : isMajor ? 9 : 5;
+    ctx.beginPath(); ctx.moveTo(x, H); ctx.lineTo(x, H - tickH);
+    ctx.strokeStyle = isCard ? '#58a6ff' : isMajor ? 'rgba(255,255,255,.75)' : 'rgba(255,255,255,.3)';
+    ctx.lineWidth   = isCard ? 1.5 : 1;
+    ctx.stroke();
+
+    // Label on every 10° (cardinal names for N/NE/E etc, numbers otherwise)
     if (isMajor) {
-      const lbl = { 0:'N', 90:'E', 180:'S', 270:'W' }[deg] ?? String(deg).padStart(3,'0');
-      ctx.fillStyle = isCard ? '#58a6ff' : 'rgba(255,255,255,.85)';
-      ctx.font = isCard ? 'bold 11px monospace' : '10px monospace';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(lbl, x, H - tickH - 9);
+      const lbl = CARD[normDeg] ?? String(normDeg);
+      ctx.fillStyle = isCard ? '#58a6ff' : 'rgba(255,255,255,.80)';
+      ctx.font      = isCard ? 'bold 10px sans-serif' : '9px monospace';
+      ctx.fillText(lbl, x, H - tickH - 3);
     }
   }
+  ctx.restore();
 
-  // Centre triangle pointer
+  // ── Fixed lubber-line triangle (drawn outside clip, always visible) ────────
   ctx.fillStyle = '#f85149';
-  ctx.beginPath(); ctx.moveTo(cx, H - 1); ctx.lineTo(cx - 5, H - 9); ctx.lineTo(cx + 5, H - 9); ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(cx, H - 1); ctx.lineTo(cx - 5, H - 11); ctx.lineTo(cx + 5, H - 11);
+  ctx.closePath(); ctx.fill();
 
-  // Update HTML heading readout (never lost to canvas clipping)
+  // ── Border ─────────────────────────────────────────────────────────────────
+  ctx.strokeStyle = 'rgba(255,255,255,.1)'; ctx.lineWidth = 1;
+  ctx.strokeRect(.5, .5, W - 1, H - 1);
+
+  // ── HTML heading readout (never affected by canvas clipping) ───────────────
   const hdgEl = document.getElementById('hud-hdg');
-  if (hdgEl) hdgEl.textContent = String(Math.round(hdg)).padStart(3,'0') + '°';
-
-  ctx.strokeStyle = 'rgba(255,255,255,.1)'; ctx.lineWidth = 1; ctx.strokeRect(.5, .5, W - 1, H - 1);
+  if (hdgEl) {
+    const card = CARD[Math.round(hdg / 45) * 45 % 360] ?? '';
+    hdgEl.textContent = String(Math.round(hdg)).padStart(3, '0') + '°' + (card ? ' ' + card : '');
+  }
 }
 
 function drawHUDHorizon(canvas, roll, pitch) {
