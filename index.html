@@ -501,6 +501,7 @@
             <option value="kmh">km/h</option>
             <option value="kts">kts</option>
             <option value="mph">mph</option>
+            <option value="ms">m/s</option>
           </select>
           <span id="ms-gs-note" style="color:var(--sec);font-size:10px;margin-left:4px"></span>
         </div>
@@ -912,13 +913,14 @@ let weatherData = null;
 
 // ====================== SPEED UNITS ======================
 let speedUnit = (() => { try { return localStorage.getItem('speedUnit') || 'kmh'; } catch { return 'kmh'; } })();
-const _SPD_FACTOR = { kmh: 3.6,     kts: 1.94384, mph: 2.23694 };
-const _SPD_LABEL  = { kmh: 'km/h',  kts: 'kts',   mph: 'mph'   };
+const _SPD_FACTOR = { kmh: 3.6,     kts: 1.94384, mph: 2.23694, ms: 1 };
+const _SPD_LABEL  = { kmh: 'km/h',  kts: 'kts',   mph: 'mph',   ms: 'm/s' };
 // Input constraints per unit (equivalent ranges of 1–80 m/s)
 const _SPD_CFG = {
   kmh: { min: 3,   max: 290, step: 1,   def: 54  },
   kts: { min: 2,   max: 157, step: 0.5, def: 29  },
   mph: { min: 2,   max: 179, step: 0.5, def: 34  },
+  ms:  { min: 1,   max: 80,  step: 0.5, def: 15  },
 };
 function msToDisp(ms)   { return ms  * _SPD_FACTOR[speedUnit]; }
 function kmhToDisp(kmh) { return kmh * _SPD_FACTOR[speedUnit] / 3.6; }
@@ -962,6 +964,7 @@ function changeSpeedUnit(u) {
   }
   _applySpeedUnitLabels();
   renderWPList(); updateMissionStats();
+  if (weatherData) renderWeather(weatherData);
 }
 
 function initSpeedUnit() {
