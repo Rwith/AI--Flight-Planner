@@ -2376,7 +2376,10 @@ function onRoseHover(e) {
   // Build compact clock-range string: consecutive offsets → "19:00–22:00", gaps stay separate
   const _fmtHour = i => {
     const t = new Date(hours[startIdx + i]);
-    return t.getHours().toString().padStart(2, '0') + ':00';
+    const base = new Date(hours[startIdx]);
+    const dayOffset = Math.floor((t - base) / 86400000);
+    const suffix = dayOffset > 0 ? `<sup>+${dayOffset}</sup>` : '';
+    return t.getHours().toString().padStart(2, '0') + ':00' + suffix;
   };
   function _rangeStr(offsets) {
     if (!offsets.length) return '';
