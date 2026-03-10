@@ -27,8 +27,9 @@
     118: 56,  // LOG_ENTRY        (received — validated, confirmed correct)
     119: 116, // LOG_REQUEST_DATA (sent by us)
     122: 203, // LOG_REQUEST_END  (sent by us)
-    11:  89,  // SET_MODE         (sent by us — change flight mode)
-    76:  152  // COMMAND_LONG     (sent by us — arm/disarm, etc.)
+    11:  89,  // SET_MODE              (sent by us — change flight mode)
+    76:  152, // COMMAND_LONG          (sent by us — arm/disarm, etc.)
+    70:  124  // RC_CHANNELS_OVERRIDE  (sent by us — joystick RC input)
   };
 
   function crc16 (data) {
@@ -75,6 +76,18 @@
     const b = new ArrayBuffer(4);
     new DataView(b).setInt32(0, v, true);
     return [...new Uint8Array(b)];
+  }
+  function i16 (v) { const n = v < 0 ? v + 65536 : v; return [n & 0xFF, (n >> 8) & 0xFF]; }
+
+  // ─── RC_CHANNELS_OVERRIDE (id=70) ────────────────────────────────────────
+  // Wire (reordered by type size): 8×u16 channels, then target_system(u8), target_component(u8)
+  // Channel values: 1000–2000 µs (standard RC PWM). 65535 = UINT16_MAX = release/ignore channel.
+  function buildRCOverride (tSys, tComp, ch1, ch2, ch3, ch4, ch5, ch6, ch7, ch8) {
+    return buildFrame(70, [
+      ...u16(ch1), ...u16(ch2), ...u16(ch3), ...u16(ch4),
+      ...u16(ch5), ...u16(ch6), ...u16(ch7), ...u16(ch8),
+      tSys, tComp
+    ]);
   }
 
   // ─── HEARTBEAT (id=0) — GCS keepalive ────────────────────────────────────
@@ -1380,6 +1393,18 @@
     const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
     writer.write(buildCommandLong(tSys, tComp, 400, arm ? 1 : 0, 0, 0, 0, 0, 0, 0, 0)).catch(e => addLog('[arm] ' + e.message));
     addLog(`[arm] COMMAND_LONG ARM_DISARM param1=${arm ? 1 : 0} → sysid=${tSys}`);
+  };
+
+  // ─── RC_CHANNELS_OVERRIDE — joystick control ──────────────────────────────
+  // chs: array of 8 channel values (1000–2000 µs). Use 65535 to release a channel.
+  // Call at ~20 Hz while joystick override is active; call with all 65535 to release.
+  window.serialSendRC = (chs) => {
+    if (!writer) return;
+    const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
+    const [c1=65535,c2=65535,c3=65535,c4=65535,c5=65535,c6=65535,c7=65535,c8=65535] = chs;
+    writer.write(buildRCOverride(tSys, tComp, c1, c2, c3, c4, c5, c6, c7, c8))
+          .catch(() => {});
   };
 
   window.serialExportCSV        = exportTelCSV;
