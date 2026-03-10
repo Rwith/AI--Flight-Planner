@@ -1,7 +1,7 @@
 {
-  "name": "flight-planner",
+  "name": "aeronav-ai",
   "version": "1.0.0",
-  "description": "Waypoint Mission & Flight Planner",
+  "description": "AeroNav AI — Waypoint Mission & Flight Planner",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -21,8 +21,8 @@
     "electron-builder": "^25.0.0"
   },
   "build": {
-    "appId": "com.flightplanner.app",
-    "productName": "Flight Planner",
+    "appId": "com.aeronav.ai",
+    "productName": "AeroNav AI",
     "npmRebuild": true,
     "files": [
       "main.js",

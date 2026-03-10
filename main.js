@@ -134,7 +134,7 @@ ipcMain.on('serial-write', (_, bytes) => {
 function createWindow () {
   mainWin = new BrowserWindow({
     width: 1280, height: 820, minWidth: 900, minHeight: 600,
-    title: 'Flight Planner',
+    title: 'AeroNav AI',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
