@@ -412,8 +412,31 @@
   <div id="gcs-arm-badge">--</div>
   <div id="gcs-mode-display">MODE: --</div>
 
-  <!-- Connect button (mirrors FC tab) -->
-  <button id="gcs-connect-btn" class="btn primary" onclick="serialConnect()" style="width:100%;font-size:13px;padding:10px">Connect to FC</button>
+  <!-- Connection panel -->
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px">
+    <div style="font-size:10px;font-weight:700;color:var(--sec);text-transform:uppercase;letter-spacing:.8px">Connection</div>
+    <!-- Mode tabs -->
+    <div class="gcs-mavtype-tabs" id="gcs-conn-tabs">
+      <button class="gcs-mavtype-tab active" id="gcs-ctab-usb"    onclick="gcsSetConnMode('usb')">USB</button>
+      <button class="gcs-mavtype-tab"        id="gcs-ctab-direct" onclick="gcsSetConnMode('direct')">WiFi Direct</button>
+      <button class="gcs-mavtype-tab"        id="gcs-ctab-wifi"   onclick="gcsSetConnMode('wifi')">WiFi + Bridge</button>
+    </div>
+    <!-- WiFi URL (shown for direct + wifi modes) -->
+    <div id="gcs-wifi-row" style="display:none;flex-direction:column;gap:4px">
+      <label style="font-size:10px;color:var(--sec)">WebSocket URL</label>
+      <input id="gcs-wifi-url" type="text" value="ws://10.0.0.1:5760"
+        oninput="document.getElementById('wifi-url').value=this.value"
+        style="background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:6px 8px;font-size:12px;outline:none;width:100%;box-sizing:border-box">
+    </div>
+    <!-- Backpack IP (shown for wifi + bridge mode only) -->
+    <div id="gcs-bp-row" style="display:none;flex-direction:column;gap:4px">
+      <label style="font-size:10px;color:var(--sec)">Backpack IP</label>
+      <input id="gcs-bp-ip" type="text" value="10.0.0.1"
+        oninput="document.getElementById('backpack-ip').value=this.value"
+        style="background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:6px 8px;font-size:12px;outline:none;width:100%;box-sizing:border-box">
+    </div>
+    <button id="gcs-connect-btn" class="btn primary" onclick="serialConnect()" style="width:100%;font-size:13px;padding:10px">Connect to FC</button>
+  </div>
 
   <!-- HUD instruments (moved here when GCS mode is active) -->
   <div id="gcs-hud-slot"></div>
@@ -3396,6 +3419,10 @@ function toggleGCS() {
   msnBtns.style.display = _gcsActive ? 'none' : 'flex';
 
   if (_gcsActive) {
+    // Sync connection mode tabs with whatever is set in the FC tab
+    const currentMode = document.getElementById('conn-mode').value;
+    gcsSetConnMode(currentMode);
+
     // Move HUD card into GCS panel slot and force it visible
     if (hudCard && hudSlot) hudSlot.appendChild(hudCard);
     hudCard.style.display = 'block';
@@ -3413,6 +3440,31 @@ function toggleGCS() {
     // Restore original HUD visibility
     hudCard.style.display = _hudVisible ? 'block' : 'none';
     window.dispatchEvent(new Event('resize'));
+  }
+}
+
+function gcsSetConnMode(mode) {
+  // Sync underlying FC tab selector and run its handler so wifi-url defaults are set
+  document.getElementById('conn-mode').value = mode;
+  toggleConnMode();
+
+  // Update GCS tab highlights
+  ['usb','direct','wifi'].forEach(m => {
+    const t = document.getElementById('gcs-ctab-' + m);
+    if (t) t.classList.toggle('active', m === mode);
+  });
+
+  // Show/hide URL and backpack IP rows
+  const isWifi = mode === 'wifi' || mode === 'direct';
+  const wifiRow = document.getElementById('gcs-wifi-row');
+  const bpRow   = document.getElementById('gcs-bp-row');
+  wifiRow.style.display = isWifi ? 'flex' : 'none';
+  bpRow.style.display   = mode === 'wifi' ? 'flex' : 'none';
+
+  // Mirror the (possibly auto-filled) wifi-url value back into the GCS input
+  if (isWifi) {
+    const url = document.getElementById('wifi-url').value;
+    document.getElementById('gcs-wifi-url').value = url;
   }
 }
 
