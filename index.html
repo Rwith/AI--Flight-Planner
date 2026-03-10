@@ -309,6 +309,7 @@
   <button class="topbtn" onclick="exportWaypoints()">Export .waypoints</button>
   <button class="topbtn" onclick="exportKML()">Export KML</button>
   <label class="topbtn" style="cursor:pointer">Import <input type="file" id="import-file" accept=".waypoints,.txt" style="display:none" onchange="importWaypoints(event)"></label>
+  <button class="topbtn primary" id="upload-btn" onclick="serialUploadWaypoints()" disabled title="Upload waypoints to connected flight computer">Upload to FC</button>
   <button class="topbtn" onclick="reverseMission()">↩ Reverse</button>
   <button class="topbtn" id="view3d-btn" onclick="toggle3DView()">3D View</button>
   <button class="topbtn" onclick="openLogbook()">Logbook</button>
@@ -391,9 +392,9 @@
             </select>
           </div>
         </div>
-        <!-- Pre-action (DO / CONDITION command inserted before this waypoint) -->
+        <!-- Post-action (DO / CONDITION command inserted after this waypoint) -->
         <div style="display:flex;align-items:center;gap:6px;margin:4px 0 2px">
-          <label style="font-size:11px;color:var(--muted);white-space:nowrap;min-width:72px">Pre-action</label>
+          <label style="font-size:11px;color:var(--muted);white-space:nowrap;min-width:72px">Action</label>
           <select id="ed-pre-action" onchange="updateSelectedWP()" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px">
             <option value="none">— None —</option>
             <option value="delay">Delay</option>
@@ -765,13 +766,10 @@
       <!-- ── Waypoint Upload ─────────────────────────────────────────────── -->
       <div class="card">
         <div class="card-title">Upload Mission to FC</div>
-        <div style="font-size:11px;color:var(--sec);margin-bottom:8px">
-          Sends current waypoints as a MAVLink mission (MISSION_ITEM_INT) using the
-          QGC waypoints format. Compatible with ArduPilot Copter / Plane / Rover.
-          Home point is automatically prepended as seq&nbsp;0.
+        <div style="font-size:11px;color:var(--sec);margin-bottom:6px">
+          Use the <strong>Upload to FC</strong> button in the toolbar to send the current
+          mission. Compatible with ArduPilot Copter / Plane / Rover via MAVLink MISSION_ITEM_INT.
         </div>
-        <button class="btn primary" id="upload-btn" onclick="serialUploadWaypoints()"
-                disabled style="width:100%">Upload Waypoints to Flight Computer</button>
         <div id="upload-status" data-state=""></div>
       </div>
 
@@ -1512,23 +1510,6 @@ function exportWaypoints() {
     const a = wp.action;
     const pa = wp.preAction || 'none';
 
-    // ── Pre-action (DO / CONDITION) emitted before the nav item ──
-    if (pa !== 'none') {
-      let pcmd, pp1=0, pp2=0, pp3=0, pp4=0, plat=0, plon=0, palt=0;
-      if      (pa === 'delay')     { pcmd=93;  pp1=wp.delayTime||5; }
-      else if (pa === 'set_speed') { pcmd=178; pp1=wp.speedType??1; pp2=wp.speed||5; pp3=-1; }
-      else if (pa === 'cond_yaw')  { pcmd=115; pp1=wp.yawHeading||0; pp2=wp.yawSpeed||0; pp4=wp.yawRel||0; }
-      else if (pa === 'do_jump')   { pcmd=177; pp1=wp.jumpWP||1; pp2=wp.jumpRepeat||1; }
-      else if (pa === 'set_roi')   { pcmd=201; pp1=3; plat=wp.lat; plon=wp.lon; palt=wp.alt; }
-      else if (pa === 'set_servo') { pcmd=183; pp1=wp.servoNum||9; pp2=wp.servoPWM||1500; }
-      if (pcmd) {
-        const pfLat = plat ? plat.toFixed(7) : '0';
-        const pfLon = plon ? plon.toFixed(7) : '0';
-        lines.push(`${idx}\t0\t3\t${pcmd}\t${pp1}\t${pp2}\t${pp3}\t${pp4}\t${pfLat}\t${pfLon}\t${palt}\t1`);
-        idx++;
-      }
-    }
-
     // ── Nav item ──
     let cmd, p1=0, p2=0, p3=0, p4=0, lat=wp.lat, lon=wp.lon, alt=wp.alt;
     if      (a === 'waypoint')     { cmd=16;  p1=wp.holdTime||0; }
@@ -1550,6 +1531,23 @@ function exportWaypoints() {
       // DO_DIGICAM_CONTROL immediately after the nav waypoint
       lines.push(`${idx}\t0\t3\t203\t0\t0\t0\t1\t0\t0\t0\t1`);
       idx++;
+    }
+
+    // ── Post-action (DO / CONDITION) emitted after the nav item ──
+    if (pa !== 'none') {
+      let pcmd, pp1=0, pp2=0, pp3=0, pp4=0, plat=0, plon=0, palt=0;
+      if      (pa === 'delay')     { pcmd=93;  pp1=wp.delayTime||5; }
+      else if (pa === 'set_speed') { pcmd=178; pp1=wp.speedType??1; pp2=wp.speed||5; pp3=-1; }
+      else if (pa === 'cond_yaw')  { pcmd=115; pp1=wp.yawHeading||0; pp2=wp.yawSpeed||0; pp4=wp.yawRel||0; }
+      else if (pa === 'do_jump')   { pcmd=177; pp1=wp.jumpWP||1; pp2=wp.jumpRepeat||1; }
+      else if (pa === 'set_roi')   { pcmd=201; pp1=3; plat=wp.lat; plon=wp.lon; palt=wp.alt; }
+      else if (pa === 'set_servo') { pcmd=183; pp1=wp.servoNum||9; pp2=wp.servoPWM||1500; }
+      if (pcmd) {
+        const pfLat = plat ? plat.toFixed(7) : '0';
+        const pfLon = plon ? plon.toFixed(7) : '0';
+        lines.push(`${idx}\t0\t3\t${pcmd}\t${pp1}\t${pp2}\t${pp3}\t${pp4}\t${pfLat}\t${pfLon}\t${palt}\t1`);
+        idx++;
+      }
     }
   });
   const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
@@ -1575,9 +1573,6 @@ function importWaypoints(event) {
     // DO/CONDITION commands stored as preAction on the following nav wp
     const PA_CMD_MAP = {93:'delay',178:'set_speed',115:'cond_yaw',177:'do_jump',201:'set_roi',183:'set_servo'};
 
-    let pendingPreAction = 'none';
-    let pendingPreParams = {};
-
     lines.slice(1).forEach(line => {
       const p = line.split('\t');
       if (p.length < 12) return;
@@ -1591,37 +1586,36 @@ function importWaypoints(event) {
         return;
       }
 
-      if (PA_CMD_MAP[cmd]) {
-        // DO / CONDITION — store as pending pre-action for the next nav waypoint
-        pendingPreAction = PA_CMD_MAP[cmd];
-        pendingPreParams = {
-          delayTime:   cmd===93  ? parseFloat(p[4])||5    : 5,
-          speedType:   cmd===178 ? parseInt(p[4])??1      : 1,
-          speed:       cmd===178 ? parseFloat(p[5])||5    : 5,
-          yawHeading:  cmd===115 ? parseFloat(p[4])||0    : 0,
-          yawSpeed:    cmd===115 ? parseFloat(p[5])||0    : 0,
-          yawRel:      cmd===115 ? parseInt(p[7])||0      : 0,
-          jumpWP:      cmd===177 ? parseInt(p[4])||1      : 1,
-          jumpRepeat:  cmd===177 ? parseInt(p[5])||1      : 1,
-          servoNum:    cmd===183 ? parseInt(p[4])||9      : 9,
-          servoPWM:    cmd===183 ? parseInt(p[5])||1500   : 1500,
-        };
-        return;
-      }
-
       if (NAV_CMDS.has(cmd)) {
         const action = NAV_CMD_MAP[cmd] || 'waypoint';
         const extra = {
-          preAction:   pendingPreAction,
-          ...pendingPreParams,
+          preAction:   'none',
           holdTime:    ['waypoint','spline'].includes(action) ? parseFloat(p[4])||0 : 0,
           loiterR:     parseFloat(p[6]) || 20,
           loiterTime:  action==='loiter_time'  ? parseFloat(p[4])||10 : 10,
           loiterTurns: action==='loiter_turns' ? parseFloat(p[4])||1  : 1,
         };
         addWaypointSilent(lat, lon, alt, action, extra);
-        pendingPreAction = 'none';
-        pendingPreParams = {};
+        return;
+      }
+
+      if (PA_CMD_MAP[cmd]) {
+        // DO / CONDITION — attach to the preceding nav waypoint as its post-action
+        if (waypoints.length > 0) {
+          const prev = waypoints[waypoints.length - 1];
+          prev.preAction = PA_CMD_MAP[cmd];
+          prev.delayTime   = cmd===93  ? parseFloat(p[4])||5    : prev.delayTime;
+          prev.speedType   = cmd===178 ? parseInt(p[4])??1      : prev.speedType;
+          prev.speed       = cmd===178 ? parseFloat(p[5])||5    : prev.speed;
+          prev.yawHeading  = cmd===115 ? parseFloat(p[4])||0    : prev.yawHeading;
+          prev.yawSpeed    = cmd===115 ? parseFloat(p[5])||0    : prev.yawSpeed;
+          prev.yawRel      = cmd===115 ? parseInt(p[7])||0      : prev.yawRel;
+          prev.jumpWP      = cmd===177 ? parseInt(p[4])||1      : prev.jumpWP;
+          prev.jumpRepeat  = cmd===177 ? parseInt(p[5])||1      : prev.jumpRepeat;
+          prev.servoNum    = cmd===183 ? parseInt(p[4])||9      : prev.servoNum;
+          prev.servoPWM    = cmd===183 ? parseInt(p[5])||1500   : prev.servoPWM;
+        }
+        return;
       }
     });
     deselectWP(); updatePolyline(); updateProfile(); renderWPList();

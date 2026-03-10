@@ -941,15 +941,15 @@
 
     const home = window._serialGetHome?.() ?? { lat: wps[0].lat, lon: wps[0].lon };
     const hLat = home.lat, hLon = home.lon;
-    // Expand: pre-actions go before their nav wp; photo gets a DO_DIGICAM_CONTROL after.
+    // Expand: nav item first, then photo digicam, then post-action DO/CONDITION.
     const list = [{ lat: hLat, lon: hLon, alt: 0, action: 'home' }];
     for (const wp of wps) {
-      if (wp.preAction && wp.preAction !== 'none') {
-        // Synthetic item: carries pre-action type + all params from the parent wp
-        list.push({ ...wp, action: wp.preAction });
-      }
       list.push(wp);
       if (wp.action === 'photo') list.push({ lat: 0, lon: 0, alt: 0, action: '_digicam' });
+      if (wp.preAction && wp.preAction !== 'none') {
+        // Synthetic item: carries post-action type + all params from the parent wp
+        list.push({ ...wp, action: wp.preAction });
+      }
     }
 
     const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
