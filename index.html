@@ -325,7 +325,6 @@
   <div class="ctx-item" id="ctx-satellite" onclick="ctxSetTile('satellite')">Satellite</div>
   <div class="ctx-item" id="ctx-topo"      onclick="ctxSetTile('topo')">Topography (Esri)</div>
   <div class="ctx-item" id="ctx-osm"       onclick="ctxSetTile('osm')">OpenStreetMap</div>
-  <div class="ctx-item" id="ctx-otopo"     onclick="ctxSetTile('otopo')">OpenTopoMap</div>
   <div style="height:1px;background:var(--border);margin:4px 0"></div>
   <div class="ctx-item"                    onclick="if(_ctxLatLng)addRallyPoint(_ctxLatLng.lat,_ctxLatLng.lng);closeMapCtx()">Add Rally Point</div>
   <div style="height:1px;background:var(--border);margin:4px 0"></div>
@@ -3238,7 +3237,6 @@ const TILE_LAYERS = {
   satellite: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri', sub: '' },
   topo:      { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri', sub: '' },
   osm:       { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',               attr: '&copy; OpenStreetMap contributors', sub: 'abc' },
-  otopo:     { url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',                 attr: '&copy; OpenTopoMap contributors', sub: 'abc', maxNativeZoom: 17 },
 };
 
 let _currentTileType = (() => { try { return localStorage.getItem('tileType') || 'dark'; } catch { return 'dark'; } })();
