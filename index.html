@@ -204,7 +204,6 @@
   }
   .insert-btn:hover { transform: scale(1.25); background: #58a6ff; color: #000; }
   .topbtn.view3d-on { border-color: var(--blue); color: var(--blue); background: rgba(88,166,255,.12); }
-  .topbtn.sun-on { border-color: #f9ca24; color: #f9ca24; background: rgba(249,202,36,.10); }
   #ml3d { position: absolute; inset: 0; z-index: 500; }
   /* mobile */
   @media (max-width: 767px) {
@@ -315,7 +314,6 @@
   <button class="topbtn" id="view3d-btn" onclick="toggle3DView()">3D View</button>
   <button class="topbtn" onclick="openLogbook()">Logbook</button>
   <button class="topbtn" id="hud-btn" onclick="toggleHUD()">HUD</button>
-  <button class="topbtn" id="sun-btn" onclick="toggleSunOverlay()">☀ Sun</button>
   <button class="topbtn" id="nfz-btn" style="display:none" onclick="toggleNFZ()">NFZ Off</button>
   <button class="topbtn danger" onclick="clearMission()">Clear</button>
 </div>
@@ -1130,33 +1128,6 @@ windCanvas.id = 'wind-canvas';
 windCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:400';
 map.getContainer().appendChild(windCanvas);
 
-// Sun shadow canvas — sits just above the sky overlay
-const _sunShadowCanvas = document.createElement('canvas');
-_sunShadowCanvas.id = 'sun-shadow-canvas';
-_sunShadowCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:300';
-map.getContainer().appendChild(_sunShadowCanvas);
-
-// Sun control panel — floating panel, shown when sun overlay is active
-const _sunCtrlPanel = document.createElement('div');
-_sunCtrlPanel.id = 'sun-ctrl-panel';
-_sunCtrlPanel.style.cssText = 'display:none;position:absolute;bottom:52px;left:10px;z-index:700;background:rgba(13,17,23,.92);border:1px solid rgba(255,255,255,.13);border-radius:8px;padding:10px 12px;min-width:210px;box-shadow:0 4px 20px rgba(0,0,0,.65);backdrop-filter:blur(4px)';
-_sunCtrlPanel.innerHTML = `
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-    <canvas id="sun-compass-canvas" width="76" height="76" style="flex-shrink:0"></canvas>
-    <div style="flex:1;min-width:0">
-      <div id="sun-time-display" style="font-size:15px;font-weight:700;color:#e6edf3;letter-spacing:.5px">--:--</div>
-      <div id="sun-phase-display" style="font-size:10px;color:#8b949e;margin-top:3px;line-height:1.5">--</div>
-    </div>
-  </div>
-  <input type="range" id="sun-time-slider" min="0" max="1439" value="720"
-         style="width:100%;margin:0 0 7px;accent-color:#f9ca24;cursor:pointer" oninput="sunSliderChanged()">
-  <div style="display:flex;gap:5px">
-    <button id="sun-play-btn" onclick="sunPlayPause()"
-      style="flex:1;padding:4px 0;font-size:11px;background:rgba(88,166,255,.15);border:1px solid rgba(88,166,255,.3);border-radius:4px;color:#58a6ff;cursor:pointer">▶ Play</button>
-    <button onclick="sunResetNow()"
-      style="flex:1;padding:4px 0;font-size:11px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:4px;color:#8b949e;cursor:pointer">Now</button>
-  </div>`;
-map.getContainer().appendChild(_sunCtrlPanel);
 
 // Sky/day-night ambient overlay — sits between tiles and overlay pane
 const skyOverlay = document.createElement('div');
@@ -2773,27 +2744,6 @@ function sunTimes(lat, lon) {
   };
 }
 
-// Returns sun azimuth (°, 0=N clockwise) and elevation (° above horizon) for a given time
-function sunPosition(lat, lon, date) {
-  const d = date || new Date();
-  const dayOfYear = Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 86400000);
-  const B    = 2 * Math.PI * (dayOfYear - 1) / 365;
-  const EoT  = 229.18 * (0.000075 + 0.001868*Math.cos(B) - 0.032077*Math.sin(B)
-               - 0.014615*Math.cos(2*B) - 0.04089*Math.sin(2*B));
-  const decl = 0.006918 - 0.399912*Math.cos(B) + 0.070257*Math.sin(B)
-               - 0.006758*Math.cos(2*B) + 0.000907*Math.sin(2*B)
-               - 0.002697*Math.cos(3*B) + 0.00148*Math.sin(3*B);
-  const latR   = lat * Math.PI / 180;
-  const utcMin = d.getUTCHours() * 60 + d.getUTCMinutes() + d.getUTCSeconds() / 60;
-  const HA     = (utcMin - (720 - 4 * lon - EoT)) * (Math.PI / 720);
-  const sinEl  = Math.sin(latR)*Math.sin(decl) + Math.cos(latR)*Math.cos(decl)*Math.cos(HA);
-  const elevation = Math.asin(Math.max(-1, Math.min(1, sinEl))) * 180 / Math.PI;
-  const az = Math.atan2(
-    -Math.cos(decl) * Math.sin(HA),
-    Math.sin(decl)*Math.cos(latR) - Math.cos(decl)*Math.cos(HA)*Math.sin(latR)
-  );
-  return { elevation, azimuth: ((az * 180 / Math.PI) + 360) % 360 };
-}
 
 function formatLocalTime(date) {
   if (!date) return '--';
@@ -2871,177 +2821,6 @@ function updateSkyOverlay(cachedTimes, cachedNow) {
   el.style.background = bg;
 }
 
-// ====================== SUN / SHADOW OVERLAY ======================
-let _sunOverlayOn  = false;
-let _sunOverlayTime = new Date();
-let _sunAnimTimer  = null;
-
-function toggleSunOverlay() {
-  _sunOverlayOn = !_sunOverlayOn;
-  const btn = document.getElementById('sun-btn');
-  btn.classList.toggle('sun-on', _sunOverlayOn);
-  btn.textContent = _sunOverlayOn ? '☀ Sun ✓' : '☀ Sun';
-  const panel = document.getElementById('sun-ctrl-panel');
-  if (panel) panel.style.display = _sunOverlayOn ? 'block' : 'none';
-  if (_sunOverlayOn) {
-    _sunOverlayTime = new Date();
-    const sl = document.getElementById('sun-time-slider');
-    if (sl) sl.value = _sunOverlayTime.getHours() * 60 + _sunOverlayTime.getMinutes();
-  } else {
-    _sunStopPlay();
-  }
-  _refreshSunOverlay();
-}
-
-function _refreshSunOverlay() {
-  const canvas = document.getElementById('sun-shadow-canvas');
-  if (!canvas) return;
-  const container = map.getContainer();
-  const W = container.offsetWidth, H = container.offsetHeight;
-  if (canvas.width !== W) canvas.width = W;
-  if (canvas.height !== H) canvas.height = H;
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, W, H);
-  _drawSunCompass(null);
-  if (!_sunOverlayOn) return;
-
-  const mc  = map.getCenter();
-  const pos = sunPosition(mc.lat, mc.lng, _sunOverlayTime);
-  _drawSunCompass(pos);
-  _updateSunPanel(pos);
-
-  if (pos.elevation <= -1) return;  // below horizon — no directional shadow cast
-
-  // Shadow gradient: light comes FROM azimuth, shadow falls TO opposite side
-  const azRad    = pos.azimuth * Math.PI / 180;
-  const elevFrac = Math.max(0, 1 - pos.elevation / 90);   // stronger near horizon
-  const alpha    = Math.min(0.28, elevFrac * 0.28);
-  const sx = Math.sin(azRad), sy = -Math.cos(azRad);      // sun direction in canvas XY (N-up)
-  const grad = ctx.createLinearGradient(
-    W/2 + sx * W, H/2 + sy * H,   // sun side (transparent)
-    W/2 - sx * W, H/2 - sy * H    // shadow side (tinted)
-  );
-  const isGolden  = pos.elevation < 10;
-  const shadowRGB = isGolden ? `rgba(15,6,0,${alpha})` : `rgba(6,8,22,${alpha})`;
-  grad.addColorStop(0,   'rgba(0,0,0,0)');
-  grad.addColorStop(0.4, 'rgba(0,0,0,0)');
-  grad.addColorStop(1,   shadowRGB);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
-}
-
-function _updateSunPanel(pos) {
-  const h = _sunOverlayTime.getHours().toString().padStart(2, '0');
-  const m = _sunOverlayTime.getMinutes().toString().padStart(2, '0');
-  const tdEl = document.getElementById('sun-time-display');
-  const phEl = document.getElementById('sun-phase-display');
-  if (tdEl) tdEl.textContent = `${h}:${m}`;
-  if (phEl) {
-    const phase = pos.elevation < -6  ? '🌙 Night'
-                : pos.elevation < 0   ? '🌆 Civil Twilight'
-                : pos.elevation < 6   ? '🌅 Blue Hour'
-                : pos.elevation < 12  ? '🌄 Golden Hour'
-                :                       '☀ Day';
-    phEl.textContent = `${phase}  ↑${pos.elevation.toFixed(1)}°  ${pos.azimuth.toFixed(0)}°`;
-  }
-}
-
-function _drawSunCompass(pos) {
-  const c = document.getElementById('sun-compass-canvas');
-  if (!c) return;
-  const ctx = c.getContext('2d');
-  const W = c.width, H = c.height, cx = W/2, cy = H/2, R = W/2 - 5;
-  ctx.clearRect(0, 0, W, H);
-
-  // Horizon ring + tick marks
-  ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2*Math.PI);
-  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1; ctx.stroke();
-  for (let a = 0; a < 360; a += 45) {
-    const ar = a * Math.PI / 180;
-    const inner = a % 90 === 0 ? R - 7 : R - 4;
-    ctx.beginPath();
-    ctx.moveTo(cx + Math.sin(ar)*inner, cy - Math.cos(ar)*inner);
-    ctx.lineTo(cx + Math.sin(ar)*R,     cy - Math.cos(ar)*R);
-    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = a%90===0 ? 1.5 : 0.8; ctx.stroke();
-  }
-  // Cardinal labels
-  ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = 'bold 8px sans-serif';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  [['N',cx,cy-R+6],['S',cx,cy+R-6],['E',cx+R-6,cy],['W',cx-R+6,cy]].forEach(([t,x,y]) => ctx.fillText(t,x,y));
-
-  if (!pos) return;
-
-  // Sun dot position: azimuth = angle from N (clockwise), elevation → radial distance
-  // 90° elevation = centre, 0° = horizon ring edge
-  const r    = R * Math.max(0, 1 - Math.max(0, pos.elevation) / 90);
-  const azR  = pos.azimuth * Math.PI / 180;
-  const sunX = cx + Math.sin(azR) * r;
-  const sunY = cy - Math.cos(azR) * r;
-
-  // Dashed shadow direction arrow
-  if (pos.elevation > -2) {
-    const shR = ((pos.azimuth + 180) % 360) * Math.PI / 180;
-    ctx.setLineDash([2, 3]);
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + Math.sin(shR) * R * 0.52, cy - Math.cos(shR) * R * 0.52);
-    ctx.strokeStyle = 'rgba(180,185,220,0.5)'; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  // Sun glow + dot
-  const isGolden = pos.elevation >= 0 && pos.elevation <= 12;
-  const isBlue   = pos.elevation > -6 && pos.elevation < 0;
-  const dotCol   = isBlue ? '#a29bfe' : isGolden ? '#f9ca24' : '#ffeaa7';
-  const glowCol  = isBlue ? 'rgba(162,155,254,.45)' : isGolden ? 'rgba(249,202,36,.5)' : 'rgba(255,234,167,.35)';
-  if (pos.elevation > -6) {
-    const grd = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 11);
-    grd.addColorStop(0, glowCol); grd.addColorStop(1, 'transparent');
-    ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(sunX, sunY, 11, 0, 2*Math.PI); ctx.fill();
-    ctx.beginPath(); ctx.arc(sunX, sunY, pos.elevation >= 0 ? 4.5 : 3, 0, 2*Math.PI);
-    if (pos.elevation >= 0) { ctx.fillStyle = dotCol; ctx.fill(); }
-    else { ctx.strokeStyle = dotCol; ctx.lineWidth = 1.5; ctx.stroke(); }
-  }
-}
-
-function sunSliderChanged() {
-  const sl = document.getElementById('sun-time-slider');
-  if (!sl) return;
-  const d = new Date();
-  const mins = parseInt(sl.value);
-  d.setHours(Math.floor(mins / 60), mins % 60, 0, 0);
-  _sunOverlayTime = d;
-  _refreshSunOverlay();
-}
-
-function sunPlayPause() {
-  if (_sunAnimTimer) {
-    _sunStopPlay();
-  } else {
-    const btn = document.getElementById('sun-play-btn');
-    if (btn) btn.textContent = '⏸ Pause';
-    _sunAnimTimer = setInterval(() => {
-      const sl = document.getElementById('sun-time-slider');
-      if (!sl) return;
-      sl.value = (parseInt(sl.value) + 5) % 1440;  // advance 5 min per frame
-      sunSliderChanged();
-    }, 80);
-  }
-}
-
-function _sunStopPlay() {
-  if (_sunAnimTimer) { clearInterval(_sunAnimTimer); _sunAnimTimer = null; }
-  const btn = document.getElementById('sun-play-btn');
-  if (btn) btn.textContent = '▶ Play';
-}
-
-function sunResetNow() {
-  _sunStopPlay();
-  _sunOverlayTime = new Date();
-  const sl = document.getElementById('sun-time-slider');
-  if (sl) sl.value = _sunOverlayTime.getHours() * 60 + _sunOverlayTime.getMinutes();
-  _refreshSunOverlay();
-}
 
 
 // ====================== TERRAIN FOLLOW ======================
@@ -3492,7 +3271,7 @@ map.on('contextmenu', e => {
   if (y + menu.offsetHeight > vh) y = vh - menu.offsetHeight - 4;
   menu.style.left = x + 'px'; menu.style.top = y + 'px';
   // Sync active tile
-  ['dark','satellite','topo'].forEach(k => {
+  Object.keys(TILE_LAYERS).forEach(k => {
     const el = document.getElementById('ctx-' + k);
     if (el) el.classList.toggle('ctx-active', k === _currentTileType);
   });
@@ -3840,8 +3619,7 @@ function drawHUDHorizon(canvas, roll, pitch) {
 }
 
 // ====================== INIT ======================
-setInterval(() => { updateSkyOverlay(); if (_sunOverlayOn) { _sunOverlayTime = new Date(); const sl=document.getElementById('sun-time-slider'); if(sl && !_sunAnimTimer) sl.value=_sunOverlayTime.getHours()*60+_sunOverlayTime.getMinutes(); _refreshSunOverlay(); } }, 60000);
-map.on('moveend resize', () => { if (_sunOverlayOn) _refreshSunOverlay(); });
+setInterval(updateSkyOverlay, 60000); // refresh sky colour every minute
 // Swap the initial tile layer to CachedTileLayer (defined above) so offline tiles work,
 // and restore the user's last-chosen map style.
 ;(function() { switchMapTile(_currentTileType); })();
