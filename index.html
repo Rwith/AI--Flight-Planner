@@ -369,29 +369,31 @@
   <div class="title">✈ AeroNav AI <span style="font-size:10px;opacity:.55;font-weight:400;vertical-align:middle">V1.4.0</span></div>
   <span id="fly-status">LOADING</span>
   <span id="weather-summary">Fetching weather…</span>
-  <label style="font-size:11px;color:var(--sec);white-space:nowrap">Default Alt (m):</label>
-  <input id="default-alt" type="number" value="50" min="0" max="500" style="width:60px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 6px;font-size:12px;outline:none">
-  <select id="speed-unit-sel" onchange="changeSpeedUnit(this.value)" title="Speed units"
-    style="background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 6px;font-size:12px;outline:none;cursor:pointer">
-    <option value="kmh">km/h</option>
-    <option value="kts">kts</option>
-    <option value="mph">mph</option>
-    <option value="ms">m/s</option>
-  </select>
-  <div class="spacer"></div>
-  <button class="topbtn" id="undo-btn" onclick="undo()" style="opacity:.4" disabled title="Undo (Ctrl+Z)">↩ Undo</button>
-  <button class="topbtn" id="redo-btn" onclick="redo()" style="opacity:.4" disabled title="Redo (Ctrl+Y)">↪ Redo</button>
-  <button class="topbtn" onclick="exportWaypoints()">Export .waypoints</button>
-  <button class="topbtn" onclick="exportKML()">Export KML</button>
-  <label class="topbtn" style="cursor:pointer">Import <input type="file" id="import-file" accept=".waypoints,.txt" style="display:none" onchange="importWaypoints(event)"></label>
-  <button class="topbtn primary" id="upload-btn" onclick="serialUploadWaypoints()" disabled title="Upload waypoints to connected flight computer">Upload to FC</button>
-  <button class="topbtn" onclick="reverseMission()">↩ Reverse</button>
-  <button class="topbtn" id="view3d-btn" onclick="toggle3DView()">3D View</button>
-  <button class="topbtn" onclick="openLogbook()">Logbook</button>
-  <button class="topbtn" id="hud-btn" onclick="toggleHUD()">HUD</button>
-  <button class="topbtn" id="nfz-btn" style="display:none" onclick="toggleNFZ()">NFZ Off</button>
+  <div id="topbar-mission-btns" style="display:flex;align-items:center;gap:4px;flex-wrap:nowrap">
+    <label style="font-size:11px;color:var(--sec);white-space:nowrap">Default Alt (m):</label>
+    <input id="default-alt" type="number" value="50" min="0" max="500" style="width:60px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 6px;font-size:12px;outline:none">
+    <select id="speed-unit-sel" onchange="changeSpeedUnit(this.value)" title="Speed units"
+      style="background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 6px;font-size:12px;outline:none;cursor:pointer">
+      <option value="kmh">km/h</option>
+      <option value="kts">kts</option>
+      <option value="mph">mph</option>
+      <option value="ms">m/s</option>
+    </select>
+    <div class="spacer"></div>
+    <button class="topbtn" id="undo-btn" onclick="undo()" style="opacity:.4" disabled title="Undo (Ctrl+Z)">↩ Undo</button>
+    <button class="topbtn" id="redo-btn" onclick="redo()" style="opacity:.4" disabled title="Redo (Ctrl+Y)">↪ Redo</button>
+    <button class="topbtn" onclick="exportWaypoints()">Export .waypoints</button>
+    <button class="topbtn" onclick="exportKML()">Export KML</button>
+    <label class="topbtn" style="cursor:pointer">Import <input type="file" id="import-file" accept=".waypoints,.txt" style="display:none" onchange="importWaypoints(event)"></label>
+    <button class="topbtn primary" id="upload-btn" onclick="serialUploadWaypoints()" disabled title="Upload waypoints to connected flight computer">Upload to FC</button>
+    <button class="topbtn" onclick="reverseMission()">↩ Reverse</button>
+    <button class="topbtn" id="view3d-btn" onclick="toggle3DView()">3D View</button>
+    <button class="topbtn" onclick="openLogbook()">Logbook</button>
+    <button class="topbtn" id="hud-btn" onclick="toggleHUD()">HUD</button>
+    <button class="topbtn" id="nfz-btn" style="display:none" onclick="toggleNFZ()">NFZ Off</button>
+    <button class="topbtn danger" onclick="clearMission()">Clear</button>
+  </div>
   <button class="topbtn" id="gcs-btn" onclick="toggleGCS()" title="Ground Control Station mode">⬢ GCS</button>
-  <button class="topbtn danger" onclick="clearMission()">Clear</button>
 </div>
 <!-- map right-click context menu -->
 <div id="map-ctx" style="display:none;position:fixed;z-index:8000;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:4px 0;min-width:170px;box-shadow:0 6px 20px rgba(0,0,0,.6);font-size:12px">
@@ -438,6 +440,9 @@
       <span class="gcs-tele-val" id="gcs-sat">--</span>
     </div>
   </div>
+
+  <!-- HUD instruments (moved here when GCS mode is active) -->
+  <div id="gcs-hud-slot"></div>
 
   <!-- Vehicle type tabs -->
   <div class="gcs-section-title">Vehicle Type</div>
@@ -945,7 +950,7 @@
       </div>
 
       <!-- ── Blackbox / Live Telemetry ──────────────────────────────────── -->
-      <div class="card">
+      <div class="card" id="bb-card">
         <div class="card-title">Blackbox — Live Telemetry</div>
 
         <div class="tele-section-title">Status</div>
@@ -1298,6 +1303,7 @@ homeMarker.on('click', e => { L.DomEvent.stopPropagation(e); });
 
 // Map click => add waypoint
 map.on('click', e => {
+  if (_gcsActive) return; // GCS mode: no waypoint placement
   const defaultAlt = parseInt(document.getElementById('default-alt').value) || 50;
   const prevAlt = waypoints.length > 0 ? waypoints[waypoints.length - 1].alt : null;
   // Use prev WP altitude when it differs from the default (pilot intentionally set it),
@@ -3403,12 +3409,36 @@ const PLANE_MODE_NAMES = {
 
 function toggleGCS() {
   _gcsActive = !_gcsActive;
-  const panel = document.getElementById('gcs-panel');
-  const btn   = document.getElementById('gcs-btn');
+  const panel   = document.getElementById('gcs-panel');
+  const btn     = document.getElementById('gcs-btn');
+  const msnBtns = document.getElementById('topbar-mission-btns');
+  const hudCard = document.getElementById('hud-card');
+  const hudSlot = document.getElementById('gcs-hud-slot');
+
   panel.classList.toggle('active', _gcsActive);
   btn.classList.toggle('gcs-on', _gcsActive);
   btn.textContent = _gcsActive ? '⬢ GCS ✓' : '⬢ GCS';
-  if (_gcsActive) switchTab('serial');
+  msnBtns.style.display = _gcsActive ? 'none' : 'flex';
+
+  if (_gcsActive) {
+    // Move HUD card into GCS panel slot and force it visible
+    if (hudCard && hudSlot) hudSlot.appendChild(hudCard);
+    hudCard.style.display = 'block';
+    // Trigger a canvas resize so the horizon/compass redraw correctly
+    window.dispatchEvent(new Event('resize'));
+    if (!_hudVisible) { _hudVisible = true; hudUpdate({}); }
+  } else {
+    // Move HUD card back to serial tab (before the blackbox card)
+    const serialTab  = document.getElementById('tab-serial');
+    const blackboxCard = document.getElementById('bb-card') ?? serialTab?.querySelector('.card:nth-child(3)');
+    if (hudCard && serialTab) {
+      if (blackboxCard) serialTab.insertBefore(hudCard, blackboxCard);
+      else serialTab.appendChild(hudCard);
+    }
+    // Restore original HUD visibility
+    hudCard.style.display = _hudVisible ? 'block' : 'none';
+    window.dispatchEvent(new Event('resize'));
+  }
 }
 
 function gcsShowModes(type) {
