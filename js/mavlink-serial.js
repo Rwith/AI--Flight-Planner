@@ -517,24 +517,35 @@
       cmd=16; frame=0;
     } else {
       frame=3; // MAV_FRAME_GLOBAL_RELATIVE_ALT for all mission items
-      if      (a === 'waypoint')     { cmd=16;  p1=wp.holdTime||0; }
-      else if (a === 'spline')       { cmd=82;  p1=wp.holdTime||0; }
-      else if (a === 'loiter')       { cmd=17;  p3=wp.loiterR||20; }
-      else if (a === 'loiter_time')  { cmd=19;  p1=wp.loiterTime||10; p3=wp.loiterR||20; }
-      else if (a === 'loiter_turns') { cmd=18;  p1=wp.loiterTurns||1; p3=wp.loiterR||20; }
-      else if (a === 'loiter_to_alt'){ cmd=31;  p2=wp.loiterR||20; }
-      else if (a === 'photo')        { cmd=16; }  // DO_DIGICAM_CONTROL follows as next seq
-      else if (a === '_digicam')     { cmd=203; p4=1; lat=0; lon=0; alt=0; }
-      else if (a === 'set_speed')    { cmd=178; p1=wp.speedType??1; p2=wp.speed||5; p3=-1; lat=0; lon=0; alt=0; }
-      else if (a === 'delay')        { cmd=93;  p1=wp.delayTime||5; lat=0; lon=0; alt=0; }
-      else if (a === 'cond_yaw')     { cmd=115; p1=wp.yawHeading||0; p2=wp.yawSpeed||0; p3=0; p4=wp.yawRel||0; lat=0; lon=0; alt=0; }
-      else if (a === 'do_jump')      { cmd=177; p1=wp.jumpWP||1; p2=wp.jumpRepeat||1; lat=0; lon=0; alt=0; }
-      else if (a === 'set_roi')      { cmd=201; p1=3; }
-      else if (a === 'set_servo')    { cmd=183; p1=wp.servoNum||9; p2=wp.servoPWM||1500; lat=0; lon=0; alt=0; }
-      else if (a === 'takeoff')      { cmd=22; }
-      else if (a === 'land')         { cmd=21; }
-      else if (a === 'rtl')          { cmd=20;  lat=0; lon=0; alt=0; }
-      else                           { cmd=16; }
+      if      (a === 'waypoint')        { cmd=16;  p1=wp.holdTime||0; }
+      else if (a === 'spline')          { cmd=82;  p1=wp.holdTime||0; }
+      else if (a === 'loiter')          { cmd=17;  p3=wp.loiterR||20; }
+      else if (a === 'loiter_time')     { cmd=19;  p1=wp.loiterTime||10; p3=wp.loiterR||20; }
+      else if (a === 'loiter_turns')    { cmd=18;  p1=wp.loiterTurns||1; p3=wp.loiterR||20; }
+      else if (a === 'loiter_to_alt')   { cmd=31;  p2=wp.loiterR||20; }
+      else if (a === 'photo')           { cmd=16; }  // DO_DIGICAM_CONTROL follows as next seq
+      else if (a === '_digicam')        { cmd=203; p4=1; lat=0; lon=0; alt=0; }
+      else if (a === 'takeoff')         { cmd=22; }
+      else if (a === 'vtol_takeoff')    { cmd=84; }
+      else if (a === 'land')            { cmd=21; }
+      else if (a === 'vtol_land')       { cmd=85; }
+      else if (a === 'rtl')             { cmd=20;  lat=0; lon=0; alt=0; }
+      // Post-action DO / CONDITION commands
+      else if (a === 'delay')           { cmd=93;  p1=wp.delayTime||5; lat=0; lon=0; alt=0; }
+      else if (a === 'cond_distance')   { cmd=114; p1=wp.condDist||10; lat=0; lon=0; alt=0; }
+      else if (a === 'cond_yaw')        { cmd=115; p1=wp.yawHeading||0; p2=wp.yawSpeed||0; p3=0; p4=wp.yawRel||0; lat=0; lon=0; alt=0; }
+      else if (a === 'set_speed')       { cmd=178; p1=wp.speedType??1; p2=wp.speed||5; p3=-1; lat=0; lon=0; alt=0; }
+      else if (a === 'do_jump')         { cmd=177; p1=wp.jumpWP||1; p2=wp.jumpRepeat||1; lat=0; lon=0; alt=0; }
+      else if (a === 'set_roi')         { cmd=201; p1=3; }
+      else if (a === 'set_servo')       { cmd=183; p1=wp.servoNum||9; p2=wp.servoPWM||1500; lat=0; lon=0; alt=0; }
+      else if (a === 'do_repeat_servo') { cmd=184; p1=wp.servoNum||9; p2=wp.servoPWM||1500; p3=wp.servoCycles||1; p4=wp.servoDwell||1; lat=0; lon=0; alt=0; }
+      else if (a === 'do_set_relay')    { cmd=181; p1=wp.relayNum??0; p2=wp.relayState??1; lat=0; lon=0; alt=0; }
+      else if (a === 'do_repeat_relay') { cmd=182; p1=wp.relayNum??0; p2=wp.relayCycles||1; p3=wp.relayDwell||1; lat=0; lon=0; alt=0; }
+      else if (a === 'cam_trigg_dist')  { cmd=206; p1=wp.camDist||0; lat=0; lon=0; alt=0; }
+      else if (a === 'do_gripper')      { cmd=187; p1=wp.gripperNum??0; p2=wp.gripperAction??0; lat=0; lon=0; alt=0; }
+      else if (a === 'do_parachute')    { cmd=208; p1=wp.parachuteCmd??2; lat=0; lon=0; alt=0; }
+      else if (a === 'do_mount_control'){ cmd=205; p1=wp.mountPitch||0; p2=wp.mountRoll||0; p3=wp.mountYaw||0; lat=0; lon=0; alt=0; }
+      else                              { cmd=16; }
     }
 
     const current = (seq === 1) ? 1 : 0;

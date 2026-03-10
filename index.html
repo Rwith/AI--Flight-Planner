@@ -385,7 +385,9 @@
                 <option value="loiter_turns">Loiter Turns</option>
                 <option value="loiter_to_alt">Loiter to Alt</option>
                 <option value="takeoff">Takeoff</option>
+                <option value="vtol_takeoff">VTOL Takeoff</option>
                 <option value="land">Land</option>
+                <option value="vtol_land">VTOL Land</option>
                 <option value="rtl">Return to Launch</option>
                 <option value="photo">Camera Trigger</option>
               </optgroup>
@@ -397,12 +399,24 @@
           <label style="font-size:11px;color:var(--muted);white-space:nowrap;min-width:72px">Action</label>
           <select id="ed-pre-action" onchange="updateSelectedWP()" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px">
             <option value="none">— None —</option>
-            <option value="delay">Delay</option>
-            <option value="set_speed">Change Speed</option>
-            <option value="cond_yaw">Condition Yaw</option>
-            <option value="do_jump">Do Jump</option>
-            <option value="set_roi">Set ROI</option>
-            <option value="set_servo">Set Servo</option>
+            <optgroup label="Condition">
+              <option value="delay">Condition Delay</option>
+              <option value="cond_distance">Condition Distance</option>
+              <option value="cond_yaw">Condition Yaw</option>
+            </optgroup>
+            <optgroup label="DO">
+              <option value="set_speed">Change Speed</option>
+              <option value="do_jump">Do Jump</option>
+              <option value="set_roi">Set ROI</option>
+              <option value="set_servo">Set Servo</option>
+              <option value="do_repeat_servo">Repeat Servo</option>
+              <option value="do_set_relay">Set Relay</option>
+              <option value="do_repeat_relay">Repeat Relay</option>
+              <option value="cam_trigg_dist">Camera Trigger Dist</option>
+              <option value="do_gripper">Gripper</option>
+              <option value="do_parachute">Parachute</option>
+              <option value="do_mount_control">Mount / Gimbal Control</option>
+            </optgroup>
           </select>
         </div>
         <!-- Hold time — Waypoint / Spline (p1) -->
@@ -475,6 +489,80 @@
         <div class="form-row" id="servo-pwm-row" style="display:none">
           <label>PWM (µs)</label>
           <input type="number" id="ed-servo-pwm" value="1500" min="800" max="2200" step="10" onchange="updateSelectedWP()">
+        </div>
+        <!-- DO — Repeat Servo (p3=cycles, p4=dwell) -->
+        <div class="form-row" id="servo-cycles-row" style="display:none">
+          <label>Cycles</label>
+          <input type="number" id="ed-servo-cycles" value="1" min="1" max="100" onchange="updateSelectedWP()">
+        </div>
+        <div class="form-row" id="servo-dwell-row" style="display:none">
+          <label>Dwell (s)</label>
+          <input type="number" id="ed-servo-dwell" value="1" min="0" max="60" step="0.1" onchange="updateSelectedWP()">
+        </div>
+        <!-- CONDITION — Distance (p1=distance m) -->
+        <div class="form-row" id="cond-dist-row" style="display:none">
+          <label>Distance (m)</label>
+          <input type="number" id="ed-cond-dist" value="10" min="0" max="10000" onchange="updateSelectedWP()">
+        </div>
+        <!-- DO — Set Relay / Repeat Relay (p1=relay#, p2=state) -->
+        <div class="form-row" id="relay-num-row" style="display:none">
+          <label>Relay #</label>
+          <input type="number" id="ed-relay-num" value="0" min="0" max="15" onchange="updateSelectedWP()">
+        </div>
+        <div class="form-row" id="relay-state-row" style="display:none">
+          <label>State</label>
+          <select id="ed-relay-state" onchange="updateSelectedWP()" style="background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px">
+            <option value="0">Off</option>
+            <option value="1">On</option>
+          </select>
+        </div>
+        <!-- DO — Repeat Relay (p2=cycles, p3=dwell) -->
+        <div class="form-row" id="relay-cycles-row" style="display:none">
+          <label>Cycles</label>
+          <input type="number" id="ed-relay-cycles" value="1" min="1" max="100" onchange="updateSelectedWP()">
+        </div>
+        <div class="form-row" id="relay-dwell-row" style="display:none">
+          <label>Dwell (s)</label>
+          <input type="number" id="ed-relay-dwell" value="1" min="0" max="60" step="0.1" onchange="updateSelectedWP()">
+        </div>
+        <!-- DO — Camera Trigger Dist (p1=dist m, 0=disable) -->
+        <div class="form-row" id="cam-dist-row" style="display:none">
+          <label>Trigger Dist (m)</label>
+          <input type="number" id="ed-cam-dist" value="30" min="0" max="1000" onchange="updateSelectedWP()">
+        </div>
+        <!-- DO — Gripper (p1=gripper#, p2=action) -->
+        <div class="form-row" id="gripper-num-row" style="display:none">
+          <label>Gripper #</label>
+          <input type="number" id="ed-gripper-num" value="0" min="0" max="7" onchange="updateSelectedWP()">
+        </div>
+        <div class="form-row" id="gripper-action-row" style="display:none">
+          <label>Action</label>
+          <select id="ed-gripper-action" onchange="updateSelectedWP()" style="background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px">
+            <option value="0">Release</option>
+            <option value="1">Grab</option>
+          </select>
+        </div>
+        <!-- DO — Parachute (p1=0 disable/1 enable/2 release) -->
+        <div class="form-row" id="parachute-row" style="display:none">
+          <label>Command</label>
+          <select id="ed-parachute" onchange="updateSelectedWP()" style="background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px">
+            <option value="0">Disable</option>
+            <option value="1">Enable</option>
+            <option value="2">Release</option>
+          </select>
+        </div>
+        <!-- DO — Mount Control (p1=pitch, p2=roll, p3=yaw °) -->
+        <div class="form-row" id="mount-pitch-row" style="display:none">
+          <label>Pitch (°)</label>
+          <input type="number" id="ed-mount-pitch" value="0" min="-90" max="90" onchange="updateSelectedWP()">
+        </div>
+        <div class="form-row" id="mount-roll-row" style="display:none">
+          <label>Roll (°)</label>
+          <input type="number" id="ed-mount-roll" value="0" min="-90" max="90" onchange="updateSelectedWP()">
+        </div>
+        <div class="form-row" id="mount-yaw-row" style="display:none">
+          <label>Yaw (°)</label>
+          <input type="number" id="ed-mount-yaw" value="0" min="-180" max="180" onchange="updateSelectedWP()">
         </div>
         <div class="btn-row">
           <button class="btn danger" onclick="deleteSelectedWP()" style="flex:1">Delete</button>
@@ -1196,7 +1284,14 @@ function addWaypoint(lat, lon, alt, action) {
     holdTime:0, loiterR:20, loiterTime:10, loiterTurns:1,
     speedType:1, speed:5, delayTime:5,
     yawHeading:0, yawSpeed:0, yawRel:0,
-    jumpWP:1, jumpRepeat:1, servoNum:9, servoPWM:1500
+    jumpWP:1, jumpRepeat:1,
+    servoNum:9, servoPWM:1500, servoCycles:1, servoDwell:1,
+    condDist:10,
+    relayNum:0, relayState:1, relayCycles:1, relayDwell:1,
+    camDist:30,
+    gripperNum:0, gripperAction:0,
+    parachuteCmd:2,
+    mountPitch:0, mountRoll:0, mountYaw:0,
   };
   waypoints.push(wp);
   _attachMarkerEvents(marker, wp);
@@ -1399,18 +1494,32 @@ function _syncEditorRows(a, pa) {
    'speed-type-row','speed-row','delay-row',
    'yaw-heading-row','yaw-speed-row','yaw-rel-row',
    'jump-wp-row','jump-repeat-row',
-   'servo-num-row','servo-pwm-row'].forEach(hide);
+   'servo-num-row','servo-pwm-row','servo-cycles-row','servo-dwell-row',
+   'cond-dist-row',
+   'relay-num-row','relay-state-row','relay-cycles-row','relay-dwell-row',
+   'cam-dist-row','gripper-num-row','gripper-action-row',
+   'parachute-row','mount-pitch-row','mount-roll-row','mount-yaw-row',
+  ].forEach(hide);
   // nav action rows
   if (a === 'waypoint' || a === 'spline')  show('hold-row');
   if (LOITER_ACTIONS.has(a))               show('loiter-row');
   if (a === 'loiter_time')                 show('loiter-time-row');
   if (a === 'loiter_turns')                show('loiter-turns-row');
-  // pre-action rows
-  if (pa === 'set_speed')  { show('speed-type-row'); show('speed-row'); }
-  if (pa === 'delay')        show('delay-row');
-  if (pa === 'cond_yaw')   { show('yaw-heading-row'); show('yaw-speed-row'); show('yaw-rel-row'); }
-  if (pa === 'do_jump')    { show('jump-wp-row'); show('jump-repeat-row'); }
-  if (pa === 'set_servo')  { show('servo-num-row'); show('servo-pwm-row'); }
+  // post-action rows
+  if (pa === 'set_speed')        { show('speed-type-row'); show('speed-row'); }
+  if (pa === 'delay')              show('delay-row');
+  if (pa === 'cond_distance')      show('cond-dist-row');
+  if (pa === 'cond_yaw')         { show('yaw-heading-row'); show('yaw-speed-row'); show('yaw-rel-row'); }
+  if (pa === 'do_jump')          { show('jump-wp-row'); show('jump-repeat-row'); }
+  if (pa === 'set_servo')        { show('servo-num-row'); show('servo-pwm-row'); }
+  if (pa === 'do_repeat_servo')  { show('servo-num-row'); show('servo-pwm-row'); show('servo-cycles-row'); show('servo-dwell-row'); }
+  if (pa === 'do_set_relay')     { show('relay-num-row'); show('relay-state-row'); }
+  if (pa === 'do_repeat_relay')  { show('relay-num-row'); show('relay-cycles-row'); show('relay-dwell-row'); }
+  if (pa === 'cam_trigg_dist')     show('cam-dist-row');
+  if (pa === 'do_gripper')       { show('gripper-num-row'); show('gripper-action-row'); }
+  if (pa === 'do_parachute')       show('parachute-row');
+  if (pa === 'do_mount_control') { show('mount-pitch-row'); show('mount-roll-row'); show('mount-yaw-row'); }
+  if (pa === 'set_roi')            {} // no extra fields — uses wp lat/lon/alt
   // Dim alt only for nav types that don't use a position
   const noAlt = ['rtl'].includes(a);
   document.getElementById('ed-alt').closest('.form-row').style.opacity = noAlt ? '0.35' : '1';
@@ -1439,6 +1548,20 @@ function showEditor(wp, idx) {
   document.getElementById('ed-jump-repeat').value    = wp.jumpRepeat  ?? 1;
   document.getElementById('ed-servo-num').value      = wp.servoNum    ?? 9;
   document.getElementById('ed-servo-pwm').value      = wp.servoPWM    ?? 1500;
+  document.getElementById('ed-servo-cycles').value   = wp.servoCycles ?? 1;
+  document.getElementById('ed-servo-dwell').value    = wp.servoDwell  ?? 1;
+  document.getElementById('ed-cond-dist').value      = wp.condDist    ?? 10;
+  document.getElementById('ed-relay-num').value      = wp.relayNum    ?? 0;
+  document.getElementById('ed-relay-state').value    = wp.relayState  ?? 1;
+  document.getElementById('ed-relay-cycles').value   = wp.relayCycles ?? 1;
+  document.getElementById('ed-relay-dwell').value    = wp.relayDwell  ?? 1;
+  document.getElementById('ed-cam-dist').value       = wp.camDist     ?? 30;
+  document.getElementById('ed-gripper-num').value    = wp.gripperNum  ?? 0;
+  document.getElementById('ed-gripper-action').value = wp.gripperAction ?? 0;
+  document.getElementById('ed-parachute').value      = wp.parachuteCmd ?? 2;
+  document.getElementById('ed-mount-pitch').value    = wp.mountPitch  ?? 0;
+  document.getElementById('ed-mount-roll').value     = wp.mountRoll   ?? 0;
+  document.getElementById('ed-mount-yaw').value      = wp.mountYaw    ?? 0;
   _syncEditorRows(wp.action, wp.preAction ?? 'none');
 }
 
@@ -1467,6 +1590,20 @@ function updateSelectedWP() {
   wp.jumpRepeat  = parseInt(document.getElementById('ed-jump-repeat').value)      || 1;
   wp.servoNum    = parseInt(document.getElementById('ed-servo-num').value)        || 9;
   wp.servoPWM    = parseInt(document.getElementById('ed-servo-pwm').value)        || 1500;
+  wp.servoCycles = parseInt(document.getElementById('ed-servo-cycles').value)     || 1;
+  wp.servoDwell  = parseFloat(document.getElementById('ed-servo-dwell').value)    || 1;
+  wp.condDist    = parseFloat(document.getElementById('ed-cond-dist').value)      || 10;
+  wp.relayNum    = parseInt(document.getElementById('ed-relay-num').value)        ?? 0;
+  wp.relayState  = parseInt(document.getElementById('ed-relay-state').value)      ?? 1;
+  wp.relayCycles = parseInt(document.getElementById('ed-relay-cycles').value)     || 1;
+  wp.relayDwell  = parseFloat(document.getElementById('ed-relay-dwell').value)    || 1;
+  wp.camDist     = parseFloat(document.getElementById('ed-cam-dist').value)       || 0;
+  wp.gripperNum  = parseInt(document.getElementById('ed-gripper-num').value)      ?? 0;
+  wp.gripperAction = parseInt(document.getElementById('ed-gripper-action').value) ?? 0;
+  wp.parachuteCmd  = parseInt(document.getElementById('ed-parachute').value)      ?? 2;
+  wp.mountPitch  = parseFloat(document.getElementById('ed-mount-pitch').value)    || 0;
+  wp.mountRoll   = parseFloat(document.getElementById('ed-mount-roll').value)     || 0;
+  wp.mountYaw    = parseFloat(document.getElementById('ed-mount-yaw').value)      || 0;
   _syncEditorRows(wp.action, wp.preAction);
   wp.marker.setIcon(makeWPIcon(selectedIdx, wp.action, true));
   renderWPList();
@@ -1520,7 +1657,9 @@ function exportWaypoints() {
     else if (a === 'loiter_to_alt'){ cmd=31;  p2=wp.loiterR||20; }
     else if (a === 'photo')        { cmd=16; }
     else if (a === 'takeoff')      { cmd=22; }
+    else if (a === 'vtol_takeoff') { cmd=84; }
     else if (a === 'land')         { cmd=21; }
+    else if (a === 'vtol_land')    { cmd=85; }
     else if (a === 'rtl')          { cmd=20;  lat=0; lon=0; alt=0; }
     else                           { cmd=16; }
     const fLat = (typeof lat==='number' && lat!==0) ? lat.toFixed(7) : '0';
@@ -1536,12 +1675,20 @@ function exportWaypoints() {
     // ── Post-action (DO / CONDITION) emitted after the nav item ──
     if (pa !== 'none') {
       let pcmd, pp1=0, pp2=0, pp3=0, pp4=0, plat=0, plon=0, palt=0;
-      if      (pa === 'delay')     { pcmd=93;  pp1=wp.delayTime||5; }
-      else if (pa === 'set_speed') { pcmd=178; pp1=wp.speedType??1; pp2=wp.speed||5; pp3=-1; }
-      else if (pa === 'cond_yaw')  { pcmd=115; pp1=wp.yawHeading||0; pp2=wp.yawSpeed||0; pp4=wp.yawRel||0; }
-      else if (pa === 'do_jump')   { pcmd=177; pp1=wp.jumpWP||1; pp2=wp.jumpRepeat||1; }
-      else if (pa === 'set_roi')   { pcmd=201; pp1=3; plat=wp.lat; plon=wp.lon; palt=wp.alt; }
-      else if (pa === 'set_servo') { pcmd=183; pp1=wp.servoNum||9; pp2=wp.servoPWM||1500; }
+      if      (pa === 'delay')           { pcmd=93;  pp1=wp.delayTime||5; }
+      else if (pa === 'cond_distance')   { pcmd=114; pp1=wp.condDist||10; }
+      else if (pa === 'set_speed')       { pcmd=178; pp1=wp.speedType??1; pp2=wp.speed||5; pp3=-1; }
+      else if (pa === 'cond_yaw')        { pcmd=115; pp1=wp.yawHeading||0; pp2=wp.yawSpeed||0; pp4=wp.yawRel||0; }
+      else if (pa === 'do_jump')         { pcmd=177; pp1=wp.jumpWP||1; pp2=wp.jumpRepeat||1; }
+      else if (pa === 'set_roi')         { pcmd=201; pp1=3; plat=wp.lat; plon=wp.lon; palt=wp.alt; }
+      else if (pa === 'set_servo')       { pcmd=183; pp1=wp.servoNum||9; pp2=wp.servoPWM||1500; }
+      else if (pa === 'do_repeat_servo') { pcmd=184; pp1=wp.servoNum||9; pp2=wp.servoPWM||1500; pp3=wp.servoCycles||1; pp4=wp.servoDwell||1; }
+      else if (pa === 'do_set_relay')    { pcmd=181; pp1=wp.relayNum??0; pp2=wp.relayState??1; }
+      else if (pa === 'do_repeat_relay') { pcmd=182; pp1=wp.relayNum??0; pp2=wp.relayCycles||1; pp3=wp.relayDwell||1; }
+      else if (pa === 'cam_trigg_dist')  { pcmd=206; pp1=wp.camDist||0; }
+      else if (pa === 'do_gripper')      { pcmd=187; pp1=wp.gripperNum??0; pp2=wp.gripperAction??0; }
+      else if (pa === 'do_parachute')    { pcmd=208; pp1=wp.parachuteCmd??2; }
+      else if (pa === 'do_mount_control'){ pcmd=205; pp1=wp.mountPitch||0; pp2=wp.mountRoll||0; pp3=wp.mountYaw||0; }
       if (pcmd) {
         const pfLat = plat ? plat.toFixed(7) : '0';
         const pfLon = plon ? plon.toFixed(7) : '0';
@@ -1567,11 +1714,17 @@ function importWaypoints(event) {
     if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
 
     // NAV commands that create a waypoint marker
-    const NAV_CMDS = new Set([16, 82, 17, 19, 18, 31, 22, 21, 20]);
+    const NAV_CMDS = new Set([16, 82, 17, 19, 18, 31, 22, 84, 21, 85, 20]);
     const NAV_CMD_MAP = {16:'waypoint',82:'spline',17:'loiter',19:'loiter_time',
-      18:'loiter_turns',31:'loiter_to_alt',22:'takeoff',21:'land',20:'rtl'};
-    // DO/CONDITION commands stored as preAction on the following nav wp
-    const PA_CMD_MAP = {93:'delay',178:'set_speed',115:'cond_yaw',177:'do_jump',201:'set_roi',183:'set_servo'};
+      18:'loiter_turns',31:'loiter_to_alt',22:'takeoff',84:'vtol_takeoff',21:'land',85:'vtol_land',20:'rtl'};
+    // DO/CONDITION commands attached as post-action to the preceding nav wp
+    const PA_CMD_MAP = {
+      93:'delay', 114:'cond_distance', 115:'cond_yaw',
+      178:'set_speed', 177:'do_jump', 201:'set_roi',
+      183:'set_servo', 184:'do_repeat_servo',
+      181:'do_set_relay', 182:'do_repeat_relay',
+      206:'cam_trigg_dist', 187:'do_gripper', 208:'do_parachute', 205:'do_mount_control',
+    };
 
     lines.slice(1).forEach(line => {
       const p = line.split('\t');
@@ -1604,16 +1757,30 @@ function importWaypoints(event) {
         if (waypoints.length > 0) {
           const prev = waypoints[waypoints.length - 1];
           prev.preAction = PA_CMD_MAP[cmd];
-          prev.delayTime   = cmd===93  ? parseFloat(p[4])||5    : prev.delayTime;
-          prev.speedType   = cmd===178 ? parseInt(p[4])??1      : prev.speedType;
-          prev.speed       = cmd===178 ? parseFloat(p[5])||5    : prev.speed;
-          prev.yawHeading  = cmd===115 ? parseFloat(p[4])||0    : prev.yawHeading;
-          prev.yawSpeed    = cmd===115 ? parseFloat(p[5])||0    : prev.yawSpeed;
-          prev.yawRel      = cmd===115 ? parseInt(p[7])||0      : prev.yawRel;
-          prev.jumpWP      = cmd===177 ? parseInt(p[4])||1      : prev.jumpWP;
-          prev.jumpRepeat  = cmd===177 ? parseInt(p[5])||1      : prev.jumpRepeat;
-          prev.servoNum    = cmd===183 ? parseInt(p[4])||9      : prev.servoNum;
-          prev.servoPWM    = cmd===183 ? parseInt(p[5])||1500   : prev.servoPWM;
+          prev.delayTime    = cmd===93  ? parseFloat(p[4])||5   : prev.delayTime;
+          prev.condDist     = cmd===114 ? parseFloat(p[4])||10  : prev.condDist;
+          prev.yawHeading   = cmd===115 ? parseFloat(p[4])||0   : prev.yawHeading;
+          prev.yawSpeed     = cmd===115 ? parseFloat(p[5])||0   : prev.yawSpeed;
+          prev.yawRel       = cmd===115 ? parseInt(p[7])||0     : prev.yawRel;
+          prev.speedType    = cmd===178 ? parseInt(p[4])??1     : prev.speedType;
+          prev.speed        = cmd===178 ? parseFloat(p[5])||5   : prev.speed;
+          prev.jumpWP       = cmd===177 ? parseInt(p[4])||1     : prev.jumpWP;
+          prev.jumpRepeat   = cmd===177 ? parseInt(p[5])||1     : prev.jumpRepeat;
+          prev.servoNum     = (cmd===183||cmd===184) ? parseInt(p[4])||9    : prev.servoNum;
+          prev.servoPWM     = (cmd===183||cmd===184) ? parseInt(p[5])||1500 : prev.servoPWM;
+          prev.servoCycles  = cmd===184 ? parseInt(p[6])||1     : prev.servoCycles;
+          prev.servoDwell   = cmd===184 ? parseFloat(p[7])||1   : prev.servoDwell;
+          prev.relayNum     = (cmd===181||cmd===182) ? parseInt(p[4])??0   : prev.relayNum;
+          prev.relayState   = cmd===181 ? parseInt(p[5])??1     : prev.relayState;
+          prev.relayCycles  = cmd===182 ? parseInt(p[5])||1     : prev.relayCycles;
+          prev.relayDwell   = cmd===182 ? parseFloat(p[6])||1   : prev.relayDwell;
+          prev.camDist      = cmd===206 ? parseFloat(p[4])||0   : prev.camDist;
+          prev.gripperNum   = cmd===187 ? parseInt(p[4])??0     : prev.gripperNum;
+          prev.gripperAction= cmd===187 ? parseInt(p[5])??0     : prev.gripperAction;
+          prev.parachuteCmd = cmd===208 ? parseInt(p[4])??2     : prev.parachuteCmd;
+          prev.mountPitch   = cmd===205 ? parseFloat(p[4])||0   : prev.mountPitch;
+          prev.mountRoll    = cmd===205 ? parseFloat(p[5])||0   : prev.mountRoll;
+          prev.mountYaw     = cmd===205 ? parseFloat(p[6])||0   : prev.mountYaw;
         }
         return;
       }
@@ -1645,6 +1812,20 @@ function addWaypointSilent(lat, lon, alt, action, extra) {
     jumpRepeat:  ex.jumpRepeat  ?? 1,
     servoNum:    ex.servoNum    ?? 9,
     servoPWM:    ex.servoPWM    ?? 1500,
+    servoCycles: ex.servoCycles ?? 1,
+    servoDwell:  ex.servoDwell  ?? 1,
+    condDist:    ex.condDist    ?? 10,
+    relayNum:    ex.relayNum    ?? 0,
+    relayState:  ex.relayState  ?? 1,
+    relayCycles: ex.relayCycles ?? 1,
+    relayDwell:  ex.relayDwell  ?? 1,
+    camDist:     ex.camDist     ?? 30,
+    gripperNum:  ex.gripperNum  ?? 0,
+    gripperAction: ex.gripperAction ?? 0,
+    parachuteCmd:  ex.parachuteCmd  ?? 2,
+    mountPitch:  ex.mountPitch  ?? 0,
+    mountRoll:   ex.mountRoll   ?? 0,
+    mountYaw:    ex.mountYaw    ?? 0,
     marker, id };
   waypoints.push(wp);
   _attachMarkerEvents(marker, wp);
