@@ -321,8 +321,11 @@
 <div id="map-ctx" style="display:none;position:fixed;z-index:8000;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:4px 0;min-width:170px;box-shadow:0 6px 20px rgba(0,0,0,.6);font-size:12px">
   <div style="padding:4px 12px 2px;font-size:10px;color:var(--sec);text-transform:uppercase;letter-spacing:.7px">Map Style</div>
   <div class="ctx-item" id="ctx-dark"      onclick="ctxSetTile('dark')">Dark</div>
+  <div class="ctx-item" id="ctx-light"     onclick="ctxSetTile('light')">Light</div>
   <div class="ctx-item" id="ctx-satellite" onclick="ctxSetTile('satellite')">Satellite</div>
-  <div class="ctx-item" id="ctx-topo"      onclick="ctxSetTile('topo')">Topography</div>
+  <div class="ctx-item" id="ctx-topo"      onclick="ctxSetTile('topo')">Topography (Esri)</div>
+  <div class="ctx-item" id="ctx-osm"       onclick="ctxSetTile('osm')">OpenStreetMap</div>
+  <div class="ctx-item" id="ctx-otopo"     onclick="ctxSetTile('otopo')">OpenTopoMap</div>
   <div style="height:1px;background:var(--border);margin:4px 0"></div>
   <div class="ctx-item"                    onclick="if(_ctxLatLng)addRallyPoint(_ctxLatLng.lat,_ctxLatLng.lng);closeMapCtx()">Add Rally Point</div>
   <div style="height:1px;background:var(--border);margin:4px 0"></div>
@@ -1006,7 +1009,8 @@
 let waypoints = []; // {lat,lon,alt,action,loiterR,marker,id}
 let selectedIdx = -1;
 let homeMarker = null;
-let homeLat = -26.65, homeLon = 153.06;
+let homeLat = (() => { try { return parseFloat(localStorage.getItem('homeLat')) || -26.65; } catch { return -26.65; } })();
+let homeLon = (() => { try { return parseFloat(localStorage.getItem('homeLon')) || 153.06; } catch { return 153.06; } })();
 let missionPolyline = null;
 let profileChart = null;
 let profileCollapsed = false;
@@ -1107,7 +1111,9 @@ let insertHideTimer = null;
 let currentTileLayer = null;
 
 // ====================== MAP INIT ======================
-const map = L.map('map', { center: [-26.65, 153.06], zoom: 14, zoomControl: false });
+const _savedView = (() => { try { const v = localStorage.getItem('mapView'); return v ? JSON.parse(v) : null; } catch { return null; } })();
+const map = L.map('map', { center: _savedView ? [_savedView.lat, _savedView.lng] : [homeLat, homeLon], zoom: _savedView ? _savedView.zoom : 14, zoomControl: false });
+map.on('moveend', () => { try { const c = map.getCenter(); localStorage.setItem('mapView', JSON.stringify({lat:c.lat,lng:c.lng,zoom:map.getZoom()})); } catch {} });
 // CachedTileLayer is defined later in the script block but hoisted — use L.tileLayer here
 // then swap to CachedTileLayer once it's available (see INIT section).
 currentTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
@@ -1138,7 +1144,7 @@ function createHomeIcon() {
 }
 
 homeMarker = L.marker([homeLat, homeLon], { icon: createHomeIcon(), draggable: true, zIndexOffset: 1000 }).addTo(map);
-homeMarker.on('dragend', e => { const p = e.target.getLatLng(); homeLat = p.lat; homeLon = p.lng; updatePolyline(); });
+homeMarker.on('dragend', e => { const p = e.target.getLatLng(); homeLat = p.lat; homeLon = p.lng; try { localStorage.setItem('homeLat', homeLat); localStorage.setItem('homeLon', homeLon); } catch {} updatePolyline(); });
 homeMarker.on('drag', e => { const p = e.target.getLatLng(); if (homeToFirstLine && waypoints.length >= 1) homeToFirstLine.setLatLngs([[p.lat, p.lng], [waypoints[0].lat, waypoints[0].lon]]); });
 homeMarker.on('click', e => { L.DomEvent.stopPropagation(e); });
 
@@ -3223,21 +3229,24 @@ async function downloadTilesForView() {
 
 // ====================== MAP TILE SWITCHER ======================
 const TILE_LAYERS = {
-  dark: { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', attr: '&copy; OpenStreetMap &copy; CARTO' },
-  satellite: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri' },
-  topo: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri', subdomains: '' }
+  dark:      { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',    attr: '&copy; OpenStreetMap &copy; CARTO', sub: 'abcd' },
+  light:     { url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',   attr: '&copy; OpenStreetMap &copy; CARTO', sub: 'abcd' },
+  satellite: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri', sub: '' },
+  topo:      { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri', sub: '' },
+  osm:       { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',               attr: '&copy; OpenStreetMap contributors', sub: 'abc' },
+  otopo:     { url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',                 attr: '&copy; OpenTopoMap contributors', sub: 'abc' },
 };
 
-let _currentTileType = 'dark';
+let _currentTileType = (() => { try { return localStorage.getItem('tileType') || 'dark'; } catch { return 'dark'; } })();
 function switchMapTile(type) {
   if (currentTileLayer) map.removeLayer(currentTileLayer);
   const cfg = TILE_LAYERS[type] || TILE_LAYERS.dark;
-  const subdomains = cfg.subdomains || 'abc';
-  currentTileLayer = new CachedTileLayer(cfg.url, { attribution: cfg.attr, subdomains, maxZoom: 20 }).addTo(map);
+  currentTileLayer = new CachedTileLayer(cfg.url, { attribution: cfg.attr, subdomains: cfg.sub ?? 'abc', maxZoom: 20 }).addTo(map);
   currentTileLayer.bringToBack();
   _currentTileType = type;
+  try { localStorage.setItem('tileType', type); } catch {}
   // Sync active highlight in context menu
-  ['dark','satellite','topo'].forEach(k => {
+  Object.keys(TILE_LAYERS).forEach(k => {
     const el = document.getElementById('ctx-' + k);
     if (el) el.classList.toggle('ctx-active', k === type);
   });
@@ -3607,14 +3616,9 @@ function drawHUDHorizon(canvas, roll, pitch) {
 
 // ====================== INIT ======================
 setInterval(updateSkyOverlay, 60000); // refresh sky colour every minute
-// Swap the initial tile layer to CachedTileLayer (defined above) so offline tiles work from start
-;(function() {
-  map.removeLayer(currentTileLayer);
-  currentTileLayer = new CachedTileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; OpenStreetMap &copy; CARTO', subdomains: 'abcd', maxZoom: 20
-  }).addTo(map);
-  currentTileLayer.bringToBack();
-})();
+// Swap the initial tile layer to CachedTileLayer (defined above) so offline tiles work,
+// and restore the user's last-chosen map style.
+;(function() { switchMapTile(_currentTileType); })();
 fetchWeather();
 renderWPList();
 updateProfile();
