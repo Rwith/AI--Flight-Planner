@@ -4940,7 +4940,8 @@ function parseDataFlashBin(buffer) {
     padding:24px;min-width:320px;max-width:460px;box-shadow:0 8px 32px rgba(0,0,0,.5)">
     <div style="font-size:15px;font-weight:600;margin-bottom:4px">Select Serial Port</div>
     <div style="font-size:11px;color:var(--sec);margin-bottom:16px">
-      Choose the COM port your device is connected to
+      Flight controller only (ArduPilot / PX4 via MAVLink).<br>
+      <b style="color:#e3b341">TX16S joystick input</b> → set USB Mode to <b>Joystick</b> in EdgeTX, not Serial.
     </div>
     <div id="serial-port-list" style="display:flex;flex-direction:column;gap:8px;max-height:260px;overflow-y:auto"></div>
     <div style="margin-top:18px;display:flex;justify-content:flex-end">
@@ -4965,21 +4966,32 @@ function parseDataFlashBin(buffer) {
       list.innerHTML = '';
 
       // ── Port buttons ────────────────────────────────────────────────────
+      // Ports that are NOT flight controllers — warn the user not to connect
+      const NOT_FC_PATTERN = /stmicro|stm32|stlink|tx16|radiomaster|taranis|frsky|spektrum|flysky|futaba|jumper|edgetx|opentx|arduino|ch340|cp210|silabs|ftdi.*joystick/i;
+
       if (ports && ports.length) {
         ports.forEach(p => {
+          const desc = p.friendlyName || p.manufacturer || '';
+          const isNotFC = NOT_FC_PATTERN.test(desc) || NOT_FC_PATTERN.test(p.path || '');
+
           const btn = document.createElement('button');
           btn.className = 'btn';
-          btn.style.cssText = 'text-align:left;padding:10px 14px;width:100%;display:flex;flex-direction:column;gap:3px;border-radius:6px';
+          btn.style.cssText = 'text-align:left;padding:10px 14px;width:100%;display:flex;flex-direction:column;gap:3px;border-radius:6px' + (isNotFC ? ';opacity:.6;border-color:#e3b341' : '');
           const row1 = document.createElement('span');
           row1.style.fontWeight = '600';
           row1.textContent = p.path || 'Unknown Port';
           btn.appendChild(row1);
-          const desc = p.friendlyName || p.manufacturer || '';
           if (desc) {
             const row2 = document.createElement('span');
             row2.style.cssText = 'font-size:10px;color:var(--sec)';
             row2.textContent = desc;
             btn.appendChild(row2);
+          }
+          if (isNotFC) {
+            const warn = document.createElement('span');
+            warn.style.cssText = 'font-size:10px;color:#e3b341;margin-top:1px';
+            warn.textContent = '⚠ Not a flight controller — TX16S joystick needs USB Mode: Joystick in EdgeTX';
+            btn.appendChild(warn);
           }
           btn.onclick = () => { modal.style.display = 'none'; resolve(p.path); };
           list.appendChild(btn);
