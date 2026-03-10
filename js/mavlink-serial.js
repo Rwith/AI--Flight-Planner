@@ -925,6 +925,8 @@
     if (upBtn) upBtn.disabled = !on;
     const fetchBtn = document.getElementById('bb-fetch-list-btn');
     if (fetchBtn) fetchBtn.disabled = !on;
+    const gcsConnBtn = document.getElementById('gcs-connect-btn');
+    if (gcsConnBtn) { gcsConnBtn.textContent = on ? 'Disconnect FC' : 'Connect to FC'; gcsConnBtn.className = on ? 'btn danger' : 'btn primary'; gcsConnBtn.style.cssText = 'width:100%;font-size:13px;padding:10px'; }
 
     // ── Heartbeat keepalive ───────────────────────────────────────────────
     // ArduPilot stops streaming LOG_DATA if no GCS heartbeat arrives within 3 s.

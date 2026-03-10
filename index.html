@@ -314,16 +314,7 @@
     text-align:center; font-size:13px; font-weight:600; color:var(--blue);
     letter-spacing:.5px; padding:4px 0;
   }
-  .gcs-tele-strip {
-    display:grid; grid-template-columns:1fr 1fr; gap:6px;
-  }
-  .gcs-tele-cell {
-    background:var(--bg); border:1px solid var(--border); border-radius:6px;
-    padding:7px 10px; display:flex; flex-direction:column; gap:2px;
-  }
-  .gcs-tele-label { font-size:9px; color:var(--sec); text-transform:uppercase; letter-spacing:.6px; }
-  .gcs-tele-val   { font-size:16px; font-weight:700; color:var(--text); }
-  .gcs-section-title {
+.gcs-section-title {
     font-size:10px; font-weight:700; color:var(--sec); text-transform:uppercase;
     letter-spacing:.8px; margin-top:2px;
   }
@@ -421,25 +412,8 @@
   <div id="gcs-arm-badge">--</div>
   <div id="gcs-mode-display">MODE: --</div>
 
-  <!-- Key telemetry -->
-  <div class="gcs-tele-strip">
-    <div class="gcs-tele-cell">
-      <span class="gcs-tele-label">Altitude AGL</span>
-      <span class="gcs-tele-val" id="gcs-alt">--</span>
-    </div>
-    <div class="gcs-tele-cell">
-      <span class="gcs-tele-label">Ground Speed</span>
-      <span class="gcs-tele-val" id="gcs-spd">--</span>
-    </div>
-    <div class="gcs-tele-cell">
-      <span class="gcs-tele-label">Battery</span>
-      <span class="gcs-tele-val" id="gcs-bat">--</span>
-    </div>
-    <div class="gcs-tele-cell">
-      <span class="gcs-tele-label">GPS Sats</span>
-      <span class="gcs-tele-val" id="gcs-sat">--</span>
-    </div>
-  </div>
+  <!-- Connect button (mirrors FC tab) -->
+  <button id="gcs-connect-btn" class="btn primary" onclick="serialConnect()" style="width:100%;font-size:13px;padding:10px">Connect to FC</button>
 
   <!-- HUD instruments (moved here when GCS mode is active) -->
   <div id="gcs-hud-slot"></div>
@@ -2569,6 +2543,7 @@ function onSegmentMousemove(e) {
 }
 
 function showInsertMarker(segIdx) {
+  if (_gcsActive) return;
   const a = waypoints[segIdx], b = waypoints[segIdx + 1];
   const midLat = (a.lat + b.lat) / 2;
   const midLon = (a.lon + b.lon) / 2;
@@ -3510,21 +3485,6 @@ window.gcsUpdate = function(tele) {
     if (detectedType !== _gcsMavType) gcsShowModes(detectedType);
   }
 
-  // Telemetry cells
-  const altEl = document.getElementById('gcs-alt');
-  if (altEl) altEl.textContent = tele.altRel != null ? tele.altRel.toFixed(1) + ' m' : '--';
-  const spdEl = document.getElementById('gcs-spd');
-  if (spdEl) spdEl.textContent = tele.groundspeed != null ? tele.groundspeed + ' m/s' : '--';
-  const batEl = document.getElementById('gcs-bat');
-  if (batEl) {
-    batEl.textContent = tele.battPct != null ? tele.battPct + '%' : '--';
-    batEl.style.color = tele.battPct >= 50 ? '#3fb950' : tele.battPct >= 20 ? '#d29922' : '#f85149';
-  }
-  const satEl = document.getElementById('gcs-sat');
-  if (satEl) {
-    satEl.textContent = tele.gpsSats ?? '--';
-    satEl.style.color = tele.gpsSats >= 8 ? '#3fb950' : tele.gpsSats >= 6 ? '#d29922' : '#f85149';
-  }
 };
 
 // ====================== MAP TILE SWITCHER ======================
