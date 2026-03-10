@@ -3238,14 +3238,14 @@ const TILE_LAYERS = {
   satellite: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri', sub: '' },
   topo:      { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri', sub: '' },
   osm:       { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',               attr: '&copy; OpenStreetMap contributors', sub: 'abc' },
-  otopo:     { url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',                 attr: '&copy; OpenTopoMap contributors', sub: 'abc' },
+  otopo:     { url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',                 attr: '&copy; OpenTopoMap contributors', sub: 'abc', maxNativeZoom: 17 },
 };
 
 let _currentTileType = (() => { try { return localStorage.getItem('tileType') || 'dark'; } catch { return 'dark'; } })();
 function switchMapTile(type) {
   if (currentTileLayer) map.removeLayer(currentTileLayer);
   const cfg = TILE_LAYERS[type] || TILE_LAYERS.dark;
-  currentTileLayer = new CachedTileLayer(cfg.url, { attribution: cfg.attr, subdomains: cfg.sub ?? 'abc', maxZoom: 20 }).addTo(map);
+  currentTileLayer = new CachedTileLayer(cfg.url, { attribution: cfg.attr, subdomains: cfg.sub ?? 'abc', maxZoom: 20, maxNativeZoom: cfg.maxNativeZoom ?? 20 }).addTo(map);
   currentTileLayer.bringToBack();
   _currentTileType = type;
   try { localStorage.setItem('tileType', type); } catch {}
