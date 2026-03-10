@@ -26,7 +26,9 @@
     117: 128, // LOG_REQUEST_LIST (sent by us)
     118: 56,  // LOG_ENTRY        (received — validated, confirmed correct)
     119: 116, // LOG_REQUEST_DATA (sent by us)
-    122: 203  // LOG_REQUEST_END  (sent by us)
+    122: 203, // LOG_REQUEST_END  (sent by us)
+    11:  89,  // SET_MODE         (sent by us — change flight mode)
+    76:  152  // COMMAND_LONG     (sent by us — arm/disarm, etc.)
   };
 
   function crc16 (data) {
@@ -138,6 +140,24 @@
   // LOG_REQUEST_END (122) — wire: tSys(u8), tComp(u8)
   function buildLogRequestEnd (tSys, tComp) {
     return buildFrame(122, [tSys, tComp]);
+  }
+
+  // ─── SET_MODE (id=11) ─────────────────────────────────────────────────────
+  // Wire (sorted large→small): custom_mode(u32), target_system(u8), base_mode(u8)
+  // base_mode=1 = MAV_MODE_FLAG_CUSTOM_MODE_ENABLED (required for ArduPilot)
+  function buildSetMode (customMode, tSys) {
+    return buildFrame(11, [...u32(customMode), tSys, 1]);
+  }
+
+  // ─── COMMAND_LONG (id=76) ─────────────────────────────────────────────────
+  // Wire: param1–7(f32×7), command(u16), target_sys(u8), target_comp(u8), confirmation(u8)
+  function buildCommandLong (tSys, tComp, cmd, p1, p2, p3, p4, p5, p6, p7, confirm) {
+    return buildFrame(76, [
+      ...f32(p1 ?? 0), ...f32(p2 ?? 0), ...f32(p3 ?? 0), ...f32(p4 ?? 0),
+      ...f32(p5 ?? 0), ...f32(p6 ?? 0), ...f32(p7 ?? 0),
+      ...u16(cmd),
+      tSys, tComp, confirm ?? 0
+    ]);
   }
 
   function requestStreams (tSys, tComp) {
@@ -284,8 +304,10 @@
       case 0: { // HEARTBEAT — type, autopilot, base_mode, system_status
         // Wire (sorted 32→8): custom_mode(u32,0), type(u8,4), autopilot(u8,5), base_mode(u8,6), system_status(u8,7), mavlink_version(u8,8)
         if (payload.length >= 9) {
-          tele.baseMode  = payload[6];
-          tele.sysStatus = payload[7];
+          tele.customMode = dv.getUint32(0, true);
+          tele.mavType    = payload[4]; // 1=plane, 2=quad, 13=hex, 14=octo
+          tele.baseMode   = payload[6];
+          tele.sysStatus  = payload[7];
         }
         // On first heartbeat ask the FC to stream battery + speed data.
         if (!streamsAsked) {
@@ -596,6 +618,8 @@
     set('tele-batt',    tele.battPct   != null && tele.battPct >= 0 ? tele.battPct + '%' : null);
     // HUD overlay (no-op if HUD is hidden)
     window.hudUpdate?.(tele);
+    // GCS control station overlay
+    window.gcsUpdate?.(tele);
   }
 
   // ─── Telemetry CSV logger ─────────────────────────────────────────────────
@@ -1245,6 +1269,22 @@
   window.serialConnect          = connect;
   window.serialDisconnect       = disconnect;
   window.serialUploadWaypoints  = uploadWaypoints;
+  // ─── Flight control commands ──────────────────────────────────────────────
+  window.serialSetMode = (customMode) => {
+    if (!writer) { addLog('[mode] Not connected'); return; }
+    const tSys = parseInt(document.getElementById('serial-sysid')?.value ?? '1', 10);
+    writer.write(buildSetMode(customMode, tSys)).catch(e => addLog('[mode] ' + e.message));
+    addLog(`[mode] SET_MODE custom_mode=${customMode} → sysid=${tSys}`);
+  };
+
+  window.serialArmDisarm = (arm) => {
+    if (!writer) { addLog('[arm] Not connected'); return; }
+    const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
+    writer.write(buildCommandLong(tSys, tComp, 400, arm ? 1 : 0, 0, 0, 0, 0, 0, 0, 0)).catch(e => addLog('[arm] ' + e.message));
+    addLog(`[arm] COMMAND_LONG ARM_DISARM param1=${arm ? 1 : 0} → sysid=${tSys}`);
+  };
+
   window.serialExportCSV        = exportTelCSV;
   window.serialClearLog         = clearLog;
   window.serialToggleLogPause   = toggleLogPause;

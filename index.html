@@ -285,6 +285,81 @@
     line-height:1.7; max-height:110px; overflow-y:auto; border:1px solid var(--border);
     border-radius:5px; padding:5px 8px; background:var(--bg); margin-top:6px; }
   /* .bb-path uses Leaflet canvas renderer — no SVG animation */
+
+  /* ── GCS CONTROL STATION ──────────────────────────────────────────────── */
+  #gcs-panel {
+    display:none; position:fixed; right:0; top:48px; width:360px;
+    height:calc(100vh - 48px); background:var(--panel); border-left:1px solid var(--border);
+    z-index:3000; flex-direction:column; padding:12px; gap:10px; overflow-y:auto;
+    box-sizing:border-box;
+  }
+  #gcs-panel.active { display:flex; }
+  .gcs-header {
+    display:flex; align-items:center; justify-content:space-between;
+    font-size:11px; font-weight:700; letter-spacing:1px; color:var(--sec);
+    text-transform:uppercase; padding-bottom:8px; border-bottom:1px solid var(--border);
+  }
+  .gcs-header button {
+    background:none; border:none; color:var(--sec); font-size:16px; cursor:pointer; padding:0 2px;
+  }
+  .gcs-header button:hover { color:var(--text); }
+  #gcs-arm-badge {
+    text-align:center; font-size:22px; font-weight:800; letter-spacing:2px;
+    padding:10px; border-radius:8px; border:2px solid rgba(255,255,255,.15);
+    color:rgba(255,255,255,.35); background:var(--card);
+  }
+  #gcs-arm-badge.armed   { color:#f85149; border-color:rgba(248,81,73,.5); background:rgba(248,81,73,.08); }
+  #gcs-arm-badge.disarmed{ color:#3fb950; border-color:rgba(63,185,80,.4); background:rgba(63,185,80,.07); }
+  #gcs-mode-display {
+    text-align:center; font-size:13px; font-weight:600; color:var(--blue);
+    letter-spacing:.5px; padding:4px 0;
+  }
+  .gcs-tele-strip {
+    display:grid; grid-template-columns:1fr 1fr; gap:6px;
+  }
+  .gcs-tele-cell {
+    background:var(--bg); border:1px solid var(--border); border-radius:6px;
+    padding:7px 10px; display:flex; flex-direction:column; gap:2px;
+  }
+  .gcs-tele-label { font-size:9px; color:var(--sec); text-transform:uppercase; letter-spacing:.6px; }
+  .gcs-tele-val   { font-size:16px; font-weight:700; color:var(--text); }
+  .gcs-section-title {
+    font-size:10px; font-weight:700; color:var(--sec); text-transform:uppercase;
+    letter-spacing:.8px; margin-top:2px;
+  }
+  .gcs-modes-grid {
+    display:grid; grid-template-columns:1fr 1fr; gap:6px;
+  }
+  .gcs-mode-btn {
+    padding:9px 6px; border-radius:7px; border:1px solid var(--border);
+    background:var(--card); color:var(--text); font-size:11px; font-weight:600;
+    cursor:pointer; letter-spacing:.3px; transition:background .15s, border-color .15s;
+  }
+  .gcs-mode-btn:hover   { background:#2d333b; border-color:var(--blue); color:var(--blue); }
+  .gcs-mode-btn.active  { background:rgba(88,166,255,.18); border-color:var(--blue); color:var(--blue); }
+  #gcs-arm-btn {
+    padding:14px; border-radius:8px; border:2px solid var(--green);
+    background:rgba(63,185,80,.12); color:var(--green); font-size:15px; font-weight:800;
+    cursor:pointer; letter-spacing:1px; text-transform:uppercase; transition:all .15s;
+    margin-top:auto;
+  }
+  #gcs-arm-btn:hover        { background:rgba(63,185,80,.25); }
+  #gcs-arm-btn.armed-state  { border-color:var(--red); color:var(--red); background:rgba(248,81,73,.12); }
+  #gcs-arm-btn.armed-state:hover { background:rgba(248,81,73,.25); }
+  .gcs-warning {
+    font-size:10px; color:var(--yellow); text-align:center; padding:4px 0;
+    border-top:1px solid var(--border); margin-top:4px;
+  }
+  .gcs-mavtype-tabs {
+    display:flex; gap:4px; background:var(--bg); border-radius:6px;
+    border:1px solid var(--border); padding:3px;
+  }
+  .gcs-mavtype-tab {
+    flex:1; padding:5px; border:none; border-radius:4px; background:none;
+    color:var(--sec); font-size:11px; font-weight:600; cursor:pointer;
+  }
+  .gcs-mavtype-tab.active { background:var(--card); color:var(--text); }
+  .topbtn.gcs-on { border-color:var(--purple); color:var(--purple); background:rgba(162,155,254,.1); }
 </style>
 </head>
 <body>
@@ -315,6 +390,7 @@
   <button class="topbtn" onclick="openLogbook()">Logbook</button>
   <button class="topbtn" id="hud-btn" onclick="toggleHUD()">HUD</button>
   <button class="topbtn" id="nfz-btn" style="display:none" onclick="toggleNFZ()">NFZ Off</button>
+  <button class="topbtn" id="gcs-btn" onclick="toggleGCS()" title="Ground Control Station mode">⬢ GCS</button>
   <button class="topbtn danger" onclick="clearMission()">Clear</button>
 </div>
 <!-- map right-click context menu -->
@@ -332,6 +408,77 @@
   <div class="ctx-item" id="ctx-nfz-item"  onclick="toggleNFZ();closeMapCtx()">NFZ</div>
   <div class="ctx-item"                    onclick="downloadTilesForView();closeMapCtx()">Cache Tiles</div>
 </div>
+<!-- GCS CONTROL STATION PANEL -->
+<div id="gcs-panel">
+  <div class="gcs-header">
+    <span>⬢ Control Station</span>
+    <button onclick="toggleGCS()" title="Close">✕</button>
+  </div>
+
+  <!-- ARM status -->
+  <div id="gcs-arm-badge">--</div>
+  <div id="gcs-mode-display">MODE: --</div>
+
+  <!-- Key telemetry -->
+  <div class="gcs-tele-strip">
+    <div class="gcs-tele-cell">
+      <span class="gcs-tele-label">Altitude AGL</span>
+      <span class="gcs-tele-val" id="gcs-alt">--</span>
+    </div>
+    <div class="gcs-tele-cell">
+      <span class="gcs-tele-label">Ground Speed</span>
+      <span class="gcs-tele-val" id="gcs-spd">--</span>
+    </div>
+    <div class="gcs-tele-cell">
+      <span class="gcs-tele-label">Battery</span>
+      <span class="gcs-tele-val" id="gcs-bat">--</span>
+    </div>
+    <div class="gcs-tele-cell">
+      <span class="gcs-tele-label">GPS Sats</span>
+      <span class="gcs-tele-val" id="gcs-sat">--</span>
+    </div>
+  </div>
+
+  <!-- Vehicle type tabs -->
+  <div class="gcs-section-title">Vehicle Type</div>
+  <div class="gcs-mavtype-tabs">
+    <button class="gcs-mavtype-tab active" id="gcs-tab-copter" onclick="gcsShowModes('copter')">Copter</button>
+    <button class="gcs-mavtype-tab"        id="gcs-tab-plane"  onclick="gcsShowModes('plane')">Plane</button>
+  </div>
+
+  <!-- Flight mode buttons: Copter -->
+  <div class="gcs-section-title">Flight Modes</div>
+  <div class="gcs-modes-grid" id="gcs-modes-copter">
+    <button class="gcs-mode-btn" data-mode="0"  onclick="gcsSetMode(0)">STABILIZE</button>
+    <button class="gcs-mode-btn" data-mode="2"  onclick="gcsSetMode(2)">ALT HOLD</button>
+    <button class="gcs-mode-btn" data-mode="5"  onclick="gcsSetMode(5)">LOITER</button>
+    <button class="gcs-mode-btn" data-mode="16" onclick="gcsSetMode(16)">POS HOLD</button>
+    <button class="gcs-mode-btn" data-mode="3"  onclick="gcsSetMode(3)">AUTO</button>
+    <button class="gcs-mode-btn" data-mode="4"  onclick="gcsSetMode(4)">GUIDED</button>
+    <button class="gcs-mode-btn" data-mode="6"  onclick="gcsSetMode(6)">RTL</button>
+    <button class="gcs-mode-btn" data-mode="9"  onclick="gcsSetMode(9)">LAND</button>
+    <button class="gcs-mode-btn" data-mode="17" onclick="gcsSetMode(17)">BRAKE</button>
+    <button class="gcs-mode-btn" data-mode="21" onclick="gcsSetMode(21)">SMART RTL</button>
+  </div>
+
+  <!-- Flight mode buttons: Plane (hidden by default) -->
+  <div class="gcs-modes-grid" id="gcs-modes-plane" style="display:none">
+    <button class="gcs-mode-btn" data-mode="0"  onclick="gcsSetMode(0)">MANUAL</button>
+    <button class="gcs-mode-btn" data-mode="2"  onclick="gcsSetMode(2)">STABILIZE</button>
+    <button class="gcs-mode-btn" data-mode="5"  onclick="gcsSetMode(5)">FLY BY WIRE A</button>
+    <button class="gcs-mode-btn" data-mode="7"  onclick="gcsSetMode(7)">CRUISE</button>
+    <button class="gcs-mode-btn" data-mode="10" onclick="gcsSetMode(10)">AUTO</button>
+    <button class="gcs-mode-btn" data-mode="15" onclick="gcsSetMode(15)">GUIDED</button>
+    <button class="gcs-mode-btn" data-mode="11" onclick="gcsSetMode(11)">RTL</button>
+    <button class="gcs-mode-btn" data-mode="12" onclick="gcsSetMode(12)">LOITER</button>
+  </div>
+
+  <!-- ARM / DISARM -->
+  <button id="gcs-arm-btn" onclick="gcsArmDisarm()">ARM</button>
+
+  <div class="gcs-warning">⚠ Commands sent directly to aircraft. Ensure safe conditions.</div>
+</div>
+
 <!-- tile download progress bar -->
 <div id="tile-progress-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;height:22px;background:var(--panel);border-top:1px solid var(--border);z-index:9000;align-items:center;padding:0 10px;gap:8px;font-size:11px;color:var(--sec)">
   <span id="tile-progress-msg">Caching tiles…</span>
@@ -3235,6 +3382,120 @@ async function downloadTilesForView() {
   btn.textContent = `Cached ✓`;
   setTimeout(() => { btn.textContent = 'Cache Tiles'; }, 3000);
 }
+
+// ====================== GCS CONTROL STATION ======================
+let _gcsActive = false;
+let _gcsArmed  = false;
+let _gcsMavType = 'copter'; // auto-detected from heartbeat
+
+const COPTER_MODE_NAMES = {
+  0:'STABILIZE', 1:'ACRO', 2:'ALT HOLD', 3:'AUTO', 4:'GUIDED', 5:'LOITER',
+  6:'RTL', 7:'CIRCLE', 9:'LAND', 11:'DRIFT', 13:'SPORT', 14:'FLIP',
+  15:'AUTOTUNE', 16:'POS HOLD', 17:'BRAKE', 19:'THROW', 20:'AVOID ADSB',
+  21:'SMART RTL', 23:'FLOWHOLD', 24:'FOLLOW', 27:'AUTO RTL',
+};
+const PLANE_MODE_NAMES = {
+  0:'MANUAL', 1:'CIRCLE', 2:'STABILIZE', 3:'TRAINING', 4:'ACRO',
+  5:'FLY BY WIRE A', 6:'FLY BY WIRE B', 7:'CRUISE', 8:'AUTOTUNE',
+  10:'AUTO', 11:'RTL', 12:'LOITER', 15:'GUIDED', 17:'QSTABILIZE',
+  18:'QHOVER', 19:'QLOITER', 20:'QLAND', 21:'QRTL', 22:'QAUTOTUNE',
+};
+
+function toggleGCS() {
+  _gcsActive = !_gcsActive;
+  const panel = document.getElementById('gcs-panel');
+  const btn   = document.getElementById('gcs-btn');
+  panel.classList.toggle('active', _gcsActive);
+  btn.classList.toggle('gcs-on', _gcsActive);
+  btn.textContent = _gcsActive ? '⬢ GCS ✓' : '⬢ GCS';
+  if (_gcsActive) switchTab('serial');
+}
+
+function gcsShowModes(type) {
+  _gcsMavType = type;
+  document.getElementById('gcs-modes-copter').style.display = type === 'copter' ? '' : 'none';
+  document.getElementById('gcs-modes-plane').style.display  = type === 'plane'  ? '' : 'none';
+  document.getElementById('gcs-tab-copter').classList.toggle('active', type === 'copter');
+  document.getElementById('gcs-tab-plane').classList.toggle('active',  type === 'plane');
+}
+
+function gcsSetMode(customMode) {
+  if (!window.serialSetMode) { alert('Not connected to flight computer.'); return; }
+  const modeNames = _gcsMavType === 'plane' ? PLANE_MODE_NAMES : COPTER_MODE_NAMES;
+  const name = modeNames[customMode] ?? `Mode ${customMode}`;
+  if (!confirm(`Set flight mode to ${name}?`)) return;
+  window.serialSetMode(customMode);
+}
+
+function gcsArmDisarm() {
+  if (!window.serialArmDisarm) { alert('Not connected to flight computer.'); return; }
+  if (_gcsArmed) {
+    if (!confirm('DISARM the aircraft?')) return;
+    window.serialArmDisarm(false);
+  } else {
+    if (!confirm('ARM the aircraft? Ensure the area is clear.')) return;
+    window.serialArmDisarm(true);
+  }
+}
+
+// Called from mavlink-serial.js on every telemetry update
+window.gcsUpdate = function(tele) {
+  if (!_gcsActive) return;
+
+  // ARM badge
+  const armed = !!(tele.baseMode & 0x80);
+  _gcsArmed = armed;
+  const badge = document.getElementById('gcs-arm-badge');
+  if (badge) {
+    badge.textContent = tele.baseMode != null ? (armed ? 'ARMED' : 'DISARMED') : '--';
+    badge.className   = tele.baseMode != null ? (armed ? 'armed' : 'disarmed') : '';
+  }
+
+  // ARM button state
+  const armBtn = document.getElementById('gcs-arm-btn');
+  if (armBtn) {
+    armBtn.textContent = armed ? 'DISARM' : 'ARM';
+    armBtn.classList.toggle('armed-state', armed);
+  }
+
+  // Mode display
+  const modeNames = tele.mavType === 1 ? PLANE_MODE_NAMES : COPTER_MODE_NAMES;
+  const modeName  = tele.customMode != null ? (modeNames[tele.customMode] ?? `Mode ${tele.customMode}`) : '--';
+  const modeEl = document.getElementById('gcs-mode-display');
+  if (modeEl) modeEl.textContent = `MODE: ${modeName}`;
+
+  // Highlight active mode button
+  const grid = _gcsMavType === 'plane'
+    ? document.getElementById('gcs-modes-plane')
+    : document.getElementById('gcs-modes-copter');
+  if (grid && tele.customMode != null) {
+    grid.querySelectorAll('.gcs-mode-btn').forEach(b => {
+      b.classList.toggle('active', parseInt(b.dataset.mode) === tele.customMode);
+    });
+  }
+
+  // Auto-detect copter vs plane from MAV_TYPE (1=plane, 2/13/14=copter)
+  if (tele.mavType != null) {
+    const detectedType = tele.mavType === 1 ? 'plane' : 'copter';
+    if (detectedType !== _gcsMavType) gcsShowModes(detectedType);
+  }
+
+  // Telemetry cells
+  const altEl = document.getElementById('gcs-alt');
+  if (altEl) altEl.textContent = tele.altRel != null ? tele.altRel.toFixed(1) + ' m' : '--';
+  const spdEl = document.getElementById('gcs-spd');
+  if (spdEl) spdEl.textContent = tele.groundspeed != null ? tele.groundspeed + ' m/s' : '--';
+  const batEl = document.getElementById('gcs-bat');
+  if (batEl) {
+    batEl.textContent = tele.battPct != null ? tele.battPct + '%' : '--';
+    batEl.style.color = tele.battPct >= 50 ? '#3fb950' : tele.battPct >= 20 ? '#d29922' : '#f85149';
+  }
+  const satEl = document.getElementById('gcs-sat');
+  if (satEl) {
+    satEl.textContent = tele.gpsSats ?? '--';
+    satEl.style.color = tele.gpsSats >= 8 ? '#3fb950' : tele.gpsSats >= 6 ? '#d29922' : '#f85149';
+  }
+};
 
 // ====================== MAP TILE SWITCHER ======================
 const TILE_LAYERS = {
