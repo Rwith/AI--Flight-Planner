@@ -386,20 +386,23 @@
                 <option value="takeoff">Takeoff</option>
                 <option value="land">Land</option>
                 <option value="rtl">Return to Launch</option>
-              </optgroup>
-              <optgroup label="Condition">
-                <option value="cond_yaw">Condition Yaw</option>
-              </optgroup>
-              <optgroup label="Do">
-                <option value="photo">DO — Camera Trigger</option>
-                <option value="set_speed">DO — Change Speed</option>
-                <option value="do_jump">DO — Jump</option>
-                <option value="set_roi">DO — Set ROI</option>
-                <option value="set_servo">DO — Set Servo</option>
-                <option value="delay">DO — Delay</option>
+                <option value="photo">Camera Trigger</option>
               </optgroup>
             </select>
           </div>
+        </div>
+        <!-- Pre-action (DO / CONDITION command inserted before this waypoint) -->
+        <div style="display:flex;align-items:center;gap:6px;margin:4px 0 2px">
+          <label style="font-size:11px;color:var(--muted);white-space:nowrap;min-width:72px">Pre-action</label>
+          <select id="ed-pre-action" onchange="updateSelectedWP()" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px">
+            <option value="none">— None —</option>
+            <option value="delay">Delay</option>
+            <option value="set_speed">Change Speed</option>
+            <option value="cond_yaw">Condition Yaw</option>
+            <option value="do_jump">Do Jump</option>
+            <option value="set_roi">Set ROI</option>
+            <option value="set_servo">Set Servo</option>
+          </select>
         </div>
         <!-- Hold time — Waypoint / Spline (p1) -->
         <div class="form-row" id="hold-row" style="display:none">
@@ -1191,7 +1194,7 @@ function addWaypoint(lat, lon, alt, action) {
     zIndexOffset: 500
   }).addTo(map);
   const wp = {
-    lat, lon, alt, action, id, marker,
+    lat, lon, alt, action, preAction:'none', id, marker,
     holdTime:0, loiterR:20, loiterTime:10, loiterTurns:1,
     speedType:1, speed:5, delayTime:5,
     yawHeading:0, yawSpeed:0, yawRel:0,
@@ -1389,7 +1392,8 @@ function deselectWP() {
   renderWPList();
 }
 
-function _syncEditorRows(a) {
+function _syncEditorRows(a, pa) {
+  pa = pa || 'none';
   const show = id => document.getElementById(id).style.display = 'flex';
   const hide = id => document.getElementById(id).style.display = 'none';
   // hide all optional rows first
@@ -1398,18 +1402,19 @@ function _syncEditorRows(a) {
    'yaw-heading-row','yaw-speed-row','yaw-rel-row',
    'jump-wp-row','jump-repeat-row',
    'servo-num-row','servo-pwm-row'].forEach(hide);
-  // show relevant rows per action
+  // nav action rows
   if (a === 'waypoint' || a === 'spline')  show('hold-row');
   if (LOITER_ACTIONS.has(a))               show('loiter-row');
   if (a === 'loiter_time')                 show('loiter-time-row');
   if (a === 'loiter_turns')                show('loiter-turns-row');
-  if (a === 'set_speed')                 { show('speed-type-row'); show('speed-row'); }
-  if (a === 'delay')                       show('delay-row');
-  if (a === 'cond_yaw')                  { show('yaw-heading-row'); show('yaw-speed-row'); show('yaw-rel-row'); }
-  if (a === 'do_jump')                   { show('jump-wp-row'); show('jump-repeat-row'); }
-  if (a === 'set_servo')                 { show('servo-num-row'); show('servo-pwm-row'); }
-  // Dim alt for actions where position is irrelevant
-  const noAlt = ['rtl','set_speed','delay','cond_yaw','do_jump','set_servo'].includes(a);
+  // pre-action rows
+  if (pa === 'set_speed')  { show('speed-type-row'); show('speed-row'); }
+  if (pa === 'delay')        show('delay-row');
+  if (pa === 'cond_yaw')   { show('yaw-heading-row'); show('yaw-speed-row'); show('yaw-rel-row'); }
+  if (pa === 'do_jump')    { show('jump-wp-row'); show('jump-repeat-row'); }
+  if (pa === 'set_servo')  { show('servo-num-row'); show('servo-pwm-row'); }
+  // Dim alt only for nav types that don't use a position
+  const noAlt = ['rtl'].includes(a);
   document.getElementById('ed-alt').closest('.form-row').style.opacity = noAlt ? '0.35' : '1';
 }
 
@@ -1418,6 +1423,7 @@ function showEditor(wp, idx) {
   document.getElementById('editor-title').textContent = `Edit WP ${idx + 1}`;
   document.getElementById('ed-alt').value            = wp.alt;
   document.getElementById('ed-action').value         = wp.action;
+  document.getElementById('ed-pre-action').value     = wp.preAction   ?? 'none';
   document.getElementById('ed-hold').value           = wp.holdTime    ?? 0;
   document.getElementById('ed-loiter-r').value       = wp.loiterR     ?? 20;
   document.getElementById('ed-loiter-time').value    = wp.loiterTime  ?? 10;
@@ -1435,7 +1441,7 @@ function showEditor(wp, idx) {
   document.getElementById('ed-jump-repeat').value    = wp.jumpRepeat  ?? 1;
   document.getElementById('ed-servo-num').value      = wp.servoNum    ?? 9;
   document.getElementById('ed-servo-pwm').value      = wp.servoPWM    ?? 1500;
-  _syncEditorRows(wp.action);
+  _syncEditorRows(wp.action, wp.preAction ?? 'none');
 }
 
 function updateEditorFields() {
@@ -1448,6 +1454,7 @@ function updateSelectedWP() {
   const wp = waypoints[selectedIdx];
   wp.alt         = parseFloat(document.getElementById('ed-alt').value)            || 50;
   wp.action      = document.getElementById('ed-action').value;
+  wp.preAction   = document.getElementById('ed-pre-action').value;
   wp.holdTime    = parseFloat(document.getElementById('ed-hold').value)           || 0;
   wp.loiterR     = parseFloat(document.getElementById('ed-loiter-r').value)       || 20;
   wp.loiterTime  = parseFloat(document.getElementById('ed-loiter-time').value)    || 10;
@@ -1462,7 +1469,7 @@ function updateSelectedWP() {
   wp.jumpRepeat  = parseInt(document.getElementById('ed-jump-repeat').value)      || 1;
   wp.servoNum    = parseInt(document.getElementById('ed-servo-num').value)        || 9;
   wp.servoPWM    = parseInt(document.getElementById('ed-servo-pwm').value)        || 1500;
-  _syncEditorRows(wp.action);
+  _syncEditorRows(wp.action, wp.preAction);
   wp.marker.setIcon(makeWPIcon(selectedIdx, wp.action, true));
   renderWPList();
   updateProfile();
@@ -1503,7 +1510,26 @@ function exportWaypoints() {
   let idx = 1;
   waypoints.forEach(wp => {
     const a = wp.action;
-    // MAVLink: cmd, p1-p4, lat, lon, alt  (per ArduPilot wiki)
+    const pa = wp.preAction || 'none';
+
+    // ── Pre-action (DO / CONDITION) emitted before the nav item ──
+    if (pa !== 'none') {
+      let pcmd, pp1=0, pp2=0, pp3=0, pp4=0, plat=0, plon=0, palt=0;
+      if      (pa === 'delay')     { pcmd=93;  pp1=wp.delayTime||5; }
+      else if (pa === 'set_speed') { pcmd=178; pp1=wp.speedType??1; pp2=wp.speed||5; pp3=-1; }
+      else if (pa === 'cond_yaw')  { pcmd=115; pp1=wp.yawHeading||0; pp2=wp.yawSpeed||0; pp4=wp.yawRel||0; }
+      else if (pa === 'do_jump')   { pcmd=177; pp1=wp.jumpWP||1; pp2=wp.jumpRepeat||1; }
+      else if (pa === 'set_roi')   { pcmd=201; pp1=3; plat=wp.lat; plon=wp.lon; palt=wp.alt; }
+      else if (pa === 'set_servo') { pcmd=183; pp1=wp.servoNum||9; pp2=wp.servoPWM||1500; }
+      if (pcmd) {
+        const pfLat = plat ? plat.toFixed(7) : '0';
+        const pfLon = plon ? plon.toFixed(7) : '0';
+        lines.push(`${idx}\t0\t3\t${pcmd}\t${pp1}\t${pp2}\t${pp3}\t${pp4}\t${pfLat}\t${pfLon}\t${palt}\t1`);
+        idx++;
+      }
+    }
+
+    // ── Nav item ──
     let cmd, p1=0, p2=0, p3=0, p4=0, lat=wp.lat, lon=wp.lon, alt=wp.alt;
     if      (a === 'waypoint')     { cmd=16;  p1=wp.holdTime||0; }
     else if (a === 'spline')       { cmd=82;  p1=wp.holdTime||0; }
@@ -1512,12 +1538,6 @@ function exportWaypoints() {
     else if (a === 'loiter_turns') { cmd=18;  p1=wp.loiterTurns||1; p3=wp.loiterR||20; }
     else if (a === 'loiter_to_alt'){ cmd=31;  p2=wp.loiterR||20; }
     else if (a === 'photo')        { cmd=16; }
-    else if (a === 'set_speed')    { cmd=178; p1=wp.speedType??1; p2=wp.speed||5; p3=-1; lat=0; lon=0; alt=0; }
-    else if (a === 'delay')        { cmd=93;  p1=wp.delayTime||5; lat=0; lon=0; alt=0; }
-    else if (a === 'cond_yaw')     { cmd=115; p1=wp.yawHeading||0; p2=wp.yawSpeed||0; p3=0; p4=wp.yawRel||0; lat=0; lon=0; alt=0; }
-    else if (a === 'do_jump')      { cmd=177; p1=wp.jumpWP||1; p2=wp.jumpRepeat||1; lat=0; lon=0; alt=0; }
-    else if (a === 'set_roi')      { cmd=201; p1=3; }  // mode 3 = fixed location
-    else if (a === 'set_servo')    { cmd=183; p1=wp.servoNum||9; p2=wp.servoPWM||1500; lat=0; lon=0; alt=0; }
     else if (a === 'takeoff')      { cmd=22; }
     else if (a === 'land')         { cmd=21; }
     else if (a === 'rtl')          { cmd=20;  lat=0; lon=0; alt=0; }
@@ -1547,36 +1567,62 @@ function importWaypoints(event) {
     waypoints = []; selectedIdx = -1;
     document.getElementById('wp-editor').classList.remove('visible');
     if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
+
+    // NAV commands that create a waypoint marker
+    const NAV_CMDS = new Set([16, 82, 17, 19, 18, 31, 22, 21, 20]);
+    const NAV_CMD_MAP = {16:'waypoint',82:'spline',17:'loiter',19:'loiter_time',
+      18:'loiter_turns',31:'loiter_to_alt',22:'takeoff',21:'land',20:'rtl'};
+    // DO/CONDITION commands stored as preAction on the following nav wp
+    const PA_CMD_MAP = {93:'delay',178:'set_speed',115:'cond_yaw',177:'do_jump',201:'set_roi',183:'set_servo'};
+
+    let pendingPreAction = 'none';
+    let pendingPreParams = {};
+
     lines.slice(1).forEach(line => {
       const p = line.split('\t');
       if (p.length < 12) return;
-      const idx = parseInt(p[0]), cmd = parseInt(p[3]);
+      const seq = parseInt(p[0]), cmd = parseInt(p[3]);
       const lat = parseFloat(p[8]), lon = parseFloat(p[9]), alt = parseFloat(p[10]);
-      if (idx === 0) { homeLat = lat; homeLon = lon; homeMarker.setLatLng([lat, lon]); return; }
-      if (cmd === 203) return; // digicam — mark previous WP as photo
-      // Map cmd back to action string
-      const CMD_MAP = {16:'waypoint',82:'spline',17:'loiter',19:'loiter_time',
-        18:'loiter_turns',31:'loiter_to_alt',178:'set_speed',93:'delay',
-        115:'cond_yaw',177:'do_jump',201:'set_roi',183:'set_servo',
-        22:'takeoff',21:'land',20:'rtl'};
-      const action = CMD_MAP[cmd] || 'waypoint';
-      const extra = {
-        holdTime:    ['waypoint','spline'].includes(action) ? parseFloat(p[4])||0 : 0,
-        loiterR:     parseFloat(p[6]) || 20,
-        loiterTime:  action==='loiter_time'  ? parseFloat(p[4])||10 : 10,
-        loiterTurns: action==='loiter_turns' ? parseFloat(p[4])||1  : 1,
-        speedType:   action==='set_speed'    ? parseInt(p[4])??1    : 1,
-        speed:       action==='set_speed'    ? parseFloat(p[5])||5  : 5,
-        delayTime:   action==='delay'        ? parseFloat(p[4])||5  : 5,
-        yawHeading:  action==='cond_yaw'     ? parseFloat(p[4])||0  : 0,
-        yawSpeed:    action==='cond_yaw'     ? parseFloat(p[5])||0  : 0,
-        yawRel:      action==='cond_yaw'     ? parseInt(p[7])||0    : 0,
-        jumpWP:      action==='do_jump'      ? parseInt(p[4])||1    : 1,
-        jumpRepeat:  action==='do_jump'      ? parseInt(p[5])||1    : 1,
-        servoNum:    action==='set_servo'    ? parseInt(p[4])||9    : 9,
-        servoPWM:    action==='set_servo'    ? parseInt(p[5])||1500 : 1500,
-      };
-      addWaypointSilent(lat, lon, alt, action, extra);
+      if (seq === 0) { homeLat = lat; homeLon = lon; homeMarker.setLatLng([lat, lon]); return; }
+
+      if (cmd === 203) {
+        // DO_DIGICAM_CONTROL — mark preceding nav wp as photo
+        if (waypoints.length > 0) waypoints[waypoints.length - 1].action = 'photo';
+        return;
+      }
+
+      if (PA_CMD_MAP[cmd]) {
+        // DO / CONDITION — store as pending pre-action for the next nav waypoint
+        pendingPreAction = PA_CMD_MAP[cmd];
+        pendingPreParams = {
+          delayTime:   cmd===93  ? parseFloat(p[4])||5    : 5,
+          speedType:   cmd===178 ? parseInt(p[4])??1      : 1,
+          speed:       cmd===178 ? parseFloat(p[5])||5    : 5,
+          yawHeading:  cmd===115 ? parseFloat(p[4])||0    : 0,
+          yawSpeed:    cmd===115 ? parseFloat(p[5])||0    : 0,
+          yawRel:      cmd===115 ? parseInt(p[7])||0      : 0,
+          jumpWP:      cmd===177 ? parseInt(p[4])||1      : 1,
+          jumpRepeat:  cmd===177 ? parseInt(p[5])||1      : 1,
+          servoNum:    cmd===183 ? parseInt(p[4])||9      : 9,
+          servoPWM:    cmd===183 ? parseInt(p[5])||1500   : 1500,
+        };
+        return;
+      }
+
+      if (NAV_CMDS.has(cmd)) {
+        const action = NAV_CMD_MAP[cmd] || 'waypoint';
+        const extra = {
+          preAction:   pendingPreAction,
+          ...pendingPreParams,
+          holdTime:    ['waypoint','spline'].includes(action) ? parseFloat(p[4])||0 : 0,
+          loiterR:     parseFloat(p[6]) || 20,
+          loiterTime:  action==='loiter_time'  ? parseFloat(p[4])||10 : 10,
+          loiterTurns: action==='loiter_turns' ? parseFloat(p[4])||1  : 1,
+        };
+        addWaypointSilent(lat, lon, alt, action, extra);
+        pendingPreAction = 'none';
+        pendingPreParams = {};
+      }
     });
     deselectWP(); updatePolyline(); updateProfile(); renderWPList();
   };
@@ -1590,7 +1636,7 @@ function addWaypointSilent(lat, lon, alt, action, extra) {
   const id = wpIdCounter++;
   const idx = waypoints.length;
   const marker = L.marker([lat, lon], { icon: makeWPIcon(idx, action, false), draggable: true, zIndexOffset: 500 }).addTo(map);
-  const wp = { lat, lon, alt, action,
+  const wp = { lat, lon, alt, action, preAction: ex.preAction ?? 'none',
     holdTime:    ex.holdTime    ?? 0,
     loiterR:     ex.loiterR     ?? 20,
     loiterTime:  ex.loiterTime  ?? 10,
