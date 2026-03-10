@@ -328,6 +328,7 @@
   }
   .gcs-mode-btn:hover   { background:#2d333b; border-color:var(--blue); color:var(--blue); }
   .gcs-mode-btn.active  { background:rgba(88,166,255,.18); border-color:var(--blue); color:var(--blue); }
+  .gcs-mode-btn.pending { background:rgba(227,179,65,.15); border-color:#e3b341; color:#e3b341; }
   #gcs-arm-btn {
     padding:14px; border-radius:8px; border:2px solid var(--green);
     background:rgba(63,185,80,.12); color:var(--green); font-size:15px; font-weight:800;
@@ -474,6 +475,9 @@
     <button class="gcs-mode-btn" data-mode="11" onclick="gcsSetMode(11)">RTL</button>
     <button class="gcs-mode-btn" data-mode="12" onclick="gcsSetMode(12)">LOITER</button>
   </div>
+
+  <!-- Mode feedback toast -->
+  <div id="gcs-mode-toast" style="display:none;font-size:11px;font-weight:600;text-align:center;padding:4px 8px;border-radius:5px;background:rgba(0,0,0,.45)"></div>
 
   <!-- ARM / DISARM -->
   <button id="gcs-arm-btn" onclick="gcsArmDisarm()">ARM</button>
@@ -3483,12 +3487,54 @@ function gcsShowModes(type) {
   document.getElementById('gcs-tab-plane').classList.toggle('active',  type === 'plane');
 }
 
+// Track pending mode to implement tap-twice confirmation without a blocking dialog
+let _gcsPendingMode = null;
+let _gcsPendingTimer = null;
+
 function gcsSetMode(customMode) {
-  if (!window.serialSetMode) { alert('Not connected to flight computer.'); return; }
-  const modeNames = _gcsMavType === 'plane' ? PLANE_MODE_NAMES : COPTER_MODE_NAMES;
-  const name = modeNames[customMode] ?? `Mode ${customMode}`;
-  if (!confirm(`Set flight mode to ${name}?`)) return;
-  window.serialSetMode(customMode);
+  const connected = document.getElementById('serial-connect-btn')?.dataset.on === '1';
+  if (!connected) {
+    gcsShowModeToast('Not connected to FC', 'var(--red)');
+    return;
+  }
+
+  // First tap: highlight button and arm a short confirmation window
+  // Second tap within 2 s: send the command
+  if (_gcsPendingMode === customMode) {
+    // Confirmed — send and clear pending state
+    clearTimeout(_gcsPendingTimer);
+    _gcsPendingMode = null;
+    _gcsModeToastTimer && clearTimeout(_gcsModeToastTimer);
+    // Clear pending highlight from all buttons
+    document.querySelectorAll('.gcs-mode-btn').forEach(b => b.classList.remove('pending'));
+    window.serialSetMode(customMode);
+  } else {
+    // First tap — mark as pending
+    clearTimeout(_gcsPendingTimer);
+    _gcsPendingMode = customMode;
+    // Highlight the pending button
+    document.querySelectorAll('.gcs-mode-btn').forEach(b => {
+      b.classList.toggle('pending', parseInt(b.dataset.mode) === customMode);
+    });
+    const modeNames = _gcsMavType === 'plane' ? PLANE_MODE_NAMES : COPTER_MODE_NAMES;
+    const name = modeNames[customMode] ?? `Mode ${customMode}`;
+    gcsShowModeToast(`Tap again to set ${name}`, '#e3b341');
+    _gcsPendingTimer = setTimeout(() => {
+      _gcsPendingMode = null;
+      document.querySelectorAll('.gcs-mode-btn').forEach(b => b.classList.remove('pending'));
+    }, 2000);
+  }
+}
+
+let _gcsModeToastTimer = null;
+function gcsShowModeToast(msg, color) {
+  const el = document.getElementById('gcs-mode-toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = color || 'var(--text)';
+  el.style.display = 'block';
+  clearTimeout(_gcsModeToastTimer);
+  _gcsModeToastTimer = setTimeout(() => { el.style.display = 'none'; }, 2500);
 }
 
 function gcsArmDisarm() {

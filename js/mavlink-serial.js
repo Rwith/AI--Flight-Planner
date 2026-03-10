@@ -1274,9 +1274,23 @@
   // ─── Flight control commands ──────────────────────────────────────────────
   window.serialSetMode = (customMode) => {
     if (!writer) { addLog('[mode] Not connected'); return; }
-    const tSys = parseInt(document.getElementById('serial-sysid')?.value ?? '1', 10);
-    writer.write(buildSetMode(customMode, tSys)).catch(e => addLog('[mode] ' + e.message));
-    addLog(`[mode] SET_MODE custom_mode=${customMode} → sysid=${tSys}`);
+    const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
+
+    // Send both SET_MODE (msg 11, legacy) and COMMAND_LONG MAV_CMD_DO_SET_MODE (176,
+    // preferred by newer ArduPilot). Also retry 3× at 200 ms / 500 ms because
+    // MAVLink over WiFi drops packets and the FC silently ignores duplicates.
+    const sendOnce = () => {
+      if (!writer) return;
+      writer.write(buildSetMode(customMode, tSys)).catch(e => addLog('[mode] SET_MODE: ' + e.message));
+      writer.write(buildCommandLong(tSys, tComp, 176, 1, customMode, 0, 0, 0, 0, 0, 0))
+            .catch(e => addLog('[mode] DO_SET_MODE: ' + e.message));
+    };
+
+    sendOnce();
+    setTimeout(sendOnce, 200);
+    setTimeout(sendOnce, 500);
+    addLog(`[mode] SET_MODE + DO_SET_MODE custom_mode=${customMode} → sysid=${tSys} (×3)`);
   };
 
   window.serialArmDisarm = (arm) => {
