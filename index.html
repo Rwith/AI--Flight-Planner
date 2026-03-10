@@ -3444,9 +3444,9 @@ function toggleGCS() {
 }
 
 function gcsSetConnMode(mode) {
-  // Sync underlying FC tab selector and run its handler so wifi-url defaults are set
+  // Sync underlying FC tab selector WITHOUT calling toggleConnMode() —
+  // that function auto-disconnects the FC, which would kill an active connection.
   document.getElementById('conn-mode').value = mode;
-  toggleConnMode();
 
   // Update GCS tab highlights
   ['usb','direct','wifi'].forEach(m => {
@@ -3456,15 +3456,22 @@ function gcsSetConnMode(mode) {
 
   // Show/hide URL and backpack IP rows
   const isWifi = mode === 'wifi' || mode === 'direct';
+  const wsPort = window.electronBridge?.WS_PORT ?? 5761;
   const wifiRow = document.getElementById('gcs-wifi-row');
   const bpRow   = document.getElementById('gcs-bp-row');
   wifiRow.style.display = isWifi ? 'flex' : 'none';
   bpRow.style.display   = mode === 'wifi' ? 'flex' : 'none';
 
-  // Mirror the (possibly auto-filled) wifi-url value back into the GCS input
+  // Set sensible wifi-url defaults (same logic as toggleConnMode, minus the disconnect)
+  const urlEl    = document.getElementById('wifi-url');
+  const gcsUrlEl = document.getElementById('gcs-wifi-url');
   if (isWifi) {
-    const url = document.getElementById('wifi-url').value;
-    document.getElementById('gcs-wifi-url').value = url;
+    if (mode === 'direct') {
+      if (!urlEl.value || urlEl.value.startsWith('ws://localhost')) urlEl.value = 'ws://10.0.0.1:5760';
+    } else {
+      if (!urlEl.value || urlEl.value === 'ws://10.0.0.1:5760') urlEl.value = `ws://localhost:${wsPort}`;
+    }
+    gcsUrlEl.value = urlEl.value;
   }
 }
 
