@@ -262,6 +262,18 @@
   let telLog          = [];    // CSV rows for export
   const tele          = {};    // live telemetry snapshot
 
+  // WiFi reconnect state
+  let _wifiUrl                = null;   // last attempted URL
+  let _wifiMode               = null;   // 'wifi' | 'direct'
+  let _wifiIntentional        = false;  // true when user clicked Disconnect
+  let _wifiReconnectTimer     = null;
+  let _wifiReconnectAttempts  = 0;
+  const WIFI_MAX_ATTEMPTS     = 8;
+  const WIFI_BACKOFF_MS       = [2000, 3000, 5000, 8000, 10000, 15000, 20000, 30000];
+
+  // Heartbeat watchdog — detects stale / zombie connections
+  let _hbWatchdog = null;
+
   // Live altitude track: array of {dist, alt} where dist = distance from home (m)
   let liveAltLog = [];
   window._getLiveAltPoints = () => liveAltLog;
@@ -313,6 +325,20 @@
         if (!streamsAsked) {
           streamsAsked = true;
           requestStreams(1, 1);
+        }
+        // Reset heartbeat watchdog — if 6 s pass with no heartbeat on a WiFi
+        // connection the socket is likely a zombie; force-close and reconnect.
+        if (wsConn) {
+          clearTimeout(_hbWatchdog);
+          _hbWatchdog = setTimeout(() => {
+            if (!wsConn) return;
+            addLog('[wifi] No heartbeat for 6 s — connection lost, reconnecting…');
+            const staleWs = wsConn;
+            wsConn = null; writer = null;
+            try { staleWs.close(); } catch {}
+            setConnected(false);
+            _scheduleWifiReconnect();
+          }, 6000);
         }
         renderTele();
         break;
@@ -859,24 +885,13 @@
         const backpackIp = document.getElementById('backpack-ip')?.value?.trim() || '10.0.0.1';
         window.electronBridge.startBridge({ mode: 'udp', backpackIp });
       }
-      try {
-        const ws = new WebSocket(url);
-        ws.binaryType = 'arraybuffer';
-        const parser = new MAVParser(onMessage);
-        ws.onopen = () => {
-          wsConn  = ws;
-          writer  = { write: (d) => { ws.send(d); return Promise.resolve(); } };
-          setConnected(true);
-          addLog('Wireless connected · ' + url);
-        };
-        ws.onmessage = (e) => parser.push(new Uint8Array(e.data));
-        ws.onerror   = ()  => addLog('[wifi] Connection failed — check URL and that the backpack AP is active');
-        ws.onclose   = ()  => {
-          if (wsConn) { wsConn = null; writer = null; setConnected(false); addLog('Wireless disconnected'); }
-        };
-      } catch (e) {
-        addLog('[wifi] ' + e.message);
-      }
+      // Store for auto-reconnect
+      _wifiUrl               = url;
+      _wifiMode              = mode;
+      _wifiIntentional       = false;
+      _wifiReconnectAttempts = 0;
+      clearTimeout(_wifiReconnectTimer);
+      _openWifiSocket(url);
       return;
     }
 
@@ -891,7 +906,73 @@
     }
   }
 
+  function _openWifiSocket (url) {
+    try {
+      const ws     = new WebSocket(url);
+      ws.binaryType = 'arraybuffer';
+      const parser  = new MAVParser(onMessage);
+
+      ws.onopen = () => {
+        // Guard: if another socket beat us to it, close this one
+        if (wsConn && wsConn !== ws) { try { ws.close(); } catch {} return; }
+        wsConn  = ws;
+        writer  = { write: (d) => { ws.send(d); return Promise.resolve(); } };
+        _wifiReconnectAttempts = 0;
+        clearTimeout(_wifiReconnectTimer);
+        setConnected(true);
+        addLog('Wireless connected · ' + url);
+      };
+
+      ws.onmessage = (e) => parser.push(new Uint8Array(e.data));
+
+      ws.onerror = () => {
+        // Only log if this is the current socket (avoids noise from stale ones)
+        if (wsConn === ws || wsConn === null) {
+          addLog('[wifi] Connection failed — check URL / backpack AP');
+        }
+      };
+
+      ws.onclose = () => {
+        // CRITICAL: check this specific socket instance to avoid a race condition
+        // where a new socket opens before the old one's onclose fires, causing
+        // the new connection's state to be wiped.
+        if (wsConn !== ws) return;
+        clearTimeout(_hbWatchdog);
+        wsConn = null; writer = null;
+        setConnected(false);
+        if (_wifiIntentional) {
+          addLog('Wireless disconnected');
+        } else {
+          addLog('Wireless disconnected unexpectedly — reconnecting…');
+          _scheduleWifiReconnect();
+        }
+      };
+    } catch (e) {
+      addLog('[wifi] ' + e.message);
+      _scheduleWifiReconnect();
+    }
+  }
+
+  function _scheduleWifiReconnect () {
+    if (_wifiIntentional || !_wifiUrl) return;
+    if (_wifiReconnectAttempts >= WIFI_MAX_ATTEMPTS) {
+      addLog('[wifi] Giving up after ' + WIFI_MAX_ATTEMPTS + ' attempts — click Connect to retry');
+      return;
+    }
+    const delay = WIFI_BACKOFF_MS[_wifiReconnectAttempts] ?? 30000;
+    _wifiReconnectAttempts++;
+    addLog(`[wifi] Reconnect attempt ${_wifiReconnectAttempts}/${WIFI_MAX_ATTEMPTS} in ${delay / 1000}s…`);
+    _wifiReconnectTimer = setTimeout(() => {
+      if (_wifiIntentional || wsConn) return;
+      _openWifiSocket(_wifiUrl);
+    }, delay);
+  }
+
   async function disconnect () {
+    // Mark as intentional so the onclose handler doesn't trigger auto-reconnect
+    _wifiIntentional = true;
+    clearTimeout(_wifiReconnectTimer);
+    clearTimeout(_hbWatchdog);
     if (wsConn) {
       const ws = wsConn; wsConn = null;
       try { ws.close(); } catch {}
