@@ -327,6 +327,7 @@
   <div class="ctx-item" id="ctx-osm"       onclick="ctxSetTile('osm')">OpenStreetMap</div>
   <div style="height:1px;background:var(--border);margin:4px 0"></div>
   <div class="ctx-item"                    onclick="if(_ctxLatLng)addRallyPoint(_ctxLatLng.lat,_ctxLatLng.lng);closeMapCtx()">Add Rally Point</div>
+  <div class="ctx-item"                    onclick="if(_ctxLatLng){homeLat=_ctxLatLng.lat;homeLon=_ctxLatLng.lng;homeMarker.setLatLng([homeLat,homeLon]);try{localStorage.setItem('homeLat',homeLat);localStorage.setItem('homeLon',homeLon);}catch{}updatePolyline();}closeMapCtx()">Move Home Here</div>
   <div style="height:1px;background:var(--border);margin:4px 0"></div>
   <div class="ctx-item" id="ctx-nfz-item"  onclick="toggleNFZ();closeMapCtx()">NFZ</div>
   <div class="ctx-item"                    onclick="downloadTilesForView();closeMapCtx()">Cache Tiles</div>
@@ -2889,6 +2890,11 @@ async function toggleNFZ() {
     nfzEnabled = false;
     btn.textContent = 'NFZ Off';
     btn.classList.remove('nfz-on');
+    _syncNFZCtx(); return;
+  }
+  if (waypoints.length === 0) {
+    alert('Unable to load NFZ: No waypoints placed.');
+    btn.textContent = 'NFZ Off';
     _syncNFZCtx(); return;
   }
   btn.textContent = 'Loading…'; _syncNFZCtx();
