@@ -1632,7 +1632,7 @@ function updateGimbalLines() {
   gimbalLines = [];
 
   waypoints.forEach(wp => {
-    if (wp.action !== 'do_mount_control') return;
+    if (wp.preAction !== 'do_mount_control') return;
     const pitch = wp.mountPitch || 0;
     const yaw   = wp.mountYaw   || 0;
 
@@ -1751,7 +1751,7 @@ function renderWPList() {
       <div class="wp-info">
         <div class="wp-num">WP${i + 1} — ${wp.action}</div>
         <div class="wp-details">${wp.alt}m AGL${legStr}</div>
-        ${wp.action === 'do_mount_control' ? `<div class="wp-details" style="color:var(--sec)">Camera: Pitch ${wp.mountPitch||0}° · Roll ${wp.mountRoll||0}° · Yaw ${wp.mountYaw||0}° (0° = straight ahead)</div>` : ''}
+        ${wp.preAction === 'do_mount_control' ? `<div class="wp-details" style="color:var(--sec)">Camera: Pitch ${wp.mountPitch||0}° · Roll ${wp.mountRoll||0}° · Yaw ${wp.mountYaw||0}° (0° = straight ahead)</div>` : ''}
       </div>
       <span class="wp-del" onclick="event.stopPropagation();deleteWPByIdx(${i})">✕</span>
     </div>`;
