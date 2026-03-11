@@ -1631,10 +1631,27 @@ function updateGimbalLines() {
   });
   gimbalLines = [];
 
-  waypoints.forEach(wp => {
+  waypoints.forEach((wp, wpIdx) => {
     if (wp.preAction !== 'do_mount_control') return;
     const pitch = wp.mountPitch || 0;
     const yaw   = wp.mountYaw   || 0;
+
+    // Flight bearing = direction of travel at this waypoint (0° yaw means straight ahead)
+    let flightBearing = 0;
+    if (wpIdx + 1 < waypoints.length) {
+      const next = waypoints[wpIdx + 1];
+      const fdLat = next.lat - wp.lat;
+      const fdLon = (next.lon - wp.lon) * Math.cos(wp.lat * Math.PI / 180);
+      flightBearing = (Math.atan2(fdLon, fdLat) * 180 / Math.PI + 360) % 360;
+    } else if (wpIdx > 0) {
+      const prev = waypoints[wpIdx - 1];
+      const fdLat = wp.lat - prev.lat;
+      const fdLon = (wp.lon - prev.lon) * Math.cos(prev.lat * Math.PI / 180);
+      flightBearing = (Math.atan2(fdLon, fdLat) * 180 / Math.PI + 360) % 360;
+    }
+
+    // Absolute map bearing = flight direction + relative yaw offset
+    const absYaw = (flightBearing + yaw + 360) % 360;
 
     // Horizontal ground projection shrinks as pitch steepens:
     //   0° pitch (straight ahead) → full BASE_M length
@@ -1643,9 +1660,9 @@ function updateGimbalLines() {
     const lenM   = BASE_M * Math.abs(Math.cos(pitch * Math.PI / 180));
     if (lenM < 2) return; // effectively straight down, nothing useful to draw
 
-    const yawRad = yaw * Math.PI / 180;
-    const dLat   = lenM * Math.cos(yawRad) / 111111;
-    const dLon   = lenM * Math.sin(yawRad) / (111111 * Math.cos(wp.lat * Math.PI / 180));
+    const absYawRad = absYaw * Math.PI / 180;
+    const dLat   = lenM * Math.cos(absYawRad) / 111111;
+    const dLon   = lenM * Math.sin(absYawRad) / (111111 * Math.cos(wp.lat * Math.PI / 180));
     const tipLat = wp.lat + dLat;
     const tipLon = wp.lon + dLon;
 
@@ -1653,11 +1670,10 @@ function updateGimbalLines() {
       color: '#ffffff', weight: 2, opacity: 0.85, interactive: false
     }).addTo(map);
 
-    // Camera icon at tip, rotated so the lens faces back toward the aircraft
-    const rot = (yaw + 180) % 360;
-    const camIcon = L.divIcon({
+    // Camera icon builder — rotated so lens faces back toward the aircraft
+    const makeCamIcon = (rot) => L.divIcon({
       className: '',
-      html: `<div style="transform:rotate(${rot}deg);transform-origin:center;line-height:0">
+      html: `<div style="transform:rotate(${rot}deg);transform-origin:center;line-height:0;cursor:grab">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="13" viewBox="0 0 18 13">
           <rect x="2" y="2" width="11" height="9" rx="1.5" fill="rgba(0,0,0,0.65)" stroke="white" stroke-width="1.5"/>
           <polygon points="13,3.5 17,1.5 17,11.5 13,9.5" fill="white"/>
@@ -1669,8 +1685,37 @@ function updateGimbalLines() {
     });
 
     const mk = L.marker([tipLat, tipLon], {
-      icon: camIcon, interactive: false, zIndexOffset: -100
+      icon: makeCamIcon((absYaw + 180) % 360), draggable: true, zIndexOffset: -100
     }).addTo(map);
+
+    mk.on('drag', e => {
+      const p = e.target.getLatLng();
+      const ddLat = p.lat - wp.lat;
+      const ddLon = (p.lng - wp.lon) * Math.cos(wp.lat * Math.PI / 180);
+      const newAbsYaw = (Math.atan2(ddLon, ddLat) * 180 / Math.PI + 360) % 360;
+      const rel = ((newAbsYaw - flightBearing) + 360) % 360;
+      wp.mountYaw = Math.round(rel > 180 ? rel - 360 : rel); // keep in -180..180
+
+      // Update polyline direction while keeping fixed length
+      const newAbsRad = newAbsYaw * Math.PI / 180;
+      const newDLat = lenM * Math.cos(newAbsRad) / 111111;
+      const newDLon = lenM * Math.sin(newAbsRad) / (111111 * Math.cos(wp.lat * Math.PI / 180));
+      poly.setLatLngs([[wp.lat, wp.lon], [wp.lat + newDLat, wp.lon + newDLon]]);
+      mk.setIcon(makeCamIcon((newAbsYaw + 180) % 360));
+
+      if (selectedIdx >= 0 && waypoints[selectedIdx] === wp) {
+        document.getElementById('ed-mount-yaw').value = wp.mountYaw;
+      }
+    });
+
+    mk.on('dragend', () => {
+      // Snap marker back to correct radius distance
+      const snapAbsYaw = (flightBearing + wp.mountYaw + 360) % 360;
+      const snapRad = snapAbsYaw * Math.PI / 180;
+      const sDLat = lenM * Math.cos(snapRad) / 111111;
+      const sDLon = lenM * Math.sin(snapRad) / (111111 * Math.cos(wp.lat * Math.PI / 180));
+      mk.setLatLng([wp.lat + sDLat, wp.lon + sDLon]);
+    });
 
     gimbalLines.push({ polyline: poly, marker: mk });
   });
