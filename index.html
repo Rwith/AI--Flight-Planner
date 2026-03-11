@@ -1391,6 +1391,7 @@ let nfzEnabled = false;
 let nfzLayers = [];
 let insertMarker = null;
 let homeToFirstLine = null;
+let gimbalLines = []; // [{polyline, marker}] for do_mount_control direction visualizers
 let hoverSegIdx = -1;
 let insertHideTimer = null;
 let currentTileLayer = null;
@@ -1618,6 +1619,60 @@ function updatePolyline() {
   missionPolyline.on('mouseout', () => {
     clearTimeout(insertHideTimer);
     insertHideTimer = setTimeout(clearInsertMarker, 120);
+  });
+  updateGimbalLines();
+}
+
+// ====================== GIMBAL DIRECTION LINES ======================
+function updateGimbalLines() {
+  gimbalLines.forEach(g => {
+    if (g.polyline) map.removeLayer(g.polyline);
+    if (g.marker)   map.removeLayer(g.marker);
+  });
+  gimbalLines = [];
+
+  waypoints.forEach(wp => {
+    if (wp.action !== 'do_mount_control') return;
+    const pitch = wp.mountPitch || 0;
+    const yaw   = wp.mountYaw   || 0;
+
+    // Horizontal ground projection shrinks as pitch steepens:
+    //   0° pitch (straight ahead) → full BASE_M length
+    //   ±90° pitch (straight down/up) → 0 length
+    const BASE_M = 150;
+    const lenM   = BASE_M * Math.abs(Math.cos(pitch * Math.PI / 180));
+    if (lenM < 2) return; // effectively straight down, nothing useful to draw
+
+    const yawRad = yaw * Math.PI / 180;
+    const dLat   = lenM * Math.cos(yawRad) / 111111;
+    const dLon   = lenM * Math.sin(yawRad) / (111111 * Math.cos(wp.lat * Math.PI / 180));
+    const tipLat = wp.lat + dLat;
+    const tipLon = wp.lon + dLon;
+
+    const poly = L.polyline([[wp.lat, wp.lon], [tipLat, tipLon]], {
+      color: '#ffffff', weight: 2, opacity: 0.85, interactive: false
+    }).addTo(map);
+
+    // Camera icon at tip, rotated so the lens faces back toward the aircraft
+    const rot = (yaw + 180) % 360;
+    const camIcon = L.divIcon({
+      className: '',
+      html: `<div style="transform:rotate(${rot}deg);transform-origin:center;line-height:0">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="13" viewBox="0 0 18 13">
+          <rect x="2" y="2" width="11" height="9" rx="1.5" fill="rgba(0,0,0,0.65)" stroke="white" stroke-width="1.5"/>
+          <polygon points="13,3.5 17,1.5 17,11.5 13,9.5" fill="white"/>
+          <circle cx="7.5" cy="6.5" r="2.2" fill="none" stroke="white" stroke-width="1.2"/>
+        </svg>
+      </div>`,
+      iconSize: [18, 13],
+      iconAnchor: [9, 6]
+    });
+
+    const mk = L.marker([tipLat, tipLon], {
+      icon: camIcon, interactive: false, zIndexOffset: -100
+    }).addTo(map);
+
+    gimbalLines.push({ polyline: poly, marker: mk });
   });
 }
 
@@ -1902,6 +1957,7 @@ function updateSelectedWP() {
   wp.marker.setIcon(makeWPIcon(selectedIdx, wp.action, true));
   renderWPList();
   updateProfile();
+  updateGimbalLines();
 }
 
 function deleteSelectedWP() { if (selectedIdx >= 0) deleteWPByIdx(selectedIdx); }
@@ -1928,6 +1984,7 @@ function clearMission() {
   waypoints = []; selectedIdx = -1;
   document.getElementById('wp-editor').classList.remove('visible');
   if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
+  updateGimbalLines();
   updateProfile(); renderWPList();
 }
 
