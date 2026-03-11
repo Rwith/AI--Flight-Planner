@@ -1382,7 +1382,8 @@ const ACTION_COLORS = {
   loiter: '#a29bfe', loiter_time: '#a29bfe', loiter_turns: '#a29bfe', loiter_to_alt: '#c7b3ff',
   photo: '#00cec9', set_speed: '#fdcb6e', delay: '#b2bec3',
   cond_yaw: '#fd79a8', do_jump: '#e17055', set_roi: '#00b894', set_servo: '#fdcb6e',
-  takeoff: '#00b894', land: '#fd79a8', rtl: '#e17055'
+  takeoff: '#26de81', vtol_takeoff: '#20bf6b',
+  land: '#ee5a24', vtol_land: '#d63031', rtl: '#e17055'
 };
 const LOITER_ACTIONS = new Set(['loiter','loiter_time','loiter_turns','loiter_to_alt']);
 let terrainElevations = null;
@@ -1681,7 +1682,7 @@ function renderWPList() {
       const dStr = d >= 1000 ? (d/1000).toFixed(1)+'km' : Math.round(d)+'m';
       const gs   = _legSpeed(i);
       const gsStr = gs.toFixed(1);
-      legStr = ` · ${dStr} · GS ${msToDisp(gs).toFixed(1)}${spdLabel()} · +${_fmtTime(cumulETA[i] - cumulETA[i-1])} (Σ ${_fmtTime(cumulETA[i])})`;
+      legStr = ` · ${dStr} · GS ${msToDisp(gs).toFixed(1)}${spdLabel()} · +${_fmtTime(cumulETA[i] - cumulETA[i-1])} (${_fmtTime(cumulETA[i])} total)`;
     }
     return `<div class="wp-item${selectedIdx === i ? ' selected' : ''}"
         onclick="selectWP(${i})" draggable="true"
@@ -1695,6 +1696,7 @@ function renderWPList() {
       <div class="wp-info">
         <div class="wp-num">WP${i + 1} — ${wp.action}</div>
         <div class="wp-details">${wp.alt}m AGL${legStr}</div>
+        ${wp.action === 'do_mount_control' ? `<div class="wp-details" style="color:var(--sec)">Camera: Pitch ${wp.mountPitch||0}° · Roll ${wp.mountRoll||0}° · Yaw ${wp.mountYaw||0}° (0° = straight ahead)</div>` : ''}
       </div>
       <span class="wp-del" onclick="event.stopPropagation();deleteWPByIdx(${i})">✕</span>
     </div>`;
