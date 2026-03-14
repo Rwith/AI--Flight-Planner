@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
 generate-installer-assets.py
-Generates dark-themed BMP images for the AeroNav AI Windows installer.
+Generates dark-themed BMP images and ICO/PNG icons for the AeroNav AI installer.
 
 Outputs:
-  build/sidebar.bmp          164 × 314  — Welcome / Finish left panel
+  build/sidebar.bmp           164 × 314  — Welcome / Finish left panel
   build/sidebar-uninstall.bmp 164 × 314  — Uninstaller left panel
-  build/header.bmp           150 × 57   — Inner-page header strip
+  build/header.bmp            150 × 57   — Inner-page header strip
+  assets/icon.ico             256 × 256  — Windows installer / taskbar icon
+  assets/icon.png             512 × 512  — Linux AppImage icon
 
 Run from the project root:
   python scripts/generate-installer-assets.py
@@ -15,6 +17,7 @@ Run from the project root:
 import struct
 import os
 import math
+import zlib
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +195,186 @@ def make_header(path, width=150, height=57):
 
 
 # ---------------------------------------------------------------------------
+# PNG writer (no external deps — raw DEFLATE via zlib)
+# ---------------------------------------------------------------------------
+
+def write_png(path, width, height, pixels):
+    """
+    Write a 32-bit RGBA PNG.
+    pixels: list of (R, G, B, A) tuples, row-major, top-to-bottom.
+    """
+    def u32be(v):
+        return struct.pack(">I", v)
+
+    def chunk(tag, data):
+        c = struct.pack(">I", len(data)) + tag + data
+        crc = zlib.crc32(tag + data) & 0xFFFFFFFF
+        return c + struct.pack(">I", crc)
+
+    # IHDR
+    ihdr_data = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    ihdr = chunk(b"IHDR", ihdr_data)
+
+    # IDAT
+    raw = b""
+    for y in range(height):
+        raw += b"\x00"  # filter type None
+        for x in range(width):
+            r, g, b, a = pixels[y * width + x]
+            raw += bytes([r, g, b, a])
+    compressed = zlib.compress(raw, 9)
+    idat = chunk(b"IDAT", compressed)
+
+    iend = chunk(b"IEND", b"")
+
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n")
+        f.write(ihdr)
+        f.write(idat)
+        f.write(iend)
+
+    print(f"  wrote {path}  ({width}×{height})")
+
+
+# ---------------------------------------------------------------------------
+# App icon pixels  — dark navy circle with "A" lettermark
+# ---------------------------------------------------------------------------
+
+def make_icon_pixels(size, alpha=True):
+    """
+    Returns a list of (R,G,B,A) or (R,G,B) pixels for the AeroNav icon at
+    the given square size.  Design: dark circle, blue ring, white "A" glyph.
+    """
+    cx = cy = size / 2
+    r_outer = size * 0.48
+    r_ring_outer = size * 0.48
+    r_ring_inner = size * 0.38
+    r_inner = size * 0.36
+
+    BG       = (0x0D, 0x11, 0x17)
+    RING     = (0x1F, 0x6F, 0xEB)
+    RING_HI  = (0x58, 0xA6, 0xFF)
+    LETTER   = (0xE6, 0xED, 0xF3)
+    TRANSP   = (0, 0, 0, 0)
+
+    def in_circle(x, y, r):
+        return math.sqrt((x - cx) ** 2 + (y - cy) ** 2) <= r
+
+    # Rasterise a bold "A" via a signed-distance-field approximation.
+    # The glyph occupies roughly 30 % of the icon width, centred.
+    def in_letter_A(px, py):
+        # Normalise to -1..1 space centred in circle
+        nx = (px - cx) / (size * 0.22)
+        ny = (py - cy) / (size * 0.22)
+        # Move glyph up slightly
+        ny -= 0.15
+
+        # Left stroke   (from bottom-left to apex)
+        # Right stroke  (from bottom-right to apex)
+        # Cross bar
+        stroke = 0.22  # half-width of each stroke in normalised space
+
+        def seg_dist(ax, ay, bx, by, qx, qy):
+            dx, dy = bx - ax, by - ay
+            t = max(0, min(1, ((qx - ax) * dx + (qy - ay) * dy) / (dx * dx + dy * dy + 1e-9)))
+            return math.sqrt((qx - ax - t * dx) ** 2 + (qy - ay - t * dy) ** 2)
+
+        apex = (0.0, -1.0)
+        bl   = (-0.75,  1.0)
+        br   = ( 0.75,  1.0)
+        ml   = (-0.28,  0.15)
+        mr   = ( 0.28,  0.15)
+
+        d_left  = seg_dist(bl[0], bl[1], apex[0], apex[1], nx, ny)
+        d_right = seg_dist(br[0], br[1], apex[0], apex[1], nx, ny)
+        d_cross = seg_dist(ml[0], ml[1], mr[0],   mr[1],   nx, ny)
+
+        return min(d_left, d_right, d_cross) < stroke
+
+    pixels = []
+    for y in range(size):
+        for x in range(size):
+            dist = math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+
+            if dist > r_outer:
+                # Outside icon — transparent
+                pixels.append(TRANSP if alpha else (0, 0, 0))
+                continue
+
+            # Anti-alias edge
+            aa = clamp(int((r_outer - dist) * 4), 0, 255)
+
+            if dist <= r_ring_inner:
+                # Inner fill
+                if in_letter_A(x, y):
+                    base = LETTER + (aa,)
+                else:
+                    base = BG + (aa,)
+            else:
+                # Ring band
+                t = (dist - r_ring_inner) / (r_ring_outer - r_ring_inner)
+                ring_col = lerp_rgb(RING, RING_HI, t)
+                base = ring_col + (aa,)
+
+            if not alpha:
+                base = base[:3]
+            pixels.append(base)
+
+    return pixels
+
+
+# ---------------------------------------------------------------------------
+# ICO writer  (single 256×256 32-bit RGBA image)
+# ---------------------------------------------------------------------------
+
+def write_ico(path, size=256):
+    pixels = make_icon_pixels(size, alpha=True)
+
+    # Build a PNG blob for the image data (ICO >= 256px stores PNG)
+    import io
+
+    def u32be(v): return struct.pack(">I", v)
+    def u32le(v): return struct.pack("<I", v)
+    def u16le(v): return struct.pack("<H", v)
+
+    def png_blob(px, w, h):
+        def chunk(tag, data):
+            c = struct.pack(">I", len(data)) + tag + data
+            crc = zlib.crc32(tag + data) & 0xFFFFFFFF
+            return c + struct.pack(">I", crc)
+        ihdr = chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+        raw = b""
+        for y in range(h):
+            raw += b"\x00"
+            for x in range(w):
+                r, g, b, a = px[y * w + x]
+                raw += bytes([r, g, b, a])
+        idat = chunk(b"IDAT", zlib.compress(raw, 6))
+        iend = chunk(b"IEND", b"")
+        return b"\x89PNG\r\n\x1a\n" + ihdr + idat + iend
+
+    image_data = png_blob(pixels, size, size)
+    img_size = len(image_data)
+
+    # ICO header + 1 directory entry
+    header = b"\x00\x00" + u16le(1) + u16le(1)   # reserved, type=ICO, count=1
+    # directory entry: w, h, palette, reserved, planes, bpp, size, offset
+    entry = (bytes([0, 0]) +           # 0,0 = 256 for 256px
+             b"\x00\x00" +             # palette count, reserved
+             u16le(1) +                # color planes
+             u16le(32) +               # bits per pixel
+             u32le(img_size) +         # image data size
+             u32le(6 + 16))            # offset = header(6) + entry(16)
+
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(header + entry + image_data)
+
+    print(f"  wrote {path}  ({size}×{size} ICO)")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -200,4 +383,10 @@ if __name__ == "__main__":
     make_sidebar("build/sidebar.bmp")
     make_sidebar("build/sidebar-uninstall.bmp", uninstall=True)
     make_header("build/header.bmp")
+
+    # App icons
+    icon_px_512 = make_icon_pixels(512, alpha=True)
+    write_png("assets/icon.png", 512, 512, icon_px_512)
+    write_ico("assets/icon.ico", size=256)
+
     print("Done.")
