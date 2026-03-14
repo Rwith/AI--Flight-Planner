@@ -272,6 +272,50 @@
   .wp-item { cursor: grab; }
   .wp-item.drag-over { border-color: var(--yellow) !important; background: rgba(210,153,34,.1) !important; }
   .wp-item.dragging  { opacity: 0.4; }
+  /* FUNCTION BLOCKS */
+  .fb-header {
+    display:flex; align-items:center; gap:8px; padding:7px 10px;
+    border-radius:6px 6px 0 0; cursor:grab; user-select:none;
+    transition:filter .15s;
+  }
+  .fb-header:hover { filter:brightness(1.08); }
+  .fb-header.dragging { opacity:.45; }
+  .fb-header.drag-over { filter:brightness(1.2); }
+  .fb-header-label {
+    font-size:11px; font-weight:700; letter-spacing:.4px;
+    color:rgba(0,0,0,.75); flex-shrink:0;
+  }
+  .fb-input {
+    /* White pill input embedded in the solid-colour block — matches reference image */
+    background:#fff; border:none; border-radius:4px;
+    color:#1a1a1a; padding:3px 7px; font-size:12px; font-weight:600;
+    outline:none; width:68px; box-shadow:0 1px 3px rgba(0,0,0,.2);
+  }
+  .fb-input-unit {
+    font-size:10px; color:rgba(0,0,0,.6); font-weight:600; flex-shrink:0;
+  }
+  .fb-del {
+    margin-left:auto; cursor:pointer; font-size:13px; font-weight:700;
+    color:rgba(0,0,0,.5); padding:0 2px; transition:color .1s; flex-shrink:0;
+  }
+  .fb-del:hover { color:rgba(0,0,0,.9); }
+  .fb-footer {
+    display:flex; align-items:center; justify-content:center; gap:5px;
+    padding:4px 10px; border-radius:0 0 6px 6px; cursor:ns-resize;
+    font-size:9px; font-weight:600; letter-spacing:.5px;
+    transition:filter .15s; user-select:none;
+  }
+  .fb-footer:hover { filter:brightness(1.1); }
+  .wp-item.fb-covered { border-radius:0; margin-left:0; border-left-width:3px; }
+  .fb-add-row {
+    display:flex; align-items:center; gap:6px; padding:5px 4px; flex-wrap:wrap;
+  }
+  .fb-add-btn {
+    display:flex; align-items:center; gap:4px; padding:4px 9px;
+    border:1px dashed var(--border); border-radius:5px; font-size:11px;
+    color:var(--sec); cursor:pointer; background:none; transition:border-color .15s, color .15s;
+  }
+  .fb-add-btn:hover { border-color:var(--blue); color:var(--blue); }
   /* RALLY POINTS */
   .rally-item { display:flex; align-items:center; gap:8px; background:var(--card); border:1px solid var(--border); border-radius:6px; padding:6px 10px; }
   /* NO-FLY WINDOW */
@@ -888,6 +932,12 @@
       </div>
       <div id="loiter-overlap-warn" style="display:none;background:rgba(210,153,34,.12);border:1px solid rgba(210,153,34,.5);border-radius:6px;padding:7px 10px;font-size:11px;color:var(--yellow)"></div>
       <div id="no-wp">No waypoints yet.<br>Click the map to place them.</div>
+      <!-- FUNCTION BLOCK TOOLBAR -->
+      <div class="fb-add-row" id="fb-toolbar" style="display:none">
+        <span style="font-size:10px;color:var(--sec);white-space:nowrap">Add block:</span>
+        <button class="fb-add-btn" onclick="addFuncBlock('set_alt')">▲ Set Altitude</button>
+        <button class="fb-add-btn" onclick="addFuncBlock('set_speed')">⚡ Set Speed</button>
+      </div>
       <div id="wp-list"></div>
       <!-- RALLY POINTS -->
       <div class="card" style="padding:8px">
@@ -1376,6 +1426,11 @@ let _dragSrcIdx = -1;
 let _shiftHeld = false;
 // Rally points
 let rallyPoints = [];
+// Function blocks (app-only, never exported)
+let funcBlocks = [];
+let _fbIdCounter = 0;
+let _fbResizing  = null; // bIdx being resized
+let _fbDragIdx   = -1;   // bIdx being dragged
 
 const ACTION_COLORS = {
   waypoint: '#58a6ff', spline: '#74b9ff',
@@ -1386,6 +1441,16 @@ const ACTION_COLORS = {
   land: '#ee5a24', vtol_land: '#d63031', rtl: '#e17055'
 };
 const LOITER_ACTIONS = new Set(['loiter','loiter_time','loiter_turns','loiter_to_alt']);
+
+// ---- Function block type registry ----
+const FUNC_BLOCK_TYPES = {
+  set_alt:   { label:'Set Altitude', rgba:'253,152,0',  icon:'▲',
+               defaultParams: () => ({ alt: 50 }) },
+  set_speed: { label:'Set Speed',    rgba:'0,180,216',  icon:'⚡',
+               defaultParams: () => ({ speed: 15 }) },
+  set_roi:   { label:'Set ROI',      rgba:'0,184,148',  icon:'◎',
+               defaultParams: () => ({}) },
+};
 let terrainElevations = null;
 let nfzEnabled = false;
 let nfzLayers = [];
@@ -1727,7 +1792,7 @@ function updateGimbalLines() {
     mk.on('dragend', () => {
       // Rebuild all gimbal lines so lengths recalculate with the new pitch
       updateGimbalLines();
-      updateWPList();
+      renderWPList();
     });
 
     gimbalLines.push({ polyline: poly, marker: mk });
@@ -1770,8 +1835,17 @@ function renderWPList() {
   updateMissionStats();
   const list = document.getElementById('wp-list');
   const noWP = document.getElementById('no-wp');
-  if (waypoints.length === 0) { list.innerHTML = ''; noWP.style.display = 'block'; checkLoiterOverlaps(); return; }
+  const fbToolbar = document.getElementById('fb-toolbar');
+
+  if (waypoints.length === 0) {
+    list.innerHTML = '';
+    noWP.style.display = 'block';
+    if (fbToolbar) fbToolbar.style.display = 'none';
+    checkLoiterOverlaps();
+    return;
+  }
   noWP.style.display = 'none';
+  if (fbToolbar) fbToolbar.style.display = 'flex';
 
   // Pre-compute cumulative ETAs
   const cumulETA = [0];
@@ -1787,18 +1861,44 @@ function renderWPList() {
     cumulETA.push(cumulETA[i - 1] + d / spd + extra);
   }
 
-  list.innerHTML = waypoints.map((wp, i) => {
+  // Build per-WP block coverage maps
+  // blkStartAt[i] = [bIdx, ...] blocks whose header should appear before WP i
+  // blkEndAt[i]   = [bIdx, ...] blocks whose footer should appear after  WP i
+  const blkStartAt = {}, blkEndAt = {};
+  funcBlocks.forEach((blk, bIdx) => {
+    const s = Math.max(0, Math.min(blk.startWpIdx, waypoints.length - 1));
+    const e = Math.max(s, Math.min(blk.endWpIdx,   waypoints.length - 1));
+    (blkStartAt[s] = blkStartAt[s] || []).push(bIdx);
+    (blkEndAt[e]   = blkEndAt[e]   || []).push(bIdx);
+  });
+
+  let html = '';
+  const openStack = []; // stack of bIdx currently wrapping WPs
+
+  for (let i = 0; i < waypoints.length; i++) {
+    // Open any blocks starting at this WP
+    (blkStartAt[i] || []).forEach(bIdx => {
+      html += _fbHeaderHTML(bIdx);
+      openStack.push(bIdx);
+    });
+
+    // WP item — with left-border accent if inside a block
+    const wp  = waypoints[i];
     const col = ACTION_COLORS[wp.action] || '#58a6ff';
     let legStr = '';
     if (i > 0) {
       const d    = haversine(waypoints[i-1].lat, waypoints[i-1].lon, wp.lat, wp.lon);
       const dStr = d >= 1000 ? (d/1000).toFixed(1)+'km' : Math.round(d)+'m';
       const gs   = _legSpeed(i);
-      const gsStr = gs.toFixed(1);
       legStr = ` · ${dStr} · GS ${msToDisp(gs).toFixed(1)}${spdLabel()} · +${_fmtTime(cumulETA[i] - cumulETA[i-1])} (${_fmtTime(cumulETA[i])} total)`;
     }
-    return `<div class="wp-item${selectedIdx === i ? ' selected' : ''}"
-        onclick="selectWP(${i})" draggable="true"
+    let fbStyle = '';
+    if (openStack.length > 0) {
+      const def = FUNC_BLOCK_TYPES[funcBlocks[openStack[0]].type];
+      if (def) fbStyle = `border-left:3px solid rgba(${def.rgba},0.85);`;
+    }
+    html += `<div class="wp-item${selectedIdx === i ? ' selected' : ''}${openStack.length ? ' fb-covered' : ''}"
+        style="${fbStyle}" onclick="selectWP(${i})" draggable="true" data-wpidx="${i}"
         ondragstart="wpDragStart(event,${i})"
         ondragover="wpDragOver(event)"
         ondragleave="wpDragLeave(event)"
@@ -1813,16 +1913,169 @@ function renderWPList() {
       </div>
       <span class="wp-del" onclick="event.stopPropagation();deleteWPByIdx(${i})">✕</span>
     </div>`;
-  }).join('');
 
+    // Close any blocks ending at this WP
+    (blkEndAt[i] || []).forEach(bIdx => {
+      html += _fbFooterHTML(bIdx);
+      const si = openStack.lastIndexOf(bIdx);
+      if (si >= 0) openStack.splice(si, 1);
+    });
+  }
+
+  list.innerHTML = html;
   checkLoiterOverlaps();
   renderRallyList();
+}
+
+// ====================== FUNCTION BLOCKS ======================
+
+// Build solid-bg header HTML matching the reference image (orange card, white input pill)
+function _fbHeaderHTML(bIdx) {
+  const blk = funcBlocks[bIdx];
+  const def = FUNC_BLOCK_TYPES[blk.type];
+  if (!def) return '';
+  const bg    = `rgba(${def.rgba},1)`;
+  const bgDim = `rgba(${def.rgba},0.85)`;
+
+  let controls = '';
+  if (blk.type === 'set_alt') {
+    controls = `<input class="fb-input" type="number" min="0" max="2000" value="${blk.params.alt ?? 50}"
+        onclick="event.stopPropagation()" oninput="updateFuncBlock(${bIdx},'alt',this.value)">
+      <span class="fb-input-unit">m AGL</span>`;
+  } else if (blk.type === 'set_speed') {
+    controls = `<input class="fb-input" type="number" min="1" max="80" value="${blk.params.speed ?? 15}"
+        onclick="event.stopPropagation()" oninput="updateFuncBlock(${bIdx},'speed',this.value)">
+      <span class="fb-input-unit">km/h</span>`;
+  }
+
+  return `<div class="fb-header" style="background:${bg}" draggable="true"
+      ondragstart="fbDragStart(event,${bIdx})"
+      ondragover="fbDragOver(event)" ondragleave="fbDragLeave(event)"
+      ondrop="fbDrop(event,${bIdx})" ondragend="fbDragEnd(event)">
+    <span style="font-size:14px;color:rgba(0,0,0,.45);cursor:grab">⠿</span>
+    <span class="fb-header-label">${def.icon} ${def.label}</span>
+    ${controls}
+    <span class="fb-del" onclick="deleteFuncBlock(${bIdx})">✕</span>
+  </div>`;
+}
+
+function _fbFooterHTML(bIdx) {
+  const blk = funcBlocks[bIdx];
+  const def = FUNC_BLOCK_TYPES[blk.type];
+  if (!def) return '';
+  const bgDim = `rgba(${def.rgba},0.55)`;
+  const fgCol = 'rgba(0,0,0,0.55)';
+  return `<div class="fb-footer" style="background:${bgDim};color:${fgCol}"
+      onmousedown="fbResizeStart(event,${bIdx})">
+    &#8942;&#8942; DRAG TO INCLUDE MORE WAYPOINTS &#8942;&#8942;
+  </div>`;
+}
+
+function addFuncBlock(type) {
+  if (waypoints.length === 0) return;
+  pushUndo();
+  const def = FUNC_BLOCK_TYPES[type];
+  if (!def) return;
+  const blk = {
+    id: ++_fbIdCounter,
+    type,
+    startWpIdx: 0,
+    endWpIdx: Math.min(1, waypoints.length - 1),
+    params: def.defaultParams()
+  };
+  // Default alt to first WP's current alt for set_alt
+  if (type === 'set_alt') blk.params.alt = waypoints[0].alt;
+  funcBlocks.push(blk);
+  _applyFuncBlock(funcBlocks.length - 1);
+  renderWPList();
+}
+
+function _applyFuncBlock(bIdx) {
+  const blk = funcBlocks[bIdx];
+  const s = Math.max(0, Math.min(blk.startWpIdx, waypoints.length - 1));
+  const e = Math.max(s, Math.min(blk.endWpIdx, waypoints.length - 1));
+  for (let i = s; i <= e; i++) {
+    if (blk.type === 'set_alt') {
+      waypoints[i].alt = parseFloat(blk.params.alt) || 50;
+    } else if (blk.type === 'set_speed') {
+      waypoints[i].speed = dispToMs(parseFloat(blk.params.speed) || 15);
+    }
+  }
+  updateProfile();
+  updateGimbalLines();
+}
+
+function updateFuncBlock(bIdx, key, value) {
+  if (!funcBlocks[bIdx]) return;
+  funcBlocks[bIdx].params[key] = parseFloat(value) || 0;
+  _applyFuncBlock(bIdx);
+  renderWPList();
+}
+
+function deleteFuncBlock(bIdx) {
+  pushUndo();
+  funcBlocks.splice(bIdx, 1);
+  renderWPList();
+}
+
+// ---- Block drag-to-reposition (HTML5 drag onto WP items) ----
+let _fbDragSrc = -1;
+function fbDragStart(e, bIdx) {
+  _fbDragSrc = bIdx;
+  _dragSrcIdx = -1; // cancel any WP drag
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('fbDrag', String(bIdx));
+  e.currentTarget.classList.add('dragging');
+  e.stopPropagation();
+}
+function fbDragOver(e)  { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+function fbDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+function fbDragEnd(e)   { e.currentTarget.classList.remove('dragging'); _fbDragSrc = -1; }
+function fbDrop(e, bIdx) {
+  // Drop a block onto another block header — reorder blocks
+  e.preventDefault(); e.stopPropagation();
+  e.currentTarget.classList.remove('drag-over');
+  if (_fbDragSrc < 0 || _fbDragSrc === bIdx) { _fbDragSrc = -1; return; }
+  pushUndo();
+  const [moved] = funcBlocks.splice(_fbDragSrc, 1);
+  funcBlocks.splice(bIdx, 0, moved);
+  _fbDragSrc = -1;
+  renderWPList();
+}
+
+// ---- Block resize (mousedown on footer, move mouse over WP items) ----
+function fbResizeStart(e, bIdx) {
+  e.preventDefault();
+  _fbResizing = bIdx;
+  document.addEventListener('mousemove', _fbResizeMove);
+  document.addEventListener('mouseup', _fbResizeEnd, { once: true });
+}
+function _fbResizeMove(e) {
+  if (_fbResizing === null) return;
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  if (!el) return;
+  const wpEl = el.closest('[data-wpidx]');
+  if (!wpEl) return;
+  const wpIdx = parseInt(wpEl.dataset.wpidx, 10);
+  if (isNaN(wpIdx)) return;
+  const blk = funcBlocks[_fbResizing];
+  if (wpIdx >= blk.startWpIdx) {
+    blk.endWpIdx = wpIdx;
+    _applyFuncBlock(_fbResizing);
+    renderWPList();
+  }
+}
+function _fbResizeEnd() {
+  _fbResizing = null;
+  document.removeEventListener('mousemove', _fbResizeMove);
 }
 
 // ====================== DRAG TO REORDER ======================
 function wpDragStart(e, idx) {
   _dragSrcIdx = idx;
+  _fbDragSrc  = -1; // ensure block drag is cleared
   e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('wpDrag', String(idx));
   e.currentTarget.classList.add('dragging');
 }
 function wpDragOver(e) {
@@ -1835,6 +2088,20 @@ function wpDragEnd(e)   { e.currentTarget.classList.remove('dragging'); }
 function wpDrop(e, targetIdx) {
   e.preventDefault();
   e.currentTarget.classList.remove('drag-over');
+
+  // If a func-block header was dragged, reposition its startWpIdx
+  if (_fbDragSrc >= 0) {
+    pushUndo();
+    const blk  = funcBlocks[_fbDragSrc];
+    const span = blk.endWpIdx - blk.startWpIdx;
+    blk.startWpIdx = targetIdx;
+    blk.endWpIdx   = Math.min(targetIdx + span, waypoints.length - 1);
+    _applyFuncBlock(_fbDragSrc);
+    _fbDragSrc = -1;
+    renderWPList();
+    return;
+  }
+
   if (_dragSrcIdx < 0 || _dragSrcIdx === targetIdx) { _dragSrcIdx = -1; return; }
   pushUndo();
   const [moved] = waypoints.splice(_dragSrcIdx, 1);
@@ -1843,10 +2110,22 @@ function wpDrop(e, targetIdx) {
   if      (selectedIdx === _dragSrcIdx)                               selectedIdx = targetIdx;
   else if (_dragSrcIdx < selectedIdx && targetIdx >= selectedIdx)    selectedIdx--;
   else if (_dragSrcIdx > selectedIdx && targetIdx <= selectedIdx)    selectedIdx++;
+  // Adjust block indices to follow the moved WP
+  funcBlocks.forEach(blk => {
+    blk.startWpIdx = _adjustIdxForMove(blk.startWpIdx, _dragSrcIdx, targetIdx);
+    blk.endWpIdx   = _adjustIdxForMove(blk.endWpIdx,   _dragSrcIdx, targetIdx);
+  });
   _dragSrcIdx = -1;
   terrainElevations = null;
   waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, i === selectedIdx)));
   updatePolyline(); updateProfile(); renderWPList();
+}
+
+function _adjustIdxForMove(idx, from, to) {
+  if (idx === from) return to;
+  if (from < to) { if (idx > from && idx <= to) return idx - 1; }
+  else           { if (idx >= to && idx < from) return idx + 1; }
+  return idx;
 }
 
 // ====================== LOITER OVERLAP DETECTION ======================
@@ -2028,6 +2307,14 @@ function deleteWPByIdx(idx) {
   waypoints.splice(idx, 1);
   if (selectedIdx === idx) { selectedIdx = -1; document.getElementById('wp-editor').classList.remove('visible'); }
   else if (selectedIdx > idx) selectedIdx--;
+  // Shift block indices down for indices after the deleted WP
+  funcBlocks.forEach(blk => {
+    if (blk.startWpIdx > idx) blk.startWpIdx--;
+    if (blk.endWpIdx   > idx) blk.endWpIdx--;
+    // Clamp to valid range
+    blk.startWpIdx = Math.max(0, Math.min(blk.startWpIdx, waypoints.length - 1));
+    blk.endWpIdx   = Math.max(blk.startWpIdx, Math.min(blk.endWpIdx, waypoints.length - 1));
+  });
   // Re-index icons
   waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, i === selectedIdx)));
   updatePolyline(); updateProfile(); renderWPList();
@@ -2040,6 +2327,7 @@ function clearMission() {
   terrainElevations = null;
   waypoints.forEach(wp => map.removeLayer(wp.marker));
   waypoints = []; selectedIdx = -1;
+  funcBlocks = []; // function blocks are also cleared with the mission
   document.getElementById('wp-editor').classList.remove('visible');
   if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
   updateGimbalLines();
