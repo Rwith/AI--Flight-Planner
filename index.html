@@ -1423,6 +1423,7 @@ let nfzLayers = [];
 let insertMarker = null;
 let homeToFirstLine = null;
 let gimbalLines = []; // [{polyline, marker}] for do_mount_control direction visualizers
+let draggingGimbal = false; // true while a gimbal camera icon is being dragged
 let hoverSegIdx = -1;
 let insertHideTimer = null;
 let currentTileLayer = null;
@@ -1725,7 +1726,7 @@ function updateGimbalLines() {
     // Camera icon builder — rotated so lens faces back toward the aircraft
     const makeCamIcon = (rot) => L.divIcon({
       className: '',
-      html: `<div style="transform:rotate(${rot}deg);transform-origin:center;line-height:0;cursor:grab">
+      html: `<div style="transform:rotate(${rot}deg);transform-origin:center;line-height:0;cursor:grab;touch-action:none;pointer-events:auto">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="13" viewBox="0 0 18 13">
           <rect x="2" y="2" width="11" height="9" rx="1.5" fill="rgba(0,0,0,0.65)" stroke="white" stroke-width="1.5"/>
           <polygon points="13,3.5 17,1.5 17,11.5 13,9.5" fill="white"/>
@@ -1739,6 +1740,8 @@ function updateGimbalLines() {
     const mk = L.marker([tipLat, tipLon], {
       icon: makeCamIcon((absYaw + 180) % 360), draggable: true, zIndexOffset: -100
     }).addTo(map);
+
+    mk.on('dragstart', () => { draggingGimbal = true; });
 
     mk.on('drag', e => {
       const p = e.target.getLatLng();
@@ -1772,6 +1775,7 @@ function updateGimbalLines() {
     });
 
     mk.on('dragend', () => {
+      draggingGimbal = false;
       // Rebuild all gimbal lines so lengths recalculate with the new pitch
       updateGimbalLines();
       renderWPList();
@@ -3315,6 +3319,7 @@ function nearestSegIdx(latlng) {
 }
 
 function onSegmentMousemove(e) {
+  if (draggingGimbal) return; // don't interfere with gimbal camera drag
   L.DomEvent.stopPropagation(e);
   clearTimeout(insertHideTimer); insertHideTimer = null;
   const seg = nearestSegIdx(e.latlng);
