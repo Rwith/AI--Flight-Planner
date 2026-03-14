@@ -524,11 +524,8 @@
     <button class="topbtn" onclick="exportWaypoints()">Export .waypoints</button>
     <button class="topbtn" onclick="exportKML()">Export KML</button>
     <label class="topbtn" style="cursor:pointer">Import <input type="file" id="import-file" accept=".waypoints,.txt" style="display:none" onchange="importWaypoints(event)"></label>
-    <button class="topbtn primary" id="upload-btn" onclick="serialUploadWaypoints()" disabled title="Upload waypoints to connected flight computer">Upload to FC</button>
     <button class="topbtn" onclick="reverseMission()">↩ Reverse</button>
     <button class="topbtn" id="view3d-btn" onclick="toggle3DView()">3D View</button>
-    <button class="topbtn" onclick="openLogbook()">Logbook</button>
-    <button class="topbtn" id="hud-btn" onclick="toggleHUD()">HUD</button>
     <button class="topbtn" id="nfz-btn" style="display:none" onclick="toggleNFZ()">NFZ Off</button>
     <button class="topbtn danger" onclick="clearMission()">Clear</button>
   </div>
@@ -1020,6 +1017,10 @@
         <div style="font-size:10px;color:var(--sec);margin-bottom:6px">Right-click the map to add a rally point (ArduPilot RTL fallback target)</div>
         <div id="rally-list"></div>
       </div>
+      <div class="card" style="padding:8px">
+        <div class="card-title">Upload Mission</div>
+        <button class="btn primary" id="upload-btn" onclick="serialUploadWaypoints()" disabled title="Upload waypoints to connected flight computer" style="width:100%">⬆ Upload to FC</button>
+      </div>
     </div>
 
     <!-- WEATHER TAB -->
@@ -1264,7 +1265,7 @@
       <div class="card">
         <div class="card-title">Upload Mission to FC</div>
         <div style="font-size:11px;color:var(--sec);margin-bottom:6px">
-          Use the <strong>Upload to FC</strong> button in the toolbar to send the current
+          Use the <strong>Upload to FC</strong> button on the Mission tab to send the current
           mission. Compatible with ArduPilot Copter / Plane / Rover via MAVLink MISSION_ITEM_INT.
         </div>
         <div id="upload-status" data-state=""></div>
