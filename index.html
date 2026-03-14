@@ -1415,7 +1415,7 @@ const FUNC_BLOCK_TYPES = {
   set_speed: { label:'Set Speed',    rgba:'0,180,216',  icon:'⚡',
                defaultParams: () => ({ speed: 15 }) },
   set_roi:   { label:'Set ROI',      rgba:'0,184,148',  icon:'◎',
-               defaultParams: () => ({}) },
+               defaultParams: () => ({ lat: null, lon: null, alt: 50 }) },
 };
 let terrainElevations = null;
 let nfzEnabled = false;
@@ -1532,6 +1532,7 @@ function _loadFuncBlocks() {
     if (!Array.isArray(data)) return;
     funcBlocks = data;
     _fbIdCounter = funcBlocks.reduce((mx, b) => Math.max(mx, b.id || 0), _fbIdCounter);
+    _rebuildRoiMarkers();
   } catch {}
 }
 function pushUndo() {
@@ -2125,6 +2126,13 @@ function _fbHeaderHTML(bIdx) {
     controls = `<input class="fb-input" type="number" min="${_sc.min}" max="${_sc.max}" step="${_sc.step}" value="${_sv}"
         onclick="event.stopPropagation()" oninput="updateFuncBlock(${bIdx},'speed',this.value)">
       <span class="fb-input-unit">${spdLabel()}</span>`;
+  } else if (blk.type === 'set_roi') {
+    const latStr = blk.params.lat != null ? blk.params.lat.toFixed(5) : '—';
+    const lonStr = blk.params.lon != null ? blk.params.lon.toFixed(5) : '—';
+    controls = `<span class="fb-input-unit" style="font-size:10px;opacity:0.9;letter-spacing:0.02em">${latStr}, ${lonStr}</span>
+      <input class="fb-input" type="number" min="0" max="2000" style="width:54px" value="${blk.params.alt ?? 50}"
+        onclick="event.stopPropagation()" oninput="updateFuncBlock(${bIdx},'alt',this.value)">
+      <span class="fb-input-unit">m</span>`;
   }
 
   return `<div class="fb-header" style="background:${bg}" draggable="true"
@@ -2150,6 +2158,36 @@ function _fbFooterHTML(bIdx) {
   </div>`;
 }
 
+// ---- ROI marker helpers ----
+function _makeRoiIcon() {
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:30px;height:30px;border-radius:50%;background:rgba(0,184,148,1);border:2.5px solid #fff;display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.75);cursor:grab;line-height:1">◎</div>`,
+    iconSize: [30, 30], iconAnchor: [15, 15]
+  });
+}
+function _createRoiMarker(bIdx) {
+  const blk = funcBlocks[bIdx];
+  if (blk.type !== 'set_roi') return;
+  if (blk._roiMarker) { map.removeLayer(blk._roiMarker); blk._roiMarker = null; }
+  if (blk.params.lat == null) { blk.params.lat = +homeLat.toFixed(6); blk.params.lon = +homeLon.toFixed(6); }
+  const m = L.marker([blk.params.lat, blk.params.lon], {
+    icon: _makeRoiIcon(), draggable: true, zIndexOffset: 700
+  }).addTo(map);
+  m.bindTooltip('ROI', { permanent: false, direction: 'top', offset: [0, -16] });
+  m.on('dragend', e => {
+    const p = e.target.getLatLng();
+    blk.params.lat = +p.lat.toFixed(6);
+    blk.params.lon = +p.lng.toFixed(6);
+    _saveFuncBlocks();
+    renderWPList();
+  });
+  blk._roiMarker = m;
+}
+function _rebuildRoiMarkers() {
+  funcBlocks.forEach((blk, bIdx) => { if (blk.type === 'set_roi') _createRoiMarker(bIdx); });
+}
+
 function addFuncBlock(type) {
   if (waypoints.length === 0) return;
   pushUndo();
@@ -2164,7 +2202,15 @@ function addFuncBlock(type) {
   };
   // Default alt to first WP's current alt for set_alt
   if (type === 'set_alt') blk.params.alt = waypoints[0].alt;
+  // Seed ROI position from the first covered waypoint
+  if (type === 'set_roi') {
+    const wp0 = waypoints[blk.startWpIdx];
+    blk.params.lat = +wp0.lat.toFixed(6);
+    blk.params.lon = +wp0.lon.toFixed(6);
+    blk.params.alt = wp0.alt;
+  }
   funcBlocks.push(blk);
+  if (type === 'set_roi') _createRoiMarker(funcBlocks.length - 1);
   _applyFuncBlock(funcBlocks.length - 1);
   _saveFuncBlocks();
   renderWPList();
@@ -2196,6 +2242,8 @@ function updateFuncBlock(bIdx, key, value) {
 
 function deleteFuncBlock(bIdx) {
   pushUndo();
+  const blk = funcBlocks[bIdx];
+  if (blk?._roiMarker) { map.removeLayer(blk._roiMarker); blk._roiMarker = null; }
   funcBlocks.splice(bIdx, 1);
   _saveFuncBlocks();
   renderWPList();
@@ -2514,6 +2562,7 @@ function clearMission() {
   terrainElevations = null;
   waypoints.forEach(wp => map.removeLayer(wp.marker));
   waypoints = []; selectedIdx = -1;
+  funcBlocks.forEach(blk => { if (blk._roiMarker) map.removeLayer(blk._roiMarker); });
   funcBlocks = []; // function blocks are also cleared with the mission
   document.getElementById('wp-editor').classList.remove('visible');
   if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
