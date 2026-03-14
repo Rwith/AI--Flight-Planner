@@ -113,8 +113,15 @@
     padding-top: 7px; margin-top: 6px;
     border-top: 1px solid var(--border);
   }
-  .wp-item:hover .wp-inline-params,
-  .wp-item:focus-within .wp-inline-params { display: flex; }
+  .wp-inline-params.open { display: flex; }
+  .wp-action-toggle {
+    font-size: 10px; color: var(--sec); padding: 1px 5px;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: var(--bg); cursor: pointer; white-space: nowrap;
+    transition: color .15s, border-color .15s;
+  }
+  .wp-action-toggle:hover { color: var(--blue); border-color: var(--blue); }
+  .wp-action-toggle.open  { color: var(--blue); border-color: var(--blue); }
   .wp-inline-field {
     display: flex; align-items: center; gap: 4px; font-size: 11px;
   }
@@ -1908,7 +1915,15 @@ function _wpInlineParamsHTML(wp, idx) {
 
   // Only return markup if there's something beyond just the always-present Alt field
   if (parts.length <= 1 && a === 'waypoint' && pa === 'none') return '';
-  return `<div class="wp-inline-params">${parts.join('')}</div>`;
+  return `<div class="wp-inline-params" data-wp="${idx}">${parts.join('')}</div>`;
+}
+
+function toggleWPActions(idx) {
+  const panel = document.querySelector(`#wp-list .wp-inline-params[data-wp="${idx}"]`);
+  const btn   = document.getElementById(`wp-act-btn-${idx}`);
+  if (!panel) return;
+  const open = panel.classList.toggle('open');
+  if (btn) btn.classList.toggle('open', open);
 }
 
 // Update a single WP field from inline panel without rebuilding the full list
@@ -2031,6 +2046,7 @@ function renderWPList() {
       const def = FUNC_BLOCK_TYPES[funcBlocks[openStack[0]].type];
       if (def) fbStyle = `border-left:3px solid rgba(${def.rgba},0.85);`;
     }
+    const _inlineHTML = _wpInlineParamsHTML(wp, i);
     html += `<div class="wp-item${selectedIdx === i ? ' selected' : ''}${openStack.length ? ' fb-covered' : ''}"
         style="${fbStyle}" onclick="selectWP(${i})" draggable="true" data-wpidx="${i}"
         ondragstart="wpDragStart(event,${i})"
@@ -2046,9 +2062,10 @@ function renderWPList() {
           <div class="wp-details" data-details="${i}">${wp.alt}m AGL${legStr}</div>
           ${wp.preAction === 'do_mount_control' ? `<div class="wp-details" style="color:var(--sec)">Cam: Pitch ${wp.mountPitch||0}° Yaw ${wp.mountYaw||0}°</div>` : ''}
         </div>
+        ${_inlineHTML ? `<span class="wp-action-toggle" id="wp-act-btn-${i}" onclick="event.stopPropagation();toggleWPActions(${i})">⚙ Edit</span>` : ''}
         <span class="wp-del" onclick="event.stopPropagation();deleteWPByIdx(${i})">✕</span>
       </div>
-      ${_wpInlineParamsHTML(wp, i)}
+      ${_inlineHTML}
     </div>`;
 
     // Close any blocks ending at this WP
