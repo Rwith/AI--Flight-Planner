@@ -26,4 +26,11 @@ contextBridge.exposeInMainWorld('electronBridge', {
       ipcRenderer.removeAllListeners('serial-error');
     },
   },
+
+  // App settings ─────────────────────────────────────────────────────────────
+  settings: {
+    get:           ()       => ipcRenderer.invoke('get-settings'),
+    save:          (data)   => ipcRenderer.invoke('save-settings', data),
+    setWindowMode: (mode)   => ipcRenderer.invoke('set-window-mode', mode),
+  },
 });

@@ -1,7 +1,8 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, screen } = require('electron');
 const path   = require('path');
+const fs     = require('fs');
 const dgram  = require('dgram');
 const net    = require('net');
 const http   = require('http');
@@ -86,8 +87,6 @@ ipcMain.on('bridge-start', (_, opts) => {
 ipcMain.on('bridge-stop', () => stopBridge());
 
 // ── IPC: Native serial port (USB) ─────────────────────────────────────────────
-// Uses the `serialport` npm package in the main process — avoids the broken
-// Web Serial API in Electron and works reliably on Windows / Mac / Linux.
 let serialPort = null;
 
 ipcMain.handle('serial-list', async () => {
@@ -97,7 +96,6 @@ ipcMain.handle('serial-list', async () => {
     return { ports };
   } catch (e) {
     console.error('[serial-list]', e.message);
-    // Return error so renderer can show a manual-entry fallback.
     return { ports: [], error: e.message };
   }
 });
@@ -130,11 +128,67 @@ ipcMain.on('serial-write', (_, bytes) => {
   if (serialPort?.isOpen) serialPort.write(Buffer.from(bytes));
 });
 
+// ── Settings persistence ───────────────────────────────────────────────────────
+let settingsPath = null;
+
+function loadSettings () {
+  try { return JSON.parse(fs.readFileSync(settingsPath, 'utf8')); }
+  catch { return { windowMode: 'fullscreen' }; }
+}
+
+function persistSettings (data) {
+  try { fs.writeFileSync(settingsPath, JSON.stringify(data, null, 2)); }
+  catch (e) { console.error('[settings]', e.message); }
+}
+
+function applyWindowMode (win, mode) {
+  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+  const cx = (w) => Math.max(0, Math.round((sw - w) / 2));
+  const cy = (h) => Math.max(0, Math.round((sh - h) / 2));
+  win.unmaximize();
+  switch (mode) {
+    case 'fullscreen':
+      win.maximize(); break;
+    case 'windowed-lg':
+      win.setBounds({ x: cx(1600), y: cy(1000), width: Math.min(1600, sw), height: Math.min(1000, sh) }); break;
+    case 'windowed-md':
+      win.setBounds({ x: cx(1280), y: cy(820),  width: Math.min(1280, sw), height: Math.min(820,  sh) }); break;
+    case 'windowed-sm':
+      win.setBounds({ x: cx(1024), y: cy(700),  width: Math.min(1024, sw), height: Math.min(700,  sh) }); break;
+    case 'windowed-xs':
+      win.setBounds({ x: cx(900),  y: cy(620),  width: 900, height: 620 }); break;
+    case 'center-float':
+      win.setBounds({ x: cx(800),  y: cy(580),  width: 800, height: 580 }); break;
+    case 'left-half':
+      win.setBounds({ x: 0, y: 0, width: Math.floor(sw / 2), height: sh }); break;
+    case 'right-half':
+      win.setBounds({ x: Math.ceil(sw / 2), y: 0, width: Math.floor(sw / 2), height: sh }); break;
+    case 'left-two-thirds':
+      win.setBounds({ x: 0, y: 0, width: Math.floor(sw * 2 / 3), height: sh }); break;
+    case 'right-two-thirds':
+      win.setBounds({ x: Math.ceil(sw / 3), y: 0, width: Math.floor(sw * 2 / 3), height: sh }); break;
+    case 'top-half':
+      win.setBounds({ x: 0, y: 0, width: sw, height: Math.floor(sh / 2) }); break;
+    case 'bottom-half':
+      win.setBounds({ x: 0, y: Math.ceil(sh / 2), width: sw, height: Math.floor(sh / 2) }); break;
+    default:
+      win.maximize();
+  }
+}
+
+ipcMain.handle('get-settings',      ()         => loadSettings());
+ipcMain.handle('save-settings',     (_, data)  => { persistSettings(data); return true; });
+ipcMain.handle('set-window-mode',   (_, mode)  => {
+  if (mainWin) applyWindowMode(mainWin, mode);
+  return true;
+});
+
 // ── Electron window ───────────────────────────────────────────────────────────
 function createWindow () {
   mainWin = new BrowserWindow({
     width: 1280, height: 820, minWidth: 900, minHeight: 600,
     title: 'AeroNav AI',
+    show: false, // shown after mode is applied
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -142,10 +196,16 @@ function createWindow () {
     }
   });
   mainWin.loadFile('index.html');
+  mainWin.once('ready-to-show', () => {
+    const settings = loadSettings();
+    applyWindowMode(mainWin, settings.windowMode || 'fullscreen');
+    mainWin.show();
+  });
   // mainWin.webContents.openDevTools();
 }
 
 app.whenReady().then(() => {
+  settingsPath = path.join(app.getPath('userData'), 'settings.json');
   Menu.setApplicationMenu(null);
   startWSServer();
   startUDP();

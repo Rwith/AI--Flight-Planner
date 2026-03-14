@@ -287,6 +287,51 @@
 
   /* ── HUD ─────────────────────────────────────────────────────────────────── */
   #hud-btn.hud-on { border-color: var(--blue); color: var(--blue); background: rgba(88,166,255,.12); }
+  /* SETTINGS OVERLAY */
+  #settings-overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,.72);
+    backdrop-filter:blur(6px); z-index:9999;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #settings-overlay.hidden { display:none; }
+  #settings-panel {
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    width:580px; max-width:92vw; max-height:88vh; overflow-y:auto;
+    box-shadow:0 24px 64px rgba(0,0,0,.6);
+  }
+  #settings-panel-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:18px 20px 14px; border-bottom:1px solid var(--border);
+  }
+  #settings-panel-header h2 { margin:0; font-size:15px; font-weight:700; }
+  #settings-close-btn {
+    background:none; border:none; color:var(--sec); font-size:18px;
+    cursor:pointer; padding:0 2px; line-height:1;
+  }
+  #settings-close-btn:hover { color:var(--text); }
+  .settings-section { padding:16px 20px; border-bottom:1px solid var(--border); }
+  .settings-section:last-child { border-bottom:none; }
+  .settings-section-title {
+    font-size:10px; font-weight:700; color:var(--sec); text-transform:uppercase;
+    letter-spacing:.9px; margin-bottom:14px;
+  }
+  /* Window mode tile grid */
+  #wm-picker {
+    display:grid; grid-template-columns:repeat(6,1fr); gap:8px;
+  }
+  .wm-tile {
+    display:flex; flex-direction:column; align-items:center; gap:5px;
+    padding:7px 4px 6px; border:1px solid var(--border); border-radius:8px;
+    cursor:pointer; background:var(--card); transition:border-color .15s, background .15s;
+  }
+  .wm-tile:hover  { border-color:var(--blue); background:rgba(88,166,255,.07); }
+  .wm-tile.active { border-color:var(--blue); background:rgba(88,166,255,.18); }
+  .wm-tile svg    { width:44px; height:30px; display:block; }
+  .wm-tile-label  { font-size:9px; color:var(--sec); text-align:center; line-height:1.2; }
+  .wm-tile.active .wm-tile-label { color:var(--blue); }
+  /* Make app title a clickable link */
+  #topbar .title { cursor:pointer; }
+  #topbar .title:hover { opacity:.8; }
   /* DRAG-TO-REORDER */
   .wp-item { cursor: grab; }
   .wp-item.drag-over { border-color: var(--yellow) !important; background: rgba(210,153,34,.1) !important; }
@@ -452,7 +497,7 @@
 
 <!-- TOP BAR -->
 <div id="topbar">
-  <div class="title">✈ AeroNav AI <span style="font-size:10px;opacity:.55;font-weight:400;vertical-align:middle">V1.4.0</span></div>
+  <div class="title" onclick="openSettings()" title="Settings">✈ AeroNav AI <span style="font-size:10px;opacity:.55;font-weight:400;vertical-align:middle">V1.4.0</span></div>
   <span id="fly-status">LOADING</span>
   <span id="weather-summary">Fetching weather…</span>
   <div id="topbar-mission-btns" style="display:flex;align-items:center;gap:4px;flex-wrap:nowrap">
@@ -5626,5 +5671,149 @@ function parseDataFlashBin(buffer) {
   };
 })();
 </script>
+<!-- ====================== SETTINGS OVERLAY ====================== -->
+<div id="settings-overlay" class="hidden">
+  <div id="settings-panel">
+    <div id="settings-panel-header">
+      <h2>⚙ Settings</h2>
+      <button id="settings-close-btn" onclick="closeSettings()">✕</button>
+    </div>
+
+    <!-- Window mode on startup -->
+    <div class="settings-section">
+      <div class="settings-section-title">Window Mode on Startup</div>
+      <div id="wm-picker"><!-- tiles injected by JS --></div>
+      <div id="wm-note" style="margin-top:10px;font-size:10px;color:var(--sec)">
+        Click a layout to apply it now and save it as the startup default.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ====================== SETTINGS PAGE ======================
+const _WM_MODES = [
+  { id:'fullscreen',      label:'Fullscreen',
+    svg:`<rect x="0" y="0" width="44" height="30" rx="2" fill="#1c2333"/>
+         <rect x="1" y="1" width="42" height="28" rx="1" fill="#3a6bc8"/>` },
+
+  { id:'windowed-lg',     label:'Large',
+    svg:`<rect x="0" y="0" width="44" height="30" rx="2" fill="#1c2333"/>
+         <rect x="3" y="3" width="38" height="24" rx="1" fill="#3a6bc8"/>` },
+
+  { id:'windowed-md',     label:'Medium',
+    svg:`<rect x="0" y="0" width="44" height="30" rx="2" fill="#1c2333"/>
+         <rect x="6" y="4" width="32" height="22" rx="1" fill="#3a6bc8"/>` },
+
+  { id:'windowed-sm',     label:'Small',
+    svg:`<rect x="0" y="0" width="44" height="30" rx="2" fill="#1c2333"/>
+         <rect x="8" y="5" width="28" height="20" rx="1" fill="#3a6bc8"/>` },
+
+  { id:'windowed-xs',     label:'Compact',
+    svg:`<rect x="0" y="0" width="44" height="30" rx="2" fill="#1c2333"/>
+         <rect x="11" y="7" width="22" height="16" rx="1" fill="#3a6bc8"/>` },
+
+  { id:'center-float',    label:'Float',
+    svg:`<rect x="0" y="0" width="44" height="30" rx="2" fill="#1c2333"/>
+         <rect x="9" y="6" width="26" height="18" rx="1" fill="#3a6bc8"/>` },
+
+  { id:'left-half',       label:'Left Half',
+    svg:`<rect x="0" y="0" width="44" height="30" rx="2" fill="#1c2333"/>
+         <rect x="1" y="1" width="20" height="28" rx="1" fill="#3a6bc8"/>
+         <rect x="23" y="1" width="20" height="28" rx="1" fill="#2a3650"/>` },
+
+  { id:'right-half',      label:'Right Half',
+    svg:`<rect x="0" y="0" width="44" height="30" rx="2" fill="#1c2333"/>
+         <rect x="1" y="1" width="20" height="28" rx="1" fill="#2a3650"/>
+         <rect x="23" y="1" width="20" height="28" rx="1" fill="#3a6bc8"/>` },
+
+  { id:'left-two-thirds', label:'Left 2/3',
+    svg:`<rect x="0" y="0" width="44" height="30" rx="2" fill="#1c2333"/>
+         <rect x="1" y="1" width="28" height="28" rx="1" fill="#3a6bc8"/>
+         <rect x="31" y="1" width="12" height="28" rx="1" fill="#2a3650"/>` },
+
+  { id:'right-two-thirds',label:'Right 2/3',
+    svg:`<rect x="0" y="0" width="44" height="30" rx="2" fill="#1c2333"/>
+         <rect x="1" y="1" width="12" height="28" rx="1" fill="#2a3650"/>
+         <rect x="15" y="1" width="28" height="28" rx="1" fill="#3a6bc8"/>` },
+
+  { id:'top-half',        label:'Top Half',
+    svg:`<rect x="0" y="0" width="44" height="30" rx="2" fill="#1c2333"/>
+         <rect x="1" y="1" width="42" height="13" rx="1" fill="#3a6bc8"/>
+         <rect x="1" y="16" width="42" height="13" rx="1" fill="#2a3650"/>` },
+
+  { id:'bottom-half',     label:'Bottom Half',
+    svg:`<rect x="0" y="0" width="44" height="30" rx="2" fill="#1c2333"/>
+         <rect x="1" y="1" width="42" height="13" rx="1" fill="#2a3650"/>
+         <rect x="1" y="16" width="42" height="13" rx="1" fill="#3a6bc8"/>` },
+];
+
+let _currentWindowMode = 'fullscreen';
+
+async function openSettings() {
+  // Load persisted setting
+  if (window.electronBridge?.settings) {
+    try {
+      const s = await window.electronBridge.settings.get();
+      _currentWindowMode = s.windowMode || 'fullscreen';
+    } catch {}
+  } else {
+    _currentWindowMode = localStorage.getItem('windowMode') || 'fullscreen';
+  }
+
+  // Render tiles
+  const picker = document.getElementById('wm-picker');
+  picker.innerHTML = _WM_MODES.map(m =>
+    `<div class="wm-tile${m.id === _currentWindowMode ? ' active' : ''}"
+         onclick="selectWindowMode('${m.id}')">
+       <svg viewBox="0 0 44 30" xmlns="http://www.w3.org/2000/svg">${m.svg}</svg>
+       <span class="wm-tile-label">${m.label}</span>
+     </div>`
+  ).join('');
+
+  document.getElementById('settings-overlay').classList.remove('hidden');
+}
+
+function closeSettings() {
+  document.getElementById('settings-overlay').classList.add('hidden');
+}
+
+async function selectWindowMode(mode) {
+  _currentWindowMode = mode;
+
+  // Update tile highlight immediately
+  document.querySelectorAll('.wm-tile').forEach(el => {
+    const isActive = el.querySelector('.wm-tile-label')?.textContent ===
+      (_WM_MODES.find(m => m.id === mode)?.label ?? '');
+    el.classList.toggle('active', isActive);
+  });
+  // Re-render so active class is accurate by id
+  document.querySelectorAll('.wm-tile').forEach((el, i) => {
+    el.classList.toggle('active', _WM_MODES[i]?.id === mode);
+  });
+
+  if (window.electronBridge?.settings) {
+    try {
+      // Apply immediately + save
+      await window.electronBridge.settings.setWindowMode(mode);
+      await window.electronBridge.settings.save({ windowMode: mode });
+    } catch(e) { console.warn('[settings]', e); }
+  } else {
+    localStorage.setItem('windowMode', mode);
+  }
+}
+
+// Close overlay on backdrop click
+document.getElementById('settings-overlay').addEventListener('click', function(e) {
+  if (e.target === this) closeSettings();
+});
+
+// Keyboard shortcut: Escape closes settings
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !document.getElementById('settings-overlay').classList.contains('hidden'))
+    closeSettings();
+});
+</script>
+
 </body>
 </html>
