@@ -7,6 +7,10 @@
 ;  sidebar bitmap defines — do NOT touch those here.
 ; ============================================================
 
+; LogicLib provides ${If}/${EndIf} etc. — must be included before
+; any function body that uses them.
+!include "LogicLib.nsh"
+
 ; ---------- Header image -----------------------------------------
 ; electron-builder does not set this, so it is safe to define here.
 !define MUI_HEADERIMAGE
