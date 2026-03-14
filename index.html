@@ -1508,6 +1508,13 @@ function _snapshotWPs() {
 }
 function _saveWaypoints() {
   try { localStorage.setItem('savedWaypoints', JSON.stringify(_snapshotWPs())); } catch {}
+  _saveFuncBlocks();
+}
+function _saveFuncBlocks() {
+  try { localStorage.setItem('savedFuncBlocks', JSON.stringify(funcBlocks.map(b => ({
+    id: b.id, type: b.type, startWpIdx: b.startWpIdx, endWpIdx: b.endWpIdx,
+    params: {...b.params}
+  })))); } catch {}
 }
 function _loadSavedWaypoints() {
   try {
@@ -1515,7 +1522,16 @@ function _loadSavedWaypoints() {
     if (!Array.isArray(data) || data.length === 0) return;
     data.forEach(d => addWaypointSilent(d.lat, d.lon, d.alt, d.action, d));
     waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, false)));
+    _loadFuncBlocks();
     updatePolyline(); updateProfile(); renderWPList();
+  } catch {}
+}
+function _loadFuncBlocks() {
+  try {
+    const data = JSON.parse(localStorage.getItem('savedFuncBlocks') || '[]');
+    if (!Array.isArray(data)) return;
+    funcBlocks = data;
+    _fbIdCounter = funcBlocks.reduce((mx, b) => Math.max(mx, b.id || 0), _fbIdCounter);
   } catch {}
 }
 function pushUndo() {
@@ -2104,9 +2120,11 @@ function _fbHeaderHTML(bIdx) {
         onclick="event.stopPropagation()" oninput="updateFuncBlock(${bIdx},'alt',this.value)">
       <span class="fb-input-unit">m AGL</span>`;
   } else if (blk.type === 'set_speed') {
-    controls = `<input class="fb-input" type="number" min="1" max="80" value="${blk.params.speed ?? 15}"
+    const _sc = _SPD_CFG[speedUnit];
+    const _sv = +msToDisp(blk.params.speed ?? 15).toFixed(1);
+    controls = `<input class="fb-input" type="number" min="${_sc.min}" max="${_sc.max}" step="${_sc.step}" value="${_sv}"
         onclick="event.stopPropagation()" oninput="updateFuncBlock(${bIdx},'speed',this.value)">
-      <span class="fb-input-unit">km/h</span>`;
+      <span class="fb-input-unit">${spdLabel()}</span>`;
   }
 
   return `<div class="fb-header" style="background:${bg}" draggable="true"
@@ -2148,6 +2166,7 @@ function addFuncBlock(type) {
   if (type === 'set_alt') blk.params.alt = waypoints[0].alt;
   funcBlocks.push(blk);
   _applyFuncBlock(funcBlocks.length - 1);
+  _saveFuncBlocks();
   renderWPList();
 }
 
@@ -2159,7 +2178,7 @@ function _applyFuncBlock(bIdx) {
     if (blk.type === 'set_alt') {
       waypoints[i].alt = parseFloat(blk.params.alt) || 50;
     } else if (blk.type === 'set_speed') {
-      waypoints[i].speed = dispToMs(parseFloat(blk.params.speed) || 15);
+      waypoints[i].speed = parseFloat(blk.params.speed) || 15; // already m/s
     }
   }
   updateProfile();
@@ -2168,14 +2187,17 @@ function _applyFuncBlock(bIdx) {
 
 function updateFuncBlock(bIdx, key, value) {
   if (!funcBlocks[bIdx]) return;
-  funcBlocks[bIdx].params[key] = parseFloat(value) || 0;
+  // Speed values are stored internally as m/s; convert from display units
+  funcBlocks[bIdx].params[key] = (key === 'speed') ? (dispToMs(parseFloat(value)) || 0) : (parseFloat(value) || 0);
   _applyFuncBlock(bIdx);
+  _saveFuncBlocks();
   renderWPList();
 }
 
 function deleteFuncBlock(bIdx) {
   pushUndo();
   funcBlocks.splice(bIdx, 1);
+  _saveFuncBlocks();
   renderWPList();
 }
 
@@ -2201,6 +2223,7 @@ function fbDrop(e, bIdx) {
   const [moved] = funcBlocks.splice(_fbDragSrc, 1);
   funcBlocks.splice(bIdx, 0, moved);
   _fbDragSrc = -1;
+  _saveFuncBlocks();
   renderWPList();
 }
 
@@ -2229,6 +2252,7 @@ function _fbResizeMove(e) {
 function _fbResizeEnd() {
   _fbResizing = null;
   document.removeEventListener('mousemove', _fbResizeMove);
+  _saveFuncBlocks();
 }
 
 // ====================== DRAG TO REORDER ======================
@@ -2259,6 +2283,7 @@ function wpDrop(e, targetIdx) {
     blk.endWpIdx   = Math.min(targetIdx + span, waypoints.length - 1);
     _applyFuncBlock(_fbDragSrc);
     _fbDragSrc = -1;
+    _saveFuncBlocks();
     renderWPList();
     return;
   }
