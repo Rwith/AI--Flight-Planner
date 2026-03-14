@@ -1313,13 +1313,13 @@
 
 <script>
 // ====================== VERSION / CACHE INVALIDATION ======================
-const APP_VERSION = '2026-03-14-1';
 (function() {
   try {
-    if (localStorage.getItem('appVersion') !== APP_VERSION) {
+    const v = document.lastModified;
+    if (localStorage.getItem('appVersion') !== v) {
       localStorage.removeItem('savedWaypoints');
       localStorage.removeItem('savedFuncBlocks');
-      localStorage.setItem('appVersion', APP_VERSION);
+      localStorage.setItem('appVersion', v);
     }
   } catch {}
 })();
