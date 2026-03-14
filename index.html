@@ -1312,6 +1312,18 @@
 </div>
 
 <script>
+// ====================== VERSION / CACHE INVALIDATION ======================
+const APP_VERSION = '2026-03-14-1';
+(function() {
+  try {
+    if (localStorage.getItem('appVersion') !== APP_VERSION) {
+      localStorage.removeItem('savedWaypoints');
+      localStorage.removeItem('savedFuncBlocks');
+      localStorage.setItem('appVersion', APP_VERSION);
+    }
+  } catch {}
+})();
+
 // ====================== STATE ======================
 let waypoints = []; // {lat,lon,alt,action,loiterR,marker,id}
 let selectedIdx = -1;
