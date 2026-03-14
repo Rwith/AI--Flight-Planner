@@ -916,6 +916,19 @@
           <label>Yaw (°)</label>
           <input type="number" id="ed-mount-yaw" value="0" min="-180" max="180" onchange="updateSelectedWP()">
         </div>
+        <!-- DO — Set ROI target position (drag marker on map or enter coords) -->
+        <div class="form-row" id="roi-lat-row" style="display:none">
+          <label>ROI Lat</label>
+          <input type="number" id="ed-roi-lat" step="0.000001" onchange="updateSelectedWP()">
+        </div>
+        <div class="form-row" id="roi-lon-row" style="display:none">
+          <label>ROI Lon</label>
+          <input type="number" id="ed-roi-lon" step="0.000001" onchange="updateSelectedWP()">
+        </div>
+        <div class="form-row" id="roi-alt-row" style="display:none">
+          <label>ROI Alt (m)</label>
+          <input type="number" id="ed-roi-alt" min="0" max="2000" onchange="updateSelectedWP()">
+        </div>
         <div class="btn-row">
           <button class="btn danger" onclick="deleteSelectedWP()" style="flex:1">Delete</button>
           <button class="btn" onclick="deselectWP()" style="flex:1">Deselect</button>
@@ -1499,6 +1512,7 @@ function makeWPIcon(idx, action, selected) {
 function _snapshotWPs() {
   return waypoints.map(wp => ({
     lat:wp.lat,lon:wp.lon,alt:wp.alt,action:wp.action,
+    roiLat:wp.roiLat,roiLon:wp.roiLon,roiAlt:wp.roiAlt,
     holdTime:wp.holdTime,loiterR:wp.loiterR,loiterTime:wp.loiterTime,
     loiterTurns:wp.loiterTurns,speedType:wp.speedType,speed:wp.speed,
     delayTime:wp.delayTime,yawHeading:wp.yawHeading,yawSpeed:wp.yawSpeed,
@@ -1547,7 +1561,7 @@ function _updateUndoBtns() {
   if (r) { r.disabled = !redoStack.length;  r.style.opacity = redoStack.length  ? '1' : '0.4'; }
 }
 function _restoreSnapshot(snap) {
-  waypoints.forEach(wp => map.removeLayer(wp.marker));
+  waypoints.forEach(wp => { _removeWpRoiMarker(wp); map.removeLayer(wp.marker); });
   waypoints = []; selectedIdx = snap.selIdx;
   snap.wps.forEach(d => addWaypointSilent(d.lat, d.lon, d.alt, d.action, d));
   waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, i === selectedIdx)));
@@ -1636,6 +1650,7 @@ function addWaypoint(lat, lon, alt, action) {
   }).addTo(map);
   const wp = {
     lat, lon, alt, action, preAction:'none', id, marker,
+    roiLat: lat, roiLon: lon, roiAlt: alt,
     holdTime:0, loiterR:20, loiterTime:10, loiterTurns:1,
     speedType:1, speed:5, delayTime:5,
     yawHeading:0, yawSpeed:0, yawRel:0,
@@ -2085,6 +2100,7 @@ function renderWPList() {
           <div class="wp-num">WP${i + 1} — ${wp.action}${wp.preAction && wp.preAction !== 'none' ? ` <span style="color:var(--sec);font-weight:400">+ ${wp.preAction}</span>` : ''}</div>
           <div class="wp-details" data-details="${i}">${wp.alt}m AGL${legStr}</div>
           ${wp.preAction === 'do_mount_control' ? `<div class="wp-details" style="color:var(--sec)">Cam: Pitch ${wp.mountPitch||0}° Yaw ${wp.mountYaw||0}°</div>` : ''}
+          ${wp.preAction === 'set_roi' ? `<div class="wp-details" style="color:var(--sec)">◎ ROI: ${(wp.roiLat??wp.lat).toFixed(5)}, ${(wp.roiLon??wp.lon).toFixed(5)}, ${wp.roiAlt??wp.alt}m</div>` : ''}
         </div>
         ${_inlineHTML ? `<span class="wp-action-toggle" id="wp-act-btn-${i}" onclick="event.stopPropagation();toggleWPActions(${i})">⚙ Edit</span>` : ''}
         <span class="wp-del" onclick="event.stopPropagation();deleteWPByIdx(${i})">✕</span>
@@ -2158,7 +2174,32 @@ function _fbFooterHTML(bIdx) {
   </div>`;
 }
 
-// ---- ROI marker helpers ----
+// ---- ROI marker helpers (waypoint action) ----
+function _createWpRoiMarker(wp) {
+  if (wp._roiMarker) { map.removeLayer(wp._roiMarker); wp._roiMarker = null; }
+  if (wp.roiLat == null) { wp.roiLat = wp.lat; wp.roiLon = wp.lon; wp.roiAlt = wp.alt; }
+  const m = L.marker([wp.roiLat, wp.roiLon], {
+    icon: _makeRoiIcon(), draggable: true, zIndexOffset: 700
+  }).addTo(map);
+  m.bindTooltip('ROI Target', { permanent: false, direction: 'top', offset: [0, -16] });
+  m.on('dragend', e => {
+    const p = e.target.getLatLng();
+    wp.roiLat = +p.lat.toFixed(6);
+    wp.roiLon = +p.lng.toFixed(6);
+    _saveWaypoints();
+    const idx = waypoints.indexOf(wp);
+    if (idx === selectedIdx) {
+      document.getElementById('ed-roi-lat').value = wp.roiLat;
+      document.getElementById('ed-roi-lon').value = wp.roiLon;
+    }
+  });
+  wp._roiMarker = m;
+}
+function _removeWpRoiMarker(wp) {
+  if (wp._roiMarker) { map.removeLayer(wp._roiMarker); wp._roiMarker = null; }
+}
+
+// ---- ROI marker helpers (function block) ----
 function _makeRoiIcon() {
   return L.divIcon({
     className: '',
@@ -2186,6 +2227,12 @@ function _createRoiMarker(bIdx) {
 }
 function _rebuildRoiMarkers() {
   funcBlocks.forEach((blk, bIdx) => { if (blk.type === 'set_roi') _createRoiMarker(bIdx); });
+}
+function _rebuildWpRoiMarkers() {
+  waypoints.forEach(wp => {
+    if (wp.preAction === 'set_roi') _createWpRoiMarker(wp);
+    else _removeWpRoiMarker(wp);
+  });
 }
 
 function addFuncBlock(type) {
@@ -2420,6 +2467,7 @@ function _syncEditorRows(a, pa) {
    'relay-num-row','relay-state-row','relay-cycles-row','relay-dwell-row',
    'cam-dist-row','gripper-num-row','gripper-action-row',
    'parachute-row','mount-pitch-row','mount-roll-row','mount-yaw-row',
+   'roi-lat-row','roi-lon-row','roi-alt-row',
   ].forEach(hide);
   // nav action rows
   if (a === 'waypoint' || a === 'spline')  show('hold-row');
@@ -2440,7 +2488,7 @@ function _syncEditorRows(a, pa) {
   if (pa === 'do_gripper')       { show('gripper-num-row'); show('gripper-action-row'); }
   if (pa === 'do_parachute')       show('parachute-row');
   if (pa === 'do_mount_control') { show('mount-pitch-row'); show('mount-roll-row'); show('mount-yaw-row'); }
-  if (pa === 'set_roi')            {} // no extra fields — uses wp lat/lon/alt
+  if (pa === 'set_roi')            { show('roi-lat-row'); show('roi-lon-row'); show('roi-alt-row'); }
   // Dim alt only for nav types that don't use a position
   const noAlt = ['rtl'].includes(a);
   document.getElementById('ed-alt').closest('.form-row').style.opacity = noAlt ? '0.35' : '1';
@@ -2483,6 +2531,9 @@ function showEditor(wp, idx) {
   document.getElementById('ed-mount-pitch').value    = wp.mountPitch  ?? 0;
   document.getElementById('ed-mount-roll').value     = wp.mountRoll   ?? 0;
   document.getElementById('ed-mount-yaw').value      = wp.mountYaw    ?? 0;
+  document.getElementById('ed-roi-lat').value        = wp.roiLat      ?? wp.lat;
+  document.getElementById('ed-roi-lon').value        = wp.roiLon      ?? wp.lon;
+  document.getElementById('ed-roi-alt').value        = wp.roiAlt      ?? wp.alt;
   _syncEditorRows(wp.action, wp.preAction ?? 'none');
 }
 
@@ -2525,7 +2576,15 @@ function updateSelectedWP() {
   wp.mountPitch  = parseFloat(document.getElementById('ed-mount-pitch').value)    || 0;
   wp.mountRoll   = parseFloat(document.getElementById('ed-mount-roll').value)     || 0;
   wp.mountYaw    = parseFloat(document.getElementById('ed-mount-yaw').value)      || 0;
+  wp.roiLat      = parseFloat(document.getElementById('ed-roi-lat').value)        || wp.lat;
+  wp.roiLon      = parseFloat(document.getElementById('ed-roi-lon').value)        || wp.lon;
+  wp.roiAlt      = parseFloat(document.getElementById('ed-roi-alt').value)        || wp.alt;
   _syncEditorRows(wp.action, wp.preAction);
+  if (wp.preAction === 'set_roi') {
+    _createWpRoiMarker(wp);
+  } else {
+    _removeWpRoiMarker(wp);
+  }
   wp.marker.setIcon(makeWPIcon(selectedIdx, wp.action, true));
   renderWPList();
   updateProfile();
@@ -2538,6 +2597,7 @@ function deleteWPByIdx(idx) {
   if (idx < 0 || idx >= waypoints.length) return;
   pushUndo();
   terrainElevations = null;
+  _removeWpRoiMarker(waypoints[idx]);
   map.removeLayer(waypoints[idx].marker);
   waypoints.splice(idx, 1);
   if (selectedIdx === idx) { selectedIdx = -1; document.getElementById('wp-editor').classList.remove('visible'); }
@@ -2560,7 +2620,7 @@ function clearMission() {
   pushUndo();
   stopPlane();
   terrainElevations = null;
-  waypoints.forEach(wp => map.removeLayer(wp.marker));
+  waypoints.forEach(wp => { _removeWpRoiMarker(wp); map.removeLayer(wp.marker); });
   waypoints = []; selectedIdx = -1;
   funcBlocks.forEach(blk => { if (blk._roiMarker) map.removeLayer(blk._roiMarker); });
   funcBlocks = []; // function blocks are also cleared with the mission
@@ -2614,7 +2674,7 @@ function exportWaypoints() {
       else if (pa === 'set_speed')       { pcmd=178; pp1=wp.speedType??1; pp2=wp.speed||5; pp3=-1; }
       else if (pa === 'cond_yaw')        { pcmd=115; pp1=wp.yawHeading||0; pp2=wp.yawSpeed||0; pp4=wp.yawRel||0; }
       else if (pa === 'do_jump')         { pcmd=177; pp1=wp.jumpWP||1; pp2=wp.jumpRepeat||1; }
-      else if (pa === 'set_roi')         { pcmd=201; pp1=3; plat=wp.lat; plon=wp.lon; palt=wp.alt; }
+      else if (pa === 'set_roi')         { pcmd=201; pp1=3; plat=wp.roiLat??wp.lat; plon=wp.roiLon??wp.lon; palt=wp.roiAlt??wp.alt; }
       else if (pa === 'set_servo')       { pcmd=183; pp1=wp.servoNum||9; pp2=wp.servoPWM||1500; }
       else if (pa === 'do_repeat_servo') { pcmd=184; pp1=wp.servoNum||9; pp2=wp.servoPWM||1500; pp3=wp.servoCycles||1; pp4=wp.servoDwell||1; }
       else if (pa === 'do_set_relay')    { pcmd=181; pp1=wp.relayNum??0; pp2=wp.relayState??1; }
@@ -2715,10 +2775,12 @@ function importWaypoints(event) {
           prev.mountPitch   = cmd===205 ? parseFloat(p[4])||0   : prev.mountPitch;
           prev.mountRoll    = cmd===205 ? parseFloat(p[5])||0   : prev.mountRoll;
           prev.mountYaw     = cmd===205 ? parseFloat(p[6])||0   : prev.mountYaw;
+          if (cmd===201) { prev.roiLat = lat; prev.roiLon = lon; prev.roiAlt = alt; }
         }
         return;
       }
     });
+    _rebuildWpRoiMarkers();
     deselectWP(); updatePolyline(); updateProfile(); renderWPList();
   };
   reader.readAsText(file);
@@ -2732,6 +2794,7 @@ function addWaypointSilent(lat, lon, alt, action, extra) {
   const idx = waypoints.length;
   const marker = L.marker([lat, lon], { icon: makeWPIcon(idx, action, false), draggable: true, zIndexOffset: 500 }).addTo(map);
   const wp = { lat, lon, alt, action, preAction: ex.preAction ?? 'none',
+    roiLat: ex.roiLat ?? lat, roiLon: ex.roiLon ?? lon, roiAlt: ex.roiAlt ?? alt,
     holdTime:    ex.holdTime    ?? 0,
     loiterR:     ex.loiterR     ?? 20,
     loiterTime:  ex.loiterTime  ?? 10,
@@ -2763,6 +2826,7 @@ function addWaypointSilent(lat, lon, alt, action, extra) {
     marker, id };
   waypoints.push(wp);
   _attachMarkerEvents(marker, wp);
+  if (ex.preAction === 'set_roi') _createWpRoiMarker(wp);
 }
 
 // ====================== WIND PARTICLES ======================
@@ -5227,7 +5291,7 @@ function bbLoadWaypoints() {
       !confirm(`Replace the current ${waypoints.length} waypoint(s) with ${navItems.length} from the log?`)) return;
 
   // Clear existing mission
-  waypoints.forEach(wp => map.removeLayer(wp.marker));
+  waypoints.forEach(wp => { _removeWpRoiMarker(wp); map.removeLayer(wp.marker); });
   waypoints = [];
   updatePolyline();
 
