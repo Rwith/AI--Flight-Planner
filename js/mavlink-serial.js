@@ -625,39 +625,43 @@
   }
 
   function renderTele () {
-    // ARM status
-    const armed = (tele.baseMode & 0x80) ? 'ARMED' : 'DISARMED';
-    const armEl = document.getElementById('tele-armed');
-    if (armEl) {
-      armEl.textContent = armed;
-      armEl.style.color = armed === 'ARMED' ? '#f85149' : '#3fb950';
+    const gcsActive = document.getElementById('gcs-panel')?.classList.contains('active');
+
+    if (!gcsActive) {
+      // Update serial-tab telemetry cells only when GCS mode is off
+      const armed = (tele.baseMode & 0x80) ? 'ARMED' : 'DISARMED';
+      const armEl = document.getElementById('tele-armed');
+      if (armEl) {
+        armEl.textContent = armed;
+        armEl.style.color = armed === 'ARMED' ? '#f85149' : '#3fb950';
+      }
+      // Position
+      set('tele-lat',     tele.lat     != null ? tele.lat.toFixed(6)    : null);
+      set('tele-lon',     tele.lon     != null ? tele.lon.toFixed(6)    : null);
+      set('tele-alt-rel', tele.altRel  != null ? tele.altRel.toFixed(1) + ' m' : null);
+      set('tele-alt-msl', tele.altMSL  != null ? tele.altMSL.toFixed(1) + ' m' : null);
+      set('tele-hdg',     tele.hdg     != null ? tele.hdg.toFixed(0)   + '°' : null);
+      // GPS
+      set('tele-gps-fix',  GPS_FIX_STR[tele.gpsFix] || null);
+      set('tele-gps-sats', tele.gpsSats);
+      set('tele-hdop',     tele.hdop   != null ? tele.hdop.toFixed(2) : null);
+      // Attitude
+      set('tele-roll',  tele.roll  != null ? tele.roll  + '°' : null);
+      set('tele-pitch', tele.pitch != null ? tele.pitch + '°' : null);
+      set('tele-yaw',   tele.yawDeg != null ? tele.yawDeg + '°' : null);
+      // Speed / HUD
+      set('tele-airspeed',    tele.airspeed    != null ? tele.airspeed    + ' m/s' : null);
+      set('tele-gndspeed',    tele.groundspeed != null ? tele.groundspeed + ' m/s' : null);
+      set('tele-climbrate',   tele.climbRate   != null ? tele.climbRate   + ' m/s' : null);
+      set('tele-throttle',    tele.throttle    != null ? tele.throttle    + '%' : null);
+      // Battery
+      set('tele-voltage', tele.voltageMv != null ? (tele.voltageMv / 1000).toFixed(2) + ' V' : null);
+      set('tele-current', tele.currentCa != null ? (tele.currentCa / 100).toFixed(1) + ' A' : null);
+      set('tele-batt',    tele.battPct   != null && tele.battPct >= 0 ? tele.battPct + '%' : null);
     }
-    // Position
-    set('tele-lat',     tele.lat     != null ? tele.lat.toFixed(6)    : null);
-    set('tele-lon',     tele.lon     != null ? tele.lon.toFixed(6)    : null);
-    set('tele-alt-rel', tele.altRel  != null ? tele.altRel.toFixed(1) + ' m' : null);
-    set('tele-alt-msl', tele.altMSL  != null ? tele.altMSL.toFixed(1) + ' m' : null);
-    set('tele-hdg',     tele.hdg     != null ? tele.hdg.toFixed(0)   + '°' : null);
-    // GPS
-    set('tele-gps-fix',  GPS_FIX_STR[tele.gpsFix] || null);
-    set('tele-gps-sats', tele.gpsSats);
-    set('tele-hdop',     tele.hdop   != null ? tele.hdop.toFixed(2) : null);
-    // Attitude
-    set('tele-roll',  tele.roll  != null ? tele.roll  + '°' : null);
-    set('tele-pitch', tele.pitch != null ? tele.pitch + '°' : null);
-    set('tele-yaw',   tele.yawDeg != null ? tele.yawDeg + '°' : null);
-    // Speed / HUD
-    set('tele-airspeed',    tele.airspeed    != null ? tele.airspeed    + ' m/s' : null);
-    set('tele-gndspeed',    tele.groundspeed != null ? tele.groundspeed + ' m/s' : null);
-    set('tele-climbrate',   tele.climbRate   != null ? tele.climbRate   + ' m/s' : null);
-    set('tele-throttle',    tele.throttle    != null ? tele.throttle    + '%' : null);
-    // Battery
-    set('tele-voltage', tele.voltageMv != null ? (tele.voltageMv / 1000).toFixed(2) + ' V' : null);
-    set('tele-current', tele.currentCa != null ? (tele.currentCa / 100).toFixed(1) + ' A' : null);
-    set('tele-batt',    tele.battPct   != null && tele.battPct >= 0 ? tele.battPct + '%' : null);
-    // HUD overlay (no-op if HUD is hidden)
+
+    // HUD instruments and GCS overlay always update regardless of mode
     window.hudUpdate?.(tele);
-    // GCS control station overlay
     window.gcsUpdate?.(tele);
   }
 

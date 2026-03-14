@@ -164,14 +164,14 @@
   /* LOGBOOK */
   #logbook-panel {
     position: fixed; top: 0; right: -420px; width: 420px; height: 100vh;
-    background: var(--panel); border-left: 1px solid var(--border); z-index: 2000;
+    background: var(--panel); border-left: 1px solid var(--border); z-index: 4000;
     display: flex; flex-direction: column; transition: right .3s ease; overflow: hidden;
   }
   #logbook-panel.open { right: 0; }
   #logbook-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   #logbook-header h3 { font-size: 14px; font-weight: 700; flex: 1; }
   #logbook-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-  #logbook-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 1999; }
+  #logbook-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 3999; }
   #logbook-overlay.open { display: block; }
   /* SPINNER */
   .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 6px; }
@@ -286,7 +286,6 @@
   #serial-connect-btn[data-on="1"] { background: rgba(248,81,73,.15); border-color: var(--red); color: var(--red); }
 
   /* ── HUD ─────────────────────────────────────────────────────────────────── */
-  #hud-btn.hud-on { border-color: var(--blue); color: var(--blue); background: rgba(88,166,255,.12); }
   /* SETTINGS OVERLAY */
   #settings-overlay {
     position:fixed; inset:0; background:rgba(0,0,0,.72);
@@ -553,8 +552,74 @@
     <button id="gcs-connect-btn" class="btn primary" onclick="serialConnect()" style="width:100%;font-size:13px;padding:10px">Connect to FC</button>
   </div>
 
-  <!-- HUD instruments (moved here when GCS mode is active) -->
-  <div id="gcs-hud-slot"></div>
+  <!-- HUD instruments — live in GCS panel permanently -->
+  <div id="hud-card" style="padding:0">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div style="font-size:11px;font-weight:700;color:var(--sec);text-transform:uppercase;letter-spacing:.5px">Instruments</div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span id="hud-flight-time" style="font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.5px;color:rgba(255,255,255,.45)">--:--</span>
+        <span id="hud-arm" style="padding:2px 10px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:1px;border:1px solid rgba(63,185,80,.4);color:#3fb950">DISARMED</span>
+      </div>
+    </div>
+    <canvas id="hud-horizon" width="318" height="180" style="display:block;width:100%;border-radius:6px"></canvas>
+    <div style="position:relative;margin-top:6px">
+      <canvas id="hud-compass" width="318" height="46" style="display:block;width:100%;border-radius:4px"></canvas>
+      <div id="hud-hdg" style="position:absolute;top:0;left:50%;transform:translateX(-50%);
+        background:rgba(0,0,0,.82);color:#fff;font:bold 13px monospace;
+        padding:1px 8px;border-radius:0 0 5px 5px;letter-spacing:.5px;pointer-events:none">000°</div>
+    </div>
+    <div id="hud-statustext" style="display:none;margin-top:5px;padding:4px 8px;border-radius:4px;
+      font-size:11px;font-weight:600;font-family:monospace;letter-spacing:.3px;
+      border-left:3px solid currentColor;background:rgba(0,0,0,.55);line-height:1.4"></div>
+    <!-- Data tiles — click to expand more info -->
+    <div id="hud-data-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px;cursor:pointer" onclick="toggleGCSMoreInfo()" title="Click for more data">
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
+        <div style="font-size:9px;color:var(--sec);text-transform:uppercase;letter-spacing:.6px">Gnd Spd</div>
+        <div id="hud-spd" style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text)">--</div>
+        <div id="hud-spd-unit" style="font-size:9px;color:var(--sec)">km/h</div>
+        <div style="margin-top:5px;height:4px;background:rgba(255,255,255,.1);border-radius:2px">
+          <div id="hud-thr-fill" style="height:100%;width:0%;background:#58a6ff;border-radius:2px;transition:width .3s"></div>
+        </div>
+        <div id="hud-thr-pct" style="font-size:9px;color:var(--sec);margin-top:1px">THR 0%</div>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
+        <div style="font-size:9px;color:var(--sec);text-transform:uppercase;letter-spacing:.6px">Alt AGL</div>
+        <div id="hud-alt" style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text)">--</div>
+        <div style="font-size:9px;color:var(--sec)">m</div>
+        <div style="font-size:9px;color:var(--sec);margin-top:4px;text-transform:uppercase;letter-spacing:.6px">Climb</div>
+        <div id="hud-climb" style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums">--</div>
+        <div id="hud-climb-unit" style="font-size:9px;color:var(--sec)">km/h</div>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
+        <div style="font-size:9px;color:var(--sec);text-transform:uppercase;letter-spacing:.6px">Battery</div>
+        <div id="hud-batt-pct" style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:#3fb950">--%</div>
+        <div style="height:4px;background:rgba(255,255,255,.1);border-radius:2px;margin:4px 0">
+          <div id="hud-batt-bar" style="height:100%;width:0%;background:#3fb950;border-radius:2px;transition:width .5s,background .5s"></div>
+        </div>
+        <div style="font-size:9px;color:var(--sec)"><span id="hud-volt">--V</span></div>
+        <div style="font-size:9px;color:var(--sec)"><span id="hud-curr">--A</span></div>
+      </div>
+    </div>
+    <div style="font-size:9px;color:var(--sec);text-align:center;margin-top:3px;letter-spacing:.3px" id="hud-more-chevron">▼ more</div>
+    <!-- Expanded detail panel -->
+    <div id="gcs-more-info" style="display:none;margin-top:6px;border-top:1px solid var(--border);padding-top:8px">
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:11px;font-variant-numeric:tabular-nums">
+        <span style="color:var(--sec)">Lat</span>        <span id="gcs-info-lat">--</span>
+        <span style="color:var(--sec)">Lon</span>        <span id="gcs-info-lon">--</span>
+        <span style="color:var(--sec)">Alt MSL</span>    <span id="gcs-info-alt-msl">--</span>
+        <span style="color:var(--sec)">Heading</span>    <span id="gcs-info-hdg">--</span>
+        <span style="color:var(--sec)">Air Spd</span>    <span id="gcs-info-aspd">--</span>
+        <span style="color:var(--sec)">Gnd Spd</span>    <span id="gcs-info-gndspd">--</span>
+        <span style="color:var(--sec)">Roll</span>        <span id="gcs-info-roll">--</span>
+        <span style="color:var(--sec)">Pitch</span>       <span id="gcs-info-pitch">--</span>
+        <span style="color:var(--sec)">GPS Fix</span>    <span id="gcs-info-fix">--</span>
+        <span style="color:var(--sec)">Satellites</span> <span id="gcs-info-sats">--</span>
+        <span style="color:var(--sec)">HDOP</span>        <span id="gcs-info-hdop">--</span>
+        <span style="color:var(--sec)">Voltage</span>    <span id="gcs-info-volt">--</span>
+        <span style="color:var(--sec)">Current</span>    <span id="gcs-info-curr">--</span>
+      </div>
+    </div>
+  </div>
 
   <!-- Vehicle type tabs -->
   <div class="gcs-section-title">Vehicle Type</div>
@@ -1018,69 +1083,6 @@
         </div>
         <div id="conn-hint" style="margin-top:6px;font-size:10px;color:var(--sec)">
           Detecting connection environment…
-        </div>
-      </div>
-
-      <!-- ── HUD instruments ────────────────────────────────────────────── -->
-      <div class="card" id="hud-card" style="display:none;padding:8px">
-        <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-          Instruments
-          <div style="display:flex;align-items:center;gap:6px">
-            <span id="hud-flight-time" style="font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.5px;color:rgba(255,255,255,.45)">--:--</span>
-            <span id="hud-arm" style="padding:2px 10px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:1px;border:1px solid rgba(63,185,80,.4);color:#3fb950">DISARMED</span>
-          </div>
-        </div>
-        <!-- Artificial horizon -->
-        <canvas id="hud-horizon" width="318" height="180" style="display:block;width:100%;border-radius:6px"></canvas>
-        <!-- Compass tape + heading readout -->
-        <div style="position:relative;margin-top:6px">
-          <canvas id="hud-compass" width="318" height="46" style="display:block;width:100%;border-radius:4px"></canvas>
-          <div id="hud-hdg" style="position:absolute;top:0;left:50%;transform:translateX(-50%);
-            background:rgba(0,0,0,.82);color:#fff;font:bold 13px monospace;
-            padding:1px 8px;border-radius:0 0 5px 5px;letter-spacing:.5px;pointer-events:none">000°</div>
-        </div>
-        <!-- Status text toast (PreArm / FC messages) -->
-        <div id="hud-statustext" style="display:none;margin-top:5px;padding:4px 8px;border-radius:4px;
-          font-size:11px;font-weight:600;font-family:monospace;letter-spacing:.3px;
-          border-left:3px solid currentColor;background:rgba(0,0,0,.55);line-height:1.4"></div>
-        <!-- Data row: speed | alt | battery -->
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px">
-          <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
-            <div style="font-size:9px;color:var(--sec);text-transform:uppercase;letter-spacing:.6px">Gnd Spd</div>
-            <div id="hud-spd" style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text)">--</div>
-            <div id="hud-spd-unit" style="font-size:9px;color:var(--sec)">km/h</div>
-            <div style="font-size:9px;color:var(--sec);margin-top:4px;text-transform:uppercase;letter-spacing:.6px">Air Spd</div>
-            <div id="hud-aspd" style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text)">--</div>
-            <div id="hud-aspd-unit" style="font-size:9px;color:var(--sec)">km/h</div>
-            <div style="margin-top:5px;height:4px;background:rgba(255,255,255,.1);border-radius:2px">
-              <div id="hud-thr-fill" style="height:100%;width:0%;background:#58a6ff;border-radius:2px;transition:width .3s"></div>
-            </div>
-            <div id="hud-thr-pct" style="font-size:9px;color:var(--sec);margin-top:1px">THR 0%</div>
-          </div>
-          <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
-            <div style="font-size:9px;color:var(--sec);text-transform:uppercase;letter-spacing:.6px">Alt AGL</div>
-            <div id="hud-alt" style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text)">--</div>
-            <div style="font-size:9px;color:var(--sec)">m</div>
-            <div style="font-size:9px;color:var(--sec);margin-top:4px;text-transform:uppercase;letter-spacing:.6px">Alt MSL</div>
-            <div id="hud-alt-msl" style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text)">--</div>
-            <div style="font-size:9px;color:var(--sec)">m</div>
-            <div style="font-size:9px;color:var(--sec);margin-top:4px;text-transform:uppercase;letter-spacing:.6px">Climb</div>
-            <div id="hud-climb" style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums">--</div>
-            <div id="hud-climb-unit" style="font-size:9px;color:var(--sec)">km/h</div>
-          </div>
-          <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
-            <div style="font-size:9px;color:var(--sec);text-transform:uppercase;letter-spacing:.6px">Battery</div>
-            <div id="hud-batt-pct" style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:#3fb950">--%</div>
-            <div style="height:4px;background:rgba(255,255,255,.1);border-radius:2px;margin:4px 0">
-              <div id="hud-batt-bar" style="height:100%;width:0%;background:#3fb950;border-radius:2px;transition:width .5s,background .5s"></div>
-            </div>
-            <div style="font-size:9px;color:var(--sec)"><span id="hud-volt">--V</span></div>
-            <div style="font-size:9px;color:var(--sec)"><span id="hud-curr">--A</span></div>
-            <div style="font-size:9px;color:var(--sec);margin-top:4px;text-transform:uppercase;letter-spacing:.6px">GPS</div>
-            <div id="hud-sats" style="font-size:13px;font-weight:600;color:var(--text)">--</div>
-            <div id="hud-fix" style="font-size:9px;color:var(--sec)">--</div>
-            <div style="font-size:9px;color:var(--sec)">HDOP <span id="hud-hdop">--</span></div>
-          </div>
         </div>
       </div>
 
@@ -4148,8 +4150,6 @@ function toggleGCS() {
   const panel   = document.getElementById('gcs-panel');
   const btn     = document.getElementById('gcs-btn');
   const msnBtns = document.getElementById('topbar-mission-btns');
-  const hudCard = document.getElementById('hud-card');
-  const hudSlot = document.getElementById('gcs-hud-slot');
 
   panel.classList.toggle('active', _gcsActive);
   btn.classList.toggle('gcs-on', _gcsActive);
@@ -4160,23 +4160,10 @@ function toggleGCS() {
     // Sync connection mode tabs with whatever is set in the FC tab
     const currentMode = document.getElementById('conn-mode').value;
     gcsSetConnMode(currentMode);
-
-    // Move HUD card into GCS panel slot and force it visible
-    if (hudCard && hudSlot) hudSlot.appendChild(hudCard);
-    hudCard.style.display = 'block';
     // Trigger a canvas resize so the horizon/compass redraw correctly
     window.dispatchEvent(new Event('resize'));
-    if (!_hudVisible) { _hudVisible = true; hudUpdate({}); }
+    _hudVisible = true; hudUpdate({});
   } else {
-    // Move HUD card back to serial tab (before the blackbox card)
-    const serialTab  = document.getElementById('tab-serial');
-    const blackboxCard = document.getElementById('bb-card') ?? serialTab?.querySelector('.card:nth-child(3)');
-    if (hudCard && serialTab) {
-      if (blackboxCard) serialTab.insertBefore(hudCard, blackboxCard);
-      else serialTab.appendChild(hudCard);
-    }
-    // Restore original HUD visibility
-    hudCard.style.display = _hudVisible ? 'block' : 'none';
     window.dispatchEvent(new Event('resize'));
   }
 
@@ -4369,7 +4356,35 @@ window.gcsUpdate = function(tele) {
     if (detectedType !== _gcsMavType) gcsShowModes(detectedType);
   }
 
+  // More-info panel (only if visible)
+  const mi = document.getElementById('gcs-more-info');
+  if (mi && mi.style.display !== 'none') {
+    const sg = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v ?? '--'; };
+    sg('gcs-info-lat',     tele.lat     != null ? tele.lat.toFixed(6)              : null);
+    sg('gcs-info-lon',     tele.lon     != null ? tele.lon.toFixed(6)              : null);
+    sg('gcs-info-alt-msl', tele.altMSL  != null ? tele.altMSL.toFixed(1) + ' m'   : null);
+    sg('gcs-info-hdg',     tele.hdg     != null ? tele.hdg.toFixed(0) + '°'        : null);
+    sg('gcs-info-aspd',    tele.airspeed    != null ? tele.airspeed    + ' m/s'    : null);
+    sg('gcs-info-gndspd',  tele.groundspeed != null ? tele.groundspeed + ' m/s'   : null);
+    sg('gcs-info-roll',    tele.roll  != null ? tele.roll  + '°'                   : null);
+    sg('gcs-info-pitch',   tele.pitch != null ? tele.pitch + '°'                   : null);
+    const GPS_FIX = ['No GPS','No Fix','2D Fix','3D Fix','DGPS','RTK Float','RTK Fixed'];
+    sg('gcs-info-fix',     GPS_FIX[tele.gpsFix] || null);
+    sg('gcs-info-sats',    tele.gpsSats);
+    sg('gcs-info-hdop',    tele.hdop   != null ? tele.hdop.toFixed(2)              : null);
+    sg('gcs-info-volt',    tele.voltageMv != null ? (tele.voltageMv/1000).toFixed(2)+' V' : null);
+    sg('gcs-info-curr',    tele.currentCa != null ? (tele.currentCa/100).toFixed(1)+' A' : null);
+  }
 };
+
+function toggleGCSMoreInfo() {
+  const mi  = document.getElementById('gcs-more-info');
+  const chv = document.getElementById('hud-more-chevron');
+  if (!mi) return;
+  const open = mi.style.display === 'none' || mi.style.display === '';
+  mi.style.display  = open ? 'block' : 'none';
+  if (chv) chv.textContent = open ? '▲ less' : '▼ more';
+}
 
 // ====================== MAP TILE SWITCHER ======================
 const TILE_LAYERS = {
@@ -4468,20 +4483,12 @@ function exportKML() {
 }
 
 // ====================== HUD ======================
-let _hudVisible = false;
+let _hudVisible = true; // HUD lives in GCS panel — always on when GCS is active
 let _armTime = null, _flightTimerInterval = null;
-
-function toggleHUD() {
-  _hudVisible = !_hudVisible;
-  document.getElementById('hud-card').style.display = _hudVisible ? 'block' : 'none';
-  document.getElementById('hud-btn').classList.toggle('hud-on', _hudVisible);
-  document.getElementById('hud-btn').textContent = _hudVisible ? 'HUD ✓' : 'HUD';
-  if (_hudVisible) { switchTab('serial'); hudUpdate({}); }
-}
 
 // Called from mavlink-serial.js renderTele() via window.hudUpdate
 function hudUpdate(tele) {
-  if (!_hudVisible) return;
+  if (!_gcsActive) return;
   const GPS_FIX = ['No GPS','No Fix','2D Fix','3D Fix','DGPS','RTK Float','RTK Fixed'];
 
   // GPS
