@@ -2397,6 +2397,7 @@ function deselectWP() {
   }
   selectedIdx = -1;
   document.getElementById('wp-editor').classList.remove('visible');
+  _resetProfileZoom();
   renderWPList();
 }
 
@@ -3147,6 +3148,9 @@ function updateProfile() {
   // Store missionDsIdx and scale for highlightProfilePoint / live overlay refresh
   profileChart._missionDsIdx = missionDsIdx;
   profileChart._distScale    = scale;
+
+  // Re-apply zoom if a WP is still selected (chart was rebuilt e.g. after drag/edit)
+  if (selectedIdx >= 0) _zoomProfileToWP(selectedIdx);
 }
 
 // Called by mavlink-serial.js whenever new live altitude data arrives.
@@ -3193,6 +3197,54 @@ function highlightProfilePoint(idx) {
   const ds = profileChart.data.datasets[dsIdx];
   if (!ds) return;
   ds.pointBackgroundColor = waypoints.map((w, i) => i === idx ? '#fff' : (ACTION_COLORS[w.action] || '#58a6ff'));
+  _zoomProfileToWP(idx);
+  profileChart.update('none');
+}
+
+function _zoomProfileToWP(idx) {
+  if (!profileChart || idx < 0 || waypoints.length === 0) return;
+  const dsIdx = profileChart._missionDsIdx ?? 0;
+  const ds    = profileChart.data.datasets[dsIdx];
+  if (!ds?.data?.length) return;
+
+  const allX   = ds.data.map(p => p.x);
+  const totalX = allX[allX.length - 1] || 1;
+  const wpX    = allX[idx] ?? 0;
+
+  // Zoom window: show ~4 WP-spacings either side, min 15% of total
+  const spacing  = waypoints.length > 1 ? totalX / (waypoints.length - 1) : totalX;
+  let   half     = Math.max(spacing * 2.5, totalX * 0.15);
+  let   xMin     = wpX - half;
+  let   xMax     = wpX + half;
+
+  // Clamp and re-centre if we'd go out of bounds
+  if (xMin < 0)      { xMax = Math.min(totalX, xMax + (-xMin)); xMin = 0; }
+  if (xMax > totalX) { xMin = Math.max(0, xMin - (xMax - totalX)); xMax = totalX; }
+
+  // Collect alt values for all datasets within this x window
+  const visAlts = [];
+  profileChart.data.datasets.forEach(d => {
+    if (!d.data) return;
+    d.data.forEach(p => { if (p.x >= xMin && p.x <= xMax) visAlts.push(p.y); });
+  });
+  if (!visAlts.length) return;
+
+  const lo  = Math.min(...visAlts);
+  const hi  = Math.max(...visAlts);
+  const pad = Math.max((hi - lo) * 0.25, 20);
+
+  profileChart.options.scales.x.min = parseFloat(xMin.toFixed(4));
+  profileChart.options.scales.x.max = parseFloat(xMax.toFixed(4));
+  profileChart.options.scales.y.min = Math.max(0, Math.floor(lo  - pad));
+  profileChart.options.scales.y.max = Math.ceil(hi + pad);
+}
+
+function _resetProfileZoom() {
+  if (!profileChart) return;
+  delete profileChart.options.scales.x.min;
+  delete profileChart.options.scales.x.max;
+  delete profileChart.options.scales.y.min;
+  delete profileChart.options.scales.y.max;
   profileChart.update('none');
 }
 
