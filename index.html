@@ -1760,7 +1760,10 @@ function updateGimbalLines() {
 
       // Update polyline to follow the dragged position live
       poly.setLatLngs([[wp.lat, wp.lon], [p.lat, p.lng]]);
-      mk.setIcon(makeCamIcon((newAbsYaw + 180) % 360));
+      // Rotate icon by mutating the existing DOM element — calling setIcon() during
+      // drag replaces the element and detaches the mouse, killing the drag.
+      const iconDiv = mk.getElement()?.querySelector('div');
+      if (iconDiv) iconDiv.style.transform = `rotate(${(newAbsYaw + 180) % 360}deg)`;
 
       if (selectedIdx >= 0 && waypoints[selectedIdx] === wp) {
         document.getElementById('ed-mount-yaw').value   = wp.mountYaw;
