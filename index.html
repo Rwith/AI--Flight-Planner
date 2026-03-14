@@ -478,36 +478,6 @@
   .gcs-mavtype-tab.active { background:var(--card); color:var(--text); }
   .topbtn.gcs-on { border-color:var(--purple); color:var(--purple); background:rgba(162,155,254,.1); }
 
-  /* ── JOYSTICK SECTION ─────────────────────────────────────────────────── */
-  #joy-section { display:flex; flex-direction:column; gap:8px; }
-  #joy-status {
-    font-size:11px; color:var(--sec); text-align:center;
-    padding:5px 8px; background:var(--bg); border-radius:6px;
-    border:1px solid var(--border); min-height:24px;
-  }
-  .joy-sticks {
-    display:flex; gap:12px; justify-content:center; align-items:center;
-  }
-  .joy-stick-wrap { display:flex; flex-direction:column; align-items:center; gap:4px; }
-  .joy-stick-label { font-size:9px; color:var(--sec); text-transform:uppercase; letter-spacing:.6px; }
-  .joy-ch-grid {
-    display:grid; grid-template-columns:1fr 1fr; gap:6px;
-  }
-  .joy-ch-row { display:flex; flex-direction:column; gap:3px; }
-  .joy-ch-label { font-size:9px; color:var(--sec); text-transform:uppercase; letter-spacing:.6px; }
-  .joy-ch-row select {
-    background:var(--bg); border:1px solid var(--border); border-radius:5px;
-    color:var(--text); padding:4px 6px; font-size:11px; outline:none; width:100%;
-  }
-  .joy-ch-row label { display:flex; align-items:center; gap:4px; font-size:10px; color:var(--sec); cursor:pointer; }
-  .joy-dz-row { display:flex; align-items:center; gap:8px; }
-  .joy-dz-row input[type=range] { flex:1; accent-color:var(--blue); }
-  .joy-dz-row span { font-size:11px; color:var(--text); min-width:28px; text-align:right; }
-  #joy-enable-btn { width:100%; padding:11px; font-size:13px; font-weight:700; }
-  #joy-enable-btn.active {
-    border-color:var(--red); color:var(--red); background:rgba(248,81,73,.12);
-  }
-  #joy-enable-btn.active:hover { background:rgba(248,81,73,.25); }
 </style>
 </head>
 <body>
@@ -626,105 +596,12 @@
   <!-- ARM / DISARM -->
   <button id="gcs-arm-btn" onclick="gcsArmDisarm()">ARM</button>
 
-  <!-- JOYSTICK -->
-  <div class="gcs-section-title">Joystick / Gamepad <span style="font-size:9px;font-weight:500;background:#e3b34122;color:#e3b341;border:1px solid #e3b34155;border-radius:4px;padding:1px 5px;vertical-align:middle;letter-spacing:.4px">WIP</span></div>
-  <div id="joy-section">
-
-    <!-- Connection status -->
-    <div id="joy-status">No gamepad connected — plug in a USB joystick</div>
-    <div id="joy-tx-help" style="display:none;font-size:10px;color:var(--sec);background:#161b22;border-radius:4px;padding:4px 6px;margin-top:3px;line-height:1.5">
-      TX16S / EdgeTX: System → Hardware → USB Mode → <b>Joystick</b>, then reconnect USB.
-    </div>
-
-    <!-- Stick visualisers -->
-    <div class="joy-sticks">
-      <div class="joy-stick-wrap">
-        <span class="joy-stick-label">Left (Thr/Yaw)</span>
-        <canvas id="joy-ls" width="80" height="80" style="border-radius:50%"></canvas>
-      </div>
-      <div class="joy-stick-wrap">
-        <span class="joy-stick-label">Right (Roll/Pitch)</span>
-        <canvas id="joy-rs" width="80" height="80" style="border-radius:50%"></canvas>
-      </div>
-    </div>
-
-    <!-- Controller profile preset -->
-    <div class="gcs-section-title" style="margin-top:4px">Controller Profile</div>
-    <select id="joy-profile" onchange="joySetProfile(this.value)" style="width:100%;margin-bottom:6px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 5px;font-size:11px">
-      <option value="gamepad">Gamepad (Xbox / PlayStation)</option>
-      <option value="rctx2">RC Transmitter — Mode 2 (TX16S, Taranis…)</option>
-    </select>
-
-    <!-- Channel → axis mapping -->
-    <div class="joy-ch-grid">
-      <div class="joy-ch-row">
-        <span class="joy-ch-label">CH1 · Roll</span>
-        <select id="joy-sel-ch1" onchange="joySetMap('ch1',this.value)">
-          <option value="0">Axis 0</option>
-          <option value="1">Axis 1</option>
-          <option value="2" selected>Axis 2</option>
-          <option value="3">Axis 3</option>
-          <option value="4">Axis 4</option>
-          <option value="5">Axis 5</option>
-          <option value="-1">— unmapped —</option>
-        </select>
-        <label><input type="checkbox" id="joy-cb-ch1" onchange="joySetInv('ch1',this.checked)"> Invert</label>
-      </div>
-      <div class="joy-ch-row">
-        <span class="joy-ch-label">CH2 · Pitch</span>
-        <select id="joy-sel-ch2" onchange="joySetMap('ch2',this.value)">
-          <option value="0">Axis 0</option>
-          <option value="1">Axis 1</option>
-          <option value="2">Axis 2</option>
-          <option value="3" selected>Axis 3</option>
-          <option value="4">Axis 4</option>
-          <option value="5">Axis 5</option>
-          <option value="-1">— unmapped —</option>
-        </select>
-        <label><input type="checkbox" id="joy-cb-ch2" checked onchange="joySetInv('ch2',this.checked)"> Invert</label>
-      </div>
-      <div class="joy-ch-row">
-        <span class="joy-ch-label">CH3 · Throttle</span>
-        <select id="joy-sel-ch3" onchange="joySetMap('ch3',this.value)">
-          <option value="0">Axis 0</option>
-          <option value="1" selected>Axis 1</option>
-          <option value="2">Axis 2</option>
-          <option value="3">Axis 3</option>
-          <option value="4">Axis 4</option>
-          <option value="5">Axis 5</option>
-          <option value="-1">— unmapped —</option>
-        </select>
-        <label><input type="checkbox" id="joy-cb-ch3" checked onchange="joySetInv('ch3',this.checked)"> Invert</label>
-      </div>
-      <div class="joy-ch-row">
-        <span class="joy-ch-label">CH4 · Yaw</span>
-        <select id="joy-sel-ch4" onchange="joySetMap('ch4',this.value)">
-          <option value="0" selected>Axis 0</option>
-          <option value="1">Axis 1</option>
-          <option value="2">Axis 2</option>
-          <option value="3">Axis 3</option>
-          <option value="4">Axis 4</option>
-          <option value="5">Axis 5</option>
-          <option value="-1">— unmapped —</option>
-        </select>
-        <label><input type="checkbox" id="joy-cb-ch4" onchange="joySetInv('ch4',this.checked)"> Invert</label>
-      </div>
-    </div>
-
-    <!-- Deadzone -->
-    <div class="gcs-section-title" style="margin-top:2px">Deadzone</div>
-    <div class="joy-dz-row">
-      <input type="range" min="0" max="30" value="5" oninput="joySetDeadzone(this.value)">
-      <span id="joy-dz-val">5%</span>
-    </div>
-
-    <!-- Enable / disable RC override -->
-    <button id="joy-enable-btn" class="btn" disabled style="width:100%;padding:11px;font-size:13px;font-weight:700;opacity:.35;cursor:not-allowed">Enable Override</button>
-    <div style="font-size:10px;color:var(--sec);text-align:center">
-      Override sends RC_CHANNELS_OVERRIDE at 20 Hz. FC must be in a mode that accepts RC input.
-    </div>
-
-  </div><!-- /joy-section -->
+  <!-- LOGBOOK CONTROLS -->
+  <div class="gcs-section-title">Flight Log</div>
+  <div class="btn-row">
+    <button class="btn" id="tele-pause-btn" onclick="serialToggleLogPause()" style="flex:1">⏸ Pause Log</button>
+    <button class="btn success" onclick="serialFinishFlight()" style="flex:1">✓ Finish Flight</button>
+  </div>
 
   <div class="gcs-warning">⚠ Commands sent directly to aircraft. Ensure safe conditions.</div>
 </div>
@@ -1254,8 +1131,6 @@
         </div>
 
         <div class="btn-row" style="margin-top:8px">
-          <button class="btn" id="tele-pause-btn" onclick="serialToggleLogPause()" style="flex:1;font-size:11px">⏸ Pause Log</button>
-          <button class="btn success" onclick="serialFinishFlight()" style="flex:1;font-size:11px">✓ Finish Flight</button>
           <button class="btn" onclick="serialExportCSV()" style="flex:1;font-size:11px">⬇ Export CSV</button>
           <button class="btn danger" onclick="serialClearLog()" style="flex:1;font-size:11px">Clear</button>
         </div>
@@ -4386,174 +4261,6 @@ function gcsArmDisarm() {
     window.serialArmDisarm(true);
   }
 }
-
-// ====================== JOYSTICK / GAMEPAD ======================
-(function () {
-  let _padIdx   = null;  // active gamepad index
-  let _rafId    = null;
-  let _lastSend = 0;
-  let _enabled  = false;
-  const RATE_MS = 50; // 20 Hz
-
-  // Channel axis mapping: gamepad axis index (or -1 for unmapped)
-  const _map = { ch1: 2, ch2: 3, ch3: 1, ch4: 0 };
-  const _inv = { ch1: false, ch2: true, ch3: true, ch4: false };
-  let _dz = 0.05; // deadzone fraction
-
-  // ── Controller profiles ──────────────────────────────────────────────────
-  // Gamepad: standard Xbox/PlayStation dual-stick layout
-  //   axis 0 = L-Stick X, 1 = L-Stick Y, 2 = R-Stick X, 3 = R-Stick Y
-  // RC Transmitter Mode 2: TX16S / Taranis / EdgeTX in USB Joystick mode
-  //   axis 0 = CH1 Roll, 1 = CH2 Pitch, 2 = CH3 Throttle, 3 = CH4 Yaw
-  //   Throttle inverted: stick up → axis -1 → with inv=true → 2000 µs (full)
-  const PROFILES = {
-    gamepad: { map: { ch1:2, ch2:3, ch3:1, ch4:0 }, inv: { ch1:false, ch2:true,  ch3:true,  ch4:false } },
-    rctx2:   { map: { ch1:0, ch2:1, ch3:2, ch4:3 }, inv: { ch1:false, ch2:false, ch3:true,  ch4:false } },
-  };
-
-  function _applyProfile(name) {
-    const p = PROFILES[name];
-    if (!p) return;
-    Object.assign(_map, p.map);
-    Object.assign(_inv, p.inv);
-    // Sync UI selects and checkboxes
-    for (const ch of ['ch1','ch2','ch3','ch4']) {
-      const sel = document.getElementById('joy-sel-' + ch);
-      if (sel) sel.value = String(_map[ch]);
-      const cb = document.getElementById('joy-cb-' + ch);
-      if (cb) cb.checked = _inv[ch];
-    }
-  }
-
-  // Keywords that identify RC transmitters in the Gamepad API ID string
-  const RC_TX_PATTERN = /radiomaster|tx16s|taranis|frsky|spektrum|flysky|futaba|jumper|opentx|edgetx/i;
-
-  function applyDeadzone(v) {
-    if (Math.abs(v) < _dz) return 0;
-    return (v - Math.sign(v) * _dz) / (1 - _dz);
-  }
-
-  function axisToUs(axisIdx, invert, axes) {
-    if (axisIdx < 0 || axisIdx >= axes.length) return 65535;
-    let v = applyDeadzone(axes[axisIdx]);
-    if (invert) v = -v;
-    return Math.round(1500 + v * 500); // 1000–2000 µs
-  }
-
-  function drawStick(id, x, y) {
-    const c = document.getElementById(id);
-    if (!c) return;
-    const ctx = c.getContext('2d');
-    const w = c.width, h = c.height, cx = w / 2, cy = h / 2, r = w / 2 - 3;
-    ctx.clearRect(0, 0, w, h);
-    // Background disc
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = '#161b22'; ctx.fill();
-    ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1; ctx.stroke();
-    // Crosshair
-    ctx.strokeStyle = '#21262d'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r); ctx.stroke();
-    // Stick dot
-    const dx = (x || 0) * (r - 7);
-    const dy = (y || 0) * (r - 7);
-    ctx.beginPath(); ctx.arc(cx + dx, cy + dy, 7, 0, Math.PI * 2);
-    ctx.fillStyle = '#58a6ff'; ctx.fill();
-    // Centre ring
-    ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2);
-    ctx.fillStyle = '#30363d'; ctx.fill();
-  }
-
-  function poll() {
-    _rafId = requestAnimationFrame(poll);
-    if (_padIdx === null) { drawStick('joy-ls', 0, 0); drawStick('joy-rs', 0, 0); return; }
-    const gp = navigator.getGamepads()[_padIdx];
-    if (!gp) return;
-
-    // Draw sticks using the active mapping so visualiser matches actual output:
-    //   Left  = Throttle (Y) + Yaw (X)
-    //   Right = Roll (X) + Pitch (Y)
-    const lx = _map.ch4 >= 0 ? (gp.axes[_map.ch4] ?? 0) : 0;
-    const ly = _map.ch3 >= 0 ? (gp.axes[_map.ch3] ?? 0) : 0;
-    const rx = _map.ch1 >= 0 ? (gp.axes[_map.ch1] ?? 0) : 0;
-    const ry = _map.ch2 >= 0 ? (gp.axes[_map.ch2] ?? 0) : 0;
-    drawStick('joy-ls', lx, ly);
-    drawStick('joy-rs', rx, ry);
-
-    if (!_enabled) return;
-    const now = performance.now();
-    if (now - _lastSend < RATE_MS) return;
-    _lastSend = now;
-
-    window.serialSendRC?.([
-      axisToUs(_map.ch1, _inv.ch1, gp.axes),
-      axisToUs(_map.ch2, _inv.ch2, gp.axes),
-      axisToUs(_map.ch3, _inv.ch3, gp.axes),
-      axisToUs(_map.ch4, _inv.ch4, gp.axes),
-      65535, 65535, 65535, 65535
-    ]);
-  }
-
-  window.addEventListener('gamepadconnected', e => {
-    _padIdx = e.gamepad.index;
-    const name = e.gamepad.id || 'Gamepad';
-    const el = document.getElementById('joy-status');
-    if (el) { el.textContent = '🎮 ' + name.slice(0, 48); el.style.color = '#3fb950'; }
-
-    // Auto-apply the right profile based on the controller name
-    const txHelp = document.getElementById('joy-tx-help');
-    const profSel = document.getElementById('joy-profile');
-    if (RC_TX_PATTERN.test(name)) {
-      _applyProfile('rctx2');
-      if (profSel) profSel.value = 'rctx2';
-      if (txHelp) txHelp.style.display = 'none';
-    } else {
-      _applyProfile('gamepad');
-      if (profSel) profSel.value = 'gamepad';
-      if (txHelp) txHelp.style.display = 'none';
-    }
-
-    if (!_rafId) poll();
-  });
-
-  window.addEventListener('gamepaddisconnected', e => {
-    if (e.gamepad.index !== _padIdx) return;
-    _padIdx = null;
-    const el = document.getElementById('joy-status');
-    if (el) { el.textContent = 'No gamepad connected — plug in a USB joystick'; el.style.color = 'var(--sec)'; }
-    if (_enabled) joyToggle(); // auto-disable override on disconnect
-  });
-
-  // ── Public API ────────────────────────────────────────────────────────────
-  window.joyToggle = function () {
-    _enabled = !_enabled;
-    const btn = document.getElementById('joy-enable-btn');
-    if (btn) {
-      btn.textContent = _enabled ? 'Stop Override' : 'Enable Override';
-      btn.classList.toggle('active', _enabled);
-    }
-    if (!_enabled) {
-      // Release all channels so FC falls back to real RC
-      window.serialSendRC?.([65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535]);
-    }
-  };
-
-  window.joySetProfile = _applyProfile;
-  window.joySetMap = (ch, v) => { _map[ch] = parseInt(v, 10); };
-  window.joySetInv = (ch, v) => { _inv[ch] = !!v; };
-  window.joySetDeadzone = (pct) => {
-    _dz = pct / 100;
-    const el = document.getElementById('joy-dz-val');
-    if (el) el.textContent = pct + '%';
-  };
-
-  // Show TX16S setup hint on load (hidden once a controller connects)
-  const _txHelp = document.getElementById('joy-tx-help');
-  if (_txHelp) _txHelp.style.display = 'block';
-
-  // Start rAF loop once (draws idle sticks even before gamepad connected)
-  if (!_rafId) poll();
-})();
 
 // Called from mavlink-serial.js on every telemetry update
 window.gcsUpdate = function(tele) {
