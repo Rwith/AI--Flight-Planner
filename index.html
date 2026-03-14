@@ -490,7 +490,7 @@
 
 <!-- TOP BAR -->
 <div id="topbar">
-  <div class="title" onclick="openSettings()" title="Settings">✈ AeroNav AI <span style="font-size:10px;opacity:.55;font-weight:400;vertical-align:middle">V1.4.0</span></div>
+  <div class="title" onclick="openSettings()" title="Settings">✈ AeroNav AI <span id="app-version" style="font-size:10px;opacity:.55;font-weight:400;vertical-align:middle"></span></div>
   <span id="fly-status">LOADING</span>
   <span id="weather-summary">Fetching weather…</span>
   <div id="topbar-mission-btns" style="display:flex;align-items:center;gap:4px;flex-wrap:nowrap">
@@ -4950,6 +4950,12 @@ setInterval(updateSkyOverlay, 60000); // refresh sky colour every minute
 // and restore the user's last-chosen map style.
 ;(function() { switchMapTile(_currentTileType); })();
 fetchWeather();
+(function() {
+  const d = new Date(document.lastModified);
+  const ver = 'v' + d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0');
+  const el = document.getElementById('app-version');
+  if (el) el.textContent = ver;
+})();
 _loadSavedWaypoints();
 renderWPList();
 updateProfile();
