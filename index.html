@@ -583,7 +583,9 @@
     <button class="gcs-mode-btn" data-mode="0"  onclick="gcsSetMode(0)">MANUAL</button>
     <button class="gcs-mode-btn" data-mode="2"  onclick="gcsSetMode(2)">STABILIZE</button>
     <button class="gcs-mode-btn" data-mode="5"  onclick="gcsSetMode(5)">FLY BY WIRE A</button>
+    <button class="gcs-mode-btn" data-mode="6"  onclick="gcsSetMode(6)">FLY BY WIRE B</button>
     <button class="gcs-mode-btn" data-mode="7"  onclick="gcsSetMode(7)">CRUISE</button>
+    <button class="gcs-mode-btn" data-mode="23" onclick="gcsSetMode(23)">THERMAL</button>
     <button class="gcs-mode-btn" data-mode="10" onclick="gcsSetMode(10)">AUTO</button>
     <button class="gcs-mode-btn" data-mode="15" onclick="gcsSetMode(15)">GUIDED</button>
     <button class="gcs-mode-btn" data-mode="11" onclick="gcsSetMode(11)">RTL</button>
@@ -593,13 +595,14 @@
   <!-- Mode feedback toast -->
   <div id="gcs-mode-toast" style="display:none;font-size:11px;font-weight:600;text-align:center;padding:4px 8px;border-radius:5px;background:rgba(0,0,0,.45)"></div>
 
-  <!-- ARM / DISARM -->
+  <!-- ARM / DISARM (single-click to ARM; double-click to DISARM) -->
   <button id="gcs-arm-btn" onclick="gcsArmDisarm()">ARM</button>
+  <div id="gcs-arm-hint" style="display:none;font-size:10px;color:var(--yellow);text-align:center;margin-top:2px">Click again to confirm disarm</div>
 
   <!-- LOGBOOK CONTROLS -->
   <div class="gcs-section-title">Flight Log</div>
   <div class="btn-row">
-    <button class="btn" id="tele-pause-btn" onclick="serialToggleLogPause()" style="flex:1">⏸ Pause Log</button>
+    <button class="btn" id="tele-pause-btn" onclick="gcsPauseLogClick()" style="flex:1">⏸ Pause Log</button>
     <button class="btn success" onclick="serialFinishFlight()" style="flex:1">✓ Finish Flight</button>
   </div>
 
@@ -2700,10 +2703,12 @@ function animateWind() {
       if (!wrapped) {
         const t = p.age / p.life;
         const alpha = t < 0.15 ? t / 0.15 : t > 0.72 ? (1 - t) / 0.28 : 1;
+        const lightMap = _currentTileType === 'light' || _currentTileType === 'osm' || _currentTileType === 'topo';
+        const rgb = lightMap ? '0,0,0' : '255,255,255';
         ctx.beginPath();
         ctx.moveTo(px * W, py * H);
         ctx.lineTo(p.x * W, p.y * H);
-        ctx.strokeStyle = `rgba(255,255,255,${(alpha * 0.55).toFixed(2)})`;
+        ctx.strokeStyle = `rgba(${rgb},${(alpha * 0.55).toFixed(2)})`;
         ctx.lineWidth = 3;
         ctx.stroke();
       }
@@ -4121,6 +4126,7 @@ const PLANE_MODE_NAMES = {
   5:'FLY BY WIRE A', 6:'FLY BY WIRE B', 7:'CRUISE', 8:'AUTOTUNE',
   10:'AUTO', 11:'RTL', 12:'LOITER', 15:'GUIDED', 17:'QSTABILIZE',
   18:'QHOVER', 19:'QLOITER', 20:'QLAND', 21:'QRTL', 22:'QAUTOTUNE',
+  23:'THERMAL',
 };
 
 function toggleGCS() {
@@ -4251,15 +4257,53 @@ function gcsShowModeToast(msg, color) {
   _gcsModeToastTimer = setTimeout(() => { el.style.display = 'none'; }, 2500);
 }
 
+let _armPrimed = false, _armPrimeTimer = null;
 function gcsArmDisarm() {
-  if (!window.serialArmDisarm) { alert('Not connected to flight computer.'); return; }
+  if (!window.serialArmDisarm) { alert('Not connected to flight controller.'); return; }
   if (_gcsArmed) {
-    if (!confirm('DISARM the aircraft?')) return;
+    const btn  = document.getElementById('gcs-arm-btn');
+    const hint = document.getElementById('gcs-arm-hint');
+    if (!_armPrimed) {
+      _armPrimed = true;
+      if (btn)  { btn.textContent = 'DISARM?'; }
+      if (hint) hint.style.display = 'block';
+      _armPrimeTimer = setTimeout(() => {
+        _armPrimed = false;
+        if (btn)  btn.textContent = 'DISARM';
+        if (hint) hint.style.display = 'none';
+      }, 2500);
+      return;
+    }
+    clearTimeout(_armPrimeTimer);
+    _armPrimed = false;
+    if (hint) hint.style.display = 'none';
     window.serialArmDisarm(false);
   } else {
-    if (!confirm('ARM the aircraft? Ensure the area is clear.')) return;
     window.serialArmDisarm(true);
   }
+}
+
+let _pausePrimed = false, _pausePrimeTimer = null;
+function gcsPauseLogClick() {
+  const btn = document.getElementById('tele-pause-btn');
+  const isCurrentlyPaused = btn?.dataset.paused === '1';
+  if (!isCurrentlyPaused) {
+    // Pausing is the destructive action — require two clicks
+    if (!_pausePrimed) {
+      _pausePrimed = true;
+      const prev = btn?.textContent || '⏸ Pause Log';
+      if (btn) { btn.dataset.prevText = prev; btn.textContent = 'Pause Log?'; }
+      _pausePrimeTimer = setTimeout(() => {
+        _pausePrimed = false;
+        if (btn) btn.textContent = btn.dataset.prevText || '⏸ Pause Log';
+      }, 2500);
+      return;
+    }
+    clearTimeout(_pausePrimeTimer);
+    _pausePrimed = false;
+    if (btn) btn.textContent = btn.dataset.prevText || '⏸ Pause Log';
+  }
+  window.serialToggleLogPause?.();
 }
 
 // Called from mavlink-serial.js on every telemetry update
@@ -4278,7 +4322,7 @@ window.gcsUpdate = function(tele) {
   // ARM button state
   const armBtn = document.getElementById('gcs-arm-btn');
   if (armBtn) {
-    armBtn.textContent = armed ? 'DISARM' : 'ARM';
+    if (!_armPrimed) armBtn.textContent = armed ? 'DISARM' : 'ARM';
     armBtn.classList.toggle('armed-state', armed);
   }
 
