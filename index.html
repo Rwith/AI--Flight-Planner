@@ -4570,7 +4570,7 @@ const TILE_LAYERS = {
   light:     { url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',   attr: '&copy; OpenStreetMap &copy; CARTO', sub: 'abcd' },
   satellite: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri', sub: '' },
   topo:      { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri', sub: '' },
-  osm:       { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',               attr: '&copy; OpenStreetMap contributors', sub: 'abc' },
+  osm:       { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri &copy; OpenStreetMap contributors', sub: '' },
 };
 
 let _currentTileType = (() => { try { return localStorage.getItem('tileType') || 'dark'; } catch { return 'dark'; } })();
