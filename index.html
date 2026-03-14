@@ -509,12 +509,12 @@
   <div class="ctx-item" id="ctx-satellite" onclick="ctxSetTile('satellite')">Satellite</div>
   <div class="ctx-item" id="ctx-topo"      onclick="ctxSetTile('topo')">Topography (Esri)</div>
   <div class="ctx-item" id="ctx-osm"       onclick="ctxSetTile('osm')">OpenStreetMap</div>
+  <div style="height:1px;background:var(--border);margin:4px 0" id="ctx-sep-mission"></div>
+  <div class="ctx-item" id="ctx-rally-item"  onclick="if(_ctxLatLng)addRallyPoint(_ctxLatLng.lat,_ctxLatLng.lng);closeMapCtx()">Add Rally Point</div>
+  <div class="ctx-item" id="ctx-home-item"   onclick="if(_ctxLatLng){homeLat=_ctxLatLng.lat;homeLon=_ctxLatLng.lng;homeMarker.setLatLng([homeLat,homeLon]);try{localStorage.setItem('homeLat',homeLat);localStorage.setItem('homeLon',homeLon);}catch{}updatePolyline();}closeMapCtx()">Move Home Here</div>
   <div style="height:1px;background:var(--border);margin:4px 0"></div>
-  <div class="ctx-item"                    onclick="if(_ctxLatLng)addRallyPoint(_ctxLatLng.lat,_ctxLatLng.lng);closeMapCtx()">Add Rally Point</div>
-  <div class="ctx-item"                    onclick="if(_ctxLatLng){homeLat=_ctxLatLng.lat;homeLon=_ctxLatLng.lng;homeMarker.setLatLng([homeLat,homeLon]);try{localStorage.setItem('homeLat',homeLat);localStorage.setItem('homeLon',homeLon);}catch{}updatePolyline();}closeMapCtx()">Move Home Here</div>
-  <div style="height:1px;background:var(--border);margin:4px 0"></div>
-  <div class="ctx-item" id="ctx-nfz-item"  onclick="toggleNFZ();closeMapCtx()">NFZ</div>
-  <div class="ctx-item"                    onclick="downloadTilesForView();closeMapCtx()">Cache Tiles</div>
+  <div class="ctx-item" id="ctx-nfz-item"   onclick="toggleNFZ();closeMapCtx()">NFZ</div>
+  <div class="ctx-item" id="ctx-cache-item"  onclick="downloadTilesForView();closeMapCtx()">Cache Tiles</div>
 </div>
 <!-- GCS CONTROL STATION PANEL -->
 <div id="gcs-panel">
@@ -1496,6 +1496,18 @@ function _snapshotWPs() {
     servoNum:wp.servoNum,servoPWM:wp.servoPWM,id:wp.id
   }));
 }
+function _saveWaypoints() {
+  try { localStorage.setItem('savedWaypoints', JSON.stringify(_snapshotWPs())); } catch {}
+}
+function _loadSavedWaypoints() {
+  try {
+    const data = JSON.parse(localStorage.getItem('savedWaypoints') || '[]');
+    if (!Array.isArray(data) || data.length === 0) return;
+    data.forEach(d => addWaypointSilent(d.lat, d.lon, d.alt, d.action, d));
+    waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, false)));
+    updatePolyline(); updateProfile(); renderWPList();
+  } catch {}
+}
 function pushUndo() {
   undoStack.push({ wps: _snapshotWPs(), selIdx: selectedIdx });
   if (undoStack.length > 60) undoStack.shift();
@@ -1620,6 +1632,7 @@ function addWaypoint(lat, lon, alt, action) {
 
 // ====================== POLYLINE ======================
 function updatePolyline() {
+  _saveWaypoints();
   if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
   if (homeToFirstLine) { map.removeLayer(homeToFirstLine); homeToFirstLine = null; }
   clearInsertMarker();
@@ -2455,6 +2468,7 @@ function clearMission() {
   if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
   updateGimbalLines();
   updateProfile(); renderWPList();
+  _saveWaypoints();
 }
 
 // ====================== EXPORT/IMPORT ======================
@@ -4165,6 +4179,13 @@ function toggleGCS() {
     hudCard.style.display = _hudVisible ? 'block' : 'none';
     window.dispatchEvent(new Event('resize'));
   }
+
+  // Restrict right-click menu in GCS mode to Map Style + NFZ only
+  const gcsOnlyIds = ['ctx-sep-mission','ctx-rally-item','ctx-home-item','ctx-cache-item'];
+  gcsOnlyIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = _gcsActive ? 'none' : '';
+  });
 }
 
 function gcsSetConnMode(mode) {
@@ -4742,6 +4763,7 @@ setInterval(updateSkyOverlay, 60000); // refresh sky colour every minute
 // and restore the user's last-chosen map style.
 ;(function() { switchMapTile(_currentTileType); })();
 fetchWeather();
+_loadSavedWaypoints();
 renderWPList();
 updateProfile();
 initWindParticles();
