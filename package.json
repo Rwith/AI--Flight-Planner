@@ -7,6 +7,8 @@
     "start": "electron .",
     "rebuild": "electron-rebuild -f -w serialport",
     "postinstall": "electron-rebuild -f -w serialport",
+    "generate-installer-assets": "python scripts/generate-installer-assets.py",
+    "prebuild:win": "python scripts/generate-installer-assets.py",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux"
@@ -33,6 +35,20 @@
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AeroNav AI",
+      "include": "build/installer.nsh",
+      "installerSidebar": "build/sidebar.bmp",
+      "uninstallerSidebar": "build/sidebar-uninstall.bmp"
     },
     "mac": {
       "target": "dmg",
