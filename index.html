@@ -1653,11 +1653,19 @@ function updateGimbalLines() {
     // Absolute map bearing = flight direction + relative yaw offset
     const absYaw = (flightBearing + yaw + 360) % 360;
 
-    // Horizontal ground projection shrinks as pitch steepens:
-    //   0° pitch (straight ahead) → full BASE_M length
+    // Horizontal ground distance from altitude and pitch angle:
+    //   dist = altitude / tan(|pitch|)
+    //   0° pitch (horizontal) → capped at altitude * 20 (very far)
     //   ±90° pitch (straight down/up) → 0 length
-    const BASE_M = 150;
-    const lenM   = BASE_M * Math.abs(Math.cos(pitch * Math.PI / 180));
+    const alt = wp.alt || 50; // AGL height in metres
+    const absPitchRad = Math.abs(pitch) * Math.PI / 180;
+    let lenM;
+    if (absPitchRad < 0.01) {
+      lenM = Math.min(alt * 20, 5000); // near-horizontal: cap sensibly
+    } else {
+      lenM = alt / Math.tan(absPitchRad);
+      lenM = Math.min(lenM, 10000); // cap at 10 km
+    }
     if (lenM < 2) return; // effectively straight down, nothing useful to draw
 
     const absYawRad = absYaw * Math.PI / 180;
@@ -1692,29 +1700,34 @@ function updateGimbalLines() {
       const p = e.target.getLatLng();
       const ddLat = p.lat - wp.lat;
       const ddLon = (p.lng - wp.lon) * Math.cos(wp.lat * Math.PI / 180);
+
+      // Update yaw from drag direction
       const newAbsYaw = (Math.atan2(ddLon, ddLat) * 180 / Math.PI + 360) % 360;
       const rel = ((newAbsYaw - flightBearing) + 360) % 360;
       wp.mountYaw = Math.round(rel > 180 ? rel - 360 : rel); // keep in -180..180
 
-      // Update polyline direction while keeping fixed length
-      const newAbsRad = newAbsYaw * Math.PI / 180;
-      const newDLat = lenM * Math.cos(newAbsRad) / 111111;
-      const newDLon = lenM * Math.sin(newAbsRad) / (111111 * Math.cos(wp.lat * Math.PI / 180));
-      poly.setLatLngs([[wp.lat, wp.lon], [wp.lat + newDLat, wp.lon + newDLon]]);
+      // Update pitch from drag distance: dist = alt / tan(|pitch|) → pitch = atan(alt/dist)
+      const distM = Math.sqrt((ddLat * 111111) ** 2 + (ddLon * 111111) ** 2);
+      if (distM > 1) {
+        const pitchMag = Math.atan(alt / distM) * 180 / Math.PI;
+        // Preserve sign: negative means looking down (common convention)
+        wp.mountPitch = Math.round(pitch <= 0 ? -pitchMag : pitchMag);
+      }
+
+      // Update polyline to follow the dragged position live
+      poly.setLatLngs([[wp.lat, wp.lon], [p.lat, p.lng]]);
       mk.setIcon(makeCamIcon((newAbsYaw + 180) % 360));
 
       if (selectedIdx >= 0 && waypoints[selectedIdx] === wp) {
-        document.getElementById('ed-mount-yaw').value = wp.mountYaw;
+        document.getElementById('ed-mount-yaw').value   = wp.mountYaw;
+        document.getElementById('ed-mount-pitch').value = wp.mountPitch;
       }
     });
 
     mk.on('dragend', () => {
-      // Snap marker back to correct radius distance
-      const snapAbsYaw = (flightBearing + wp.mountYaw + 360) % 360;
-      const snapRad = snapAbsYaw * Math.PI / 180;
-      const sDLat = lenM * Math.cos(snapRad) / 111111;
-      const sDLon = lenM * Math.sin(snapRad) / (111111 * Math.cos(wp.lat * Math.PI / 180));
-      mk.setLatLng([wp.lat + sDLat, wp.lon + sDLon]);
+      // Rebuild all gimbal lines so lengths recalculate with the new pitch
+      updateGimbalLines();
+      updateWPList();
     });
 
     gimbalLines.push({ polyline: poly, marker: mk });
