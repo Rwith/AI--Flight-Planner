@@ -4491,13 +4491,15 @@ function hudUpdate(tele) {
   if (!_gcsActive) return;
   const GPS_FIX = ['No GPS','No Fix','2D Fix','3D Fix','DGPS','RTK Float','RTK Fixed'];
 
-  // GPS
+  // GPS (elements removed from compact HUD — no-op if absent)
   const sats = tele.gpsSats;
   const satEl = document.getElementById('hud-sats');
-  satEl.textContent = sats ?? '--';
-  satEl.style.color = sats >= 8 ? '#3fb950' : sats >= 6 ? '#d29922' : sats > 0 ? '#f85149' : 'rgba(255,255,255,.4)';
-  document.getElementById('hud-fix').textContent  = GPS_FIX[tele.gpsFix] ?? '--';
-  document.getElementById('hud-hdop').textContent = tele.hdop != null ? tele.hdop.toFixed(2) : '--';
+  if (satEl) {
+    satEl.textContent = sats ?? '--';
+    satEl.style.color = sats >= 8 ? '#3fb950' : sats >= 6 ? '#d29922' : sats > 0 ? '#f85149' : 'rgba(255,255,255,.4)';
+  }
+  const fixEl  = document.getElementById('hud-fix');  if (fixEl)  fixEl.textContent  = GPS_FIX[tele.gpsFix] ?? '--';
+  const hdopEl = document.getElementById('hud-hdop'); if (hdopEl) hdopEl.textContent = tele.hdop != null ? tele.hdop.toFixed(2) : '--';
 
   // Battery
   const pct = tele.battPct;
@@ -4540,8 +4542,8 @@ function hudUpdate(tele) {
   }
 
   // Speed
-  document.getElementById('hud-spd').textContent  = tele.groundspeed != null ? msToDisp(parseFloat(tele.groundspeed)).toFixed(1) : '--';
-  document.getElementById('hud-aspd').textContent = tele.airspeed    != null ? msToDisp(parseFloat(tele.airspeed)).toFixed(1)    : '--';
+  const spdEl  = document.getElementById('hud-spd');  if (spdEl)  spdEl.textContent  = tele.groundspeed != null ? msToDisp(parseFloat(tele.groundspeed)).toFixed(1) : '--';
+  const aspdEl = document.getElementById('hud-aspd'); if (aspdEl) aspdEl.textContent = tele.airspeed    != null ? msToDisp(parseFloat(tele.airspeed)).toFixed(1)    : '--';
 
   // Throttle
   const thr = tele.throttle;
@@ -4549,8 +4551,8 @@ function hudUpdate(tele) {
   document.getElementById('hud-thr-pct').textContent  = thr != null ? thr + '%' : '0%';
 
   // Altitude
-  document.getElementById('hud-alt').textContent     = tele.altRel != null ? tele.altRel.toFixed(1)  : '--';
-  document.getElementById('hud-alt-msl').textContent = tele.altMSL != null ? tele.altMSL.toFixed(1)  : '--';
+  const altEl    = document.getElementById('hud-alt');     if (altEl)    altEl.textContent    = tele.altRel != null ? tele.altRel.toFixed(1) : '--';
+  const altMslEl = document.getElementById('hud-alt-msl'); if (altMslEl) altMslEl.textContent = tele.altMSL != null ? tele.altMSL.toFixed(1) : '--';
 
   // Climb rate
   const crEl = document.getElementById('hud-climb');
