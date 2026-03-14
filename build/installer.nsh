@@ -3,6 +3,7 @@
 ; ============================================================
 
 !include "LogicLib.nsh"
+!include "WinMessages.nsh"
 
 ; ---------- Header image -----------------------------------------
 !define MUI_HEADERIMAGE
