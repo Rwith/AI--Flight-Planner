@@ -96,16 +96,35 @@
   #wp-list { display: flex; flex-direction: column; gap: 4px; }
   .wp-item {
     background: var(--card); border: 1px solid var(--border); border-radius: 6px;
-    padding: 7px 10px; cursor: pointer; display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; cursor: pointer; display: flex; flex-direction: column; gap: 0;
     transition: border-color .15s;
   }
   .wp-item:hover { border-color: var(--blue); }
   .wp-item.selected { border-color: var(--blue); background: rgba(88,166,255,.08); }
+  .wp-row { display: flex; align-items: center; gap: 8px; }
   .wp-dot { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; }
-  .wp-info { flex: 1; }
+  .wp-info { flex: 1; min-width: 0; }
   .wp-info .wp-num { font-weight: 600; font-size: 12px; }
   .wp-info .wp-details { color: var(--sec); font-size: 11px; }
   .wp-del { color: var(--red); cursor: pointer; font-size: 14px; padding: 2px 4px; }
+  /* INLINE HOVER PARAMS */
+  .wp-inline-params {
+    display: none; flex-wrap: wrap; gap: 5px 10px;
+    padding-top: 7px; margin-top: 6px;
+    border-top: 1px solid var(--border);
+  }
+  .wp-item:hover .wp-inline-params,
+  .wp-item:focus-within .wp-inline-params { display: flex; }
+  .wp-inline-field {
+    display: flex; align-items: center; gap: 4px; font-size: 11px;
+  }
+  .wp-inline-field label { color: var(--sec); white-space: nowrap; font-size: 10px; }
+  .wp-inline-field input, .wp-inline-field select {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text); padding: 2px 5px; font-size: 11px; outline: none;
+  }
+  .wp-inline-field input:focus, .wp-inline-field select:focus { border-color: var(--blue); }
+  .wp-inline-unit { color: var(--sec); font-size: 10px; }
   /* EDITOR */
   #wp-editor { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: none; }
   #wp-editor.visible { display: block; }
@@ -1831,6 +1850,168 @@ function _legSpeed(i) {
   }
   return airspeed;
 }
+// ====================== INLINE WP PARAMS (hover panel) ======================
+function _wpInlineParamsHTML(wp, idx) {
+  const a  = wp.action;
+  const pa = wp.preAction || 'none';
+
+  // Helpers — stop propagation so clicking inputs doesn't fire selectWP
+  const inp = (lbl, field, type, val, extra = '') =>
+    `<div class="wp-inline-field">
+       <label>${lbl}</label>
+       <input type="${type}" value="${val}" ${extra}
+         onclick="event.stopPropagation()"
+         ondragstart="event.stopPropagation()"
+         onchange="wpInlineUpdate(${idx},'${field}',this.value)">
+     </div>`;
+  const sel = (lbl, field, val, opts) =>
+    `<div class="wp-inline-field">
+       <label>${lbl}</label>
+       <select onclick="event.stopPropagation()" ondragstart="event.stopPropagation()"
+         onchange="wpInlineUpdate(${idx},'${field}',this.value)">
+         ${opts.map(([v,t]) => `<option value="${v}"${String(v)===String(val)?' selected':''}>${t}</option>`).join('')}
+       </select>
+     </div>`;
+
+  const parts = [];
+
+  // Alt — always a quick-edit field
+  parts.push(inp('Alt', 'alt', 'number', wp.alt, 'min="0" max="2000" style="width:54px"') +
+    '<span class="wp-inline-unit">m</span>');
+
+  // Navigation action params
+  if (a === 'waypoint' || a === 'spline')
+    parts.push(inp('Hold', 'holdTime', 'number', wp.holdTime ?? 0, 'min="0" max="3600" style="width:48px"') +
+      '<span class="wp-inline-unit">s</span>');
+  if (LOITER_ACTIONS.has(a)) {
+    parts.push(inp('R', 'loiterR', 'number', wp.loiterR ?? 20, 'min="1" max="2000" style="width:52px"') +
+      '<span class="wp-inline-unit">m</span>');
+    if (a === 'loiter_time')
+      parts.push(inp('Dur', 'loiterTime', 'number', wp.loiterTime ?? 10, 'min="1" style="width:48px"') +
+        '<span class="wp-inline-unit">s</span>');
+    if (a === 'loiter_turns')
+      parts.push(inp('Turns', 'loiterTurns', 'number', wp.loiterTurns ?? 1, 'min="1" style="width:44px"'));
+  }
+
+  // Pre-action params
+  if (pa === 'delay')
+    parts.push(inp('Delay', 'delayTime', 'number', wp.delayTime ?? 5, 'min="0" style="width:48px"') +
+      '<span class="wp-inline-unit">s</span>');
+  if (pa === 'set_speed') {
+    parts.push(sel('Spd', 'speedType', wp.speedType ?? 1, [['1','GS'],['0','AS']]));
+    parts.push(inp('', 'speed_disp', 'number', +msToDisp(wp.speed ?? 5).toFixed(1),
+      `min="1" max="80" step="0.5" style="width:54px"`) +
+      `<span class="wp-inline-unit">${spdLabel()}</span>`);
+  }
+  if (pa === 'cond_yaw') {
+    parts.push(inp('Hdg', 'yawHeading', 'number', wp.yawHeading ?? 0, 'min="0" max="360" style="width:50px"') +
+      '<span class="wp-inline-unit">°</span>');
+    parts.push(inp('Spd', 'yawSpeed', 'number', wp.yawSpeed ?? 0, 'min="0" style="width:44px"'));
+    parts.push(sel('', 'yawRel', wp.yawRel ?? 0, [['0','Abs'],['1','Rel']]));
+  }
+  if (pa === 'do_jump') {
+    parts.push(inp('WP#', 'jumpWP', 'number', wp.jumpWP ?? 1, 'min="1" style="width:44px"'));
+    parts.push(inp('Rpt', 'jumpRepeat', 'number', wp.jumpRepeat ?? 1, 'min="-1" style="width:44px"'));
+  }
+  if (pa === 'set_servo' || pa === 'do_repeat_servo') {
+    parts.push(inp('#', 'servoNum', 'number', wp.servoNum ?? 9, 'min="1" max="16" style="width:40px"'));
+    parts.push(inp('PWM', 'servoPWM', 'number', wp.servoPWM ?? 1500, 'min="500" max="2500" style="width:58px"'));
+    if (pa === 'do_repeat_servo') {
+      parts.push(inp('×', 'servoCycles', 'number', wp.servoCycles ?? 1, 'min="1" style="width:38px"'));
+      parts.push(inp('Dwell', 'servoDwell', 'number', wp.servoDwell ?? 1, 'min="0" step="0.1" style="width:44px"') +
+        '<span class="wp-inline-unit">s</span>');
+    }
+  }
+  if (pa === 'do_set_relay' || pa === 'do_repeat_relay') {
+    parts.push(inp('#', 'relayNum', 'number', wp.relayNum ?? 0, 'min="0" style="width:38px"'));
+    parts.push(sel('', 'relayState', wp.relayState ?? 1, [['1','On'],['0','Off']]));
+    if (pa === 'do_repeat_relay') {
+      parts.push(inp('×', 'relayCycles', 'number', wp.relayCycles ?? 1, 'min="1" style="width:38px"'));
+      parts.push(inp('Dwell', 'relayDwell', 'number', wp.relayDwell ?? 1, 'min="0" step="0.1" style="width:44px"') +
+        '<span class="wp-inline-unit">s</span>');
+    }
+  }
+  if (pa === 'cam_trigg_dist')
+    parts.push(inp('Dist', 'camDist', 'number', wp.camDist ?? 30, 'min="0" style="width:52px"') +
+      '<span class="wp-inline-unit">m</span>');
+  if (pa === 'cond_distance')
+    parts.push(inp('Dist', 'condDist', 'number', wp.condDist ?? 10, 'min="0" style="width:52px"') +
+      '<span class="wp-inline-unit">m</span>');
+  if (pa === 'do_gripper') {
+    parts.push(inp('#', 'gripperNum', 'number', wp.gripperNum ?? 0, 'min="0" style="width:38px"'));
+    parts.push(sel('', 'gripperAction', wp.gripperAction ?? 0, [['0','Release'],['1','Grab']]));
+  }
+  if (pa === 'do_parachute')
+    parts.push(sel('Chute', 'parachuteCmd', wp.parachuteCmd ?? 2,
+      [['0','Disable'],['1','Enable'],['2','Release']]));
+  if (pa === 'do_mount_control') {
+    parts.push(inp('Pitch', 'mountPitch', 'number', wp.mountPitch ?? 0, 'min="-90" max="90" style="width:46px"') +
+      '<span class="wp-inline-unit">°</span>');
+    parts.push(inp('Roll', 'mountRoll', 'number', wp.mountRoll ?? 0, 'min="-90" max="90" style="width:46px"') +
+      '<span class="wp-inline-unit">°</span>');
+    parts.push(inp('Yaw', 'mountYaw', 'number', wp.mountYaw ?? 0, 'min="-180" max="180" style="width:50px"') +
+      '<span class="wp-inline-unit">°</span>');
+  }
+
+  // Only return markup if there's something beyond just the always-present Alt field
+  if (parts.length <= 1 && a === 'waypoint' && pa === 'none') return '';
+  return `<div class="wp-inline-params">${parts.join('')}</div>`;
+}
+
+// Update a single WP field from inline panel without rebuilding the full list
+function wpInlineUpdate(idx, field, value) {
+  if (idx < 0 || idx >= waypoints.length) return;
+  const wp = waypoints[idx];
+  switch (field) {
+    case 'alt':          wp.alt          = parseFloat(value) || 50;  break;
+    case 'holdTime':     wp.holdTime     = parseFloat(value) || 0;   break;
+    case 'loiterR':      wp.loiterR      = parseFloat(value) || 20;  break;
+    case 'loiterTime':   wp.loiterTime   = parseFloat(value) || 10;  break;
+    case 'loiterTurns':  wp.loiterTurns  = parseFloat(value) || 1;   break;
+    case 'speed_disp':   wp.speed        = dispToMs(parseFloat(value) || _SPD_CFG[speedUnit].def); break;
+    case 'speedType':    wp.speedType    = parseInt(value) ?? 1;     break;
+    case 'delayTime':    wp.delayTime    = parseFloat(value) || 5;   break;
+    case 'yawHeading':   wp.yawHeading   = parseFloat(value) || 0;   break;
+    case 'yawSpeed':     wp.yawSpeed     = parseFloat(value) || 0;   break;
+    case 'yawRel':       wp.yawRel       = parseInt(value) ?? 0;     break;
+    case 'jumpWP':       wp.jumpWP       = parseInt(value) || 1;     break;
+    case 'jumpRepeat':   wp.jumpRepeat   = parseInt(value) || 1;     break;
+    case 'servoNum':     wp.servoNum     = parseInt(value) || 9;     break;
+    case 'servoPWM':     wp.servoPWM     = parseInt(value) || 1500;  break;
+    case 'servoCycles':  wp.servoCycles  = parseInt(value) || 1;     break;
+    case 'servoDwell':   wp.servoDwell   = parseFloat(value) || 1;   break;
+    case 'condDist':     wp.condDist     = parseFloat(value) || 10;  break;
+    case 'relayNum':     wp.relayNum     = parseInt(value) ?? 0;     break;
+    case 'relayState':   wp.relayState   = parseInt(value) ?? 1;     break;
+    case 'relayCycles':  wp.relayCycles  = parseInt(value) || 1;     break;
+    case 'relayDwell':   wp.relayDwell   = parseFloat(value) || 1;   break;
+    case 'camDist':      wp.camDist      = parseFloat(value) || 30;  break;
+    case 'gripperNum':   wp.gripperNum   = parseInt(value) ?? 0;     break;
+    case 'gripperAction':wp.gripperAction= parseInt(value) ?? 0;     break;
+    case 'parachuteCmd': wp.parachuteCmd = parseInt(value) ?? 2;     break;
+    case 'mountPitch':   wp.mountPitch   = parseFloat(value) || 0;   break;
+    case 'mountRoll':    wp.mountRoll    = parseFloat(value) || 0;   break;
+    case 'mountYaw':     wp.mountYaw     = parseFloat(value) || 0;   break;
+  }
+  // Sync to main editor if this WP is currently selected (avoids a full re-render)
+  if (selectedIdx === idx) showEditor(wp, idx);
+  // Update only the summary text line in the existing DOM node
+  const detailEl = document.querySelector(`[data-details="${idx}"]`);
+  if (detailEl) {
+    let legStr = '';
+    if (idx > 0) {
+      const d   = haversine(waypoints[idx-1].lat, waypoints[idx-1].lon, wp.lat, wp.lon);
+      const dStr = d >= 1000 ? (d/1000).toFixed(1)+'km' : Math.round(d)+'m';
+      const gs  = _legSpeed(idx);
+      legStr = ` · ${dStr} · GS ${msToDisp(gs).toFixed(1)}${spdLabel()}`;
+    }
+    detailEl.textContent = `${wp.alt}m AGL${legStr}`;
+  }
+  updateMissionStats();
+  updateProfile();
+  updateGimbalLines();
+}
+
 function renderWPList() {
   updateMissionStats();
   const list = document.getElementById('wp-list');
@@ -1904,14 +2085,17 @@ function renderWPList() {
         ondragleave="wpDragLeave(event)"
         ondrop="wpDrop(event,${i})"
         ondragend="wpDragEnd(event)">
-      <span style="color:var(--sec);font-size:14px;cursor:grab;padding:0 2px">⠿</span>
-      <div class="wp-dot" style="background:${col};color:#000">${i + 1}</div>
-      <div class="wp-info">
-        <div class="wp-num">WP${i + 1} — ${wp.action}</div>
-        <div class="wp-details">${wp.alt}m AGL${legStr}</div>
-        ${wp.preAction === 'do_mount_control' ? `<div class="wp-details" style="color:var(--sec)">Camera: Pitch ${wp.mountPitch||0}° · Roll ${wp.mountRoll||0}° · Yaw ${wp.mountYaw||0}° (0° = straight ahead)</div>` : ''}
+      <div class="wp-row">
+        <span style="color:var(--sec);font-size:14px;cursor:grab;padding:0 2px">⠿</span>
+        <div class="wp-dot" style="background:${col};color:#000">${i + 1}</div>
+        <div class="wp-info">
+          <div class="wp-num">WP${i + 1} — ${wp.action}${wp.preAction && wp.preAction !== 'none' ? ` <span style="color:var(--sec);font-weight:400">+ ${wp.preAction}</span>` : ''}</div>
+          <div class="wp-details" data-details="${i}">${wp.alt}m AGL${legStr}</div>
+          ${wp.preAction === 'do_mount_control' ? `<div class="wp-details" style="color:var(--sec)">Cam: Pitch ${wp.mountPitch||0}° Yaw ${wp.mountYaw||0}°</div>` : ''}
+        </div>
+        <span class="wp-del" onclick="event.stopPropagation();deleteWPByIdx(${i})">✕</span>
       </div>
-      <span class="wp-del" onclick="event.stopPropagation();deleteWPByIdx(${i})">✕</span>
+      ${_wpInlineParamsHTML(wp, i)}
     </div>`;
 
     // Close any blocks ending at this WP
