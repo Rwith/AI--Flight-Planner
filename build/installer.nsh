@@ -14,36 +14,51 @@
 !define MUI_HEADERIMAGE_BITMAP "${BUILD_RESOURCES_DIR}\header.bmp"
 
 ; ---------- Detect existing install → swap Install/Update text ------
-; $IsUpdate is set in .onInit (customInit below) by reading the
-; uninstall registry key that electron-builder writes on first install.
-; The WelcomePagePre and FinishPagePre functions run just before each
-; page is shown and overwrite the static text when updating.
+; $IsUpdate is set in .onInit (via customInit) by reading the registry
+; key that electron-builder writes on first install. WelcomePagePre
+; runs just before the welcome page is shown and rewrites the text.
+
+; Top-level Var so it is visible before any function body is compiled.
+Var IsUpdate
+
+Function WelcomePagePre
+  ${If} $IsUpdate == "1"
+    SendMessage $mui.WelcomePage.Title ${WM_SETTEXT} 0 \
+      "STR:Update AeroNav AI"
+    SendMessage $mui.WelcomePage.Text ${WM_SETTEXT} 0 \
+      "STR:AeroNav AI is already installed on this computer.$\r$\n$\r$\nThis wizard will update it to v${VERSION}.$\r$\n$\r$\nClose AeroNav AI before continuing, then click Next."
+  ${EndIf}
+FunctionEnd
+
+Function FinishPagePre
+  ${If} $IsUpdate == "1"
+    SendMessage $mui.FinishPage.Title ${WM_SETTEXT} 0 \
+      "STR:AeroNav AI Updated"
+    SendMessage $mui.FinishPage.Text ${WM_SETTEXT} 0 \
+      "STR:AeroNav AI has been successfully updated to v${VERSION}.$\r$\n$\r$\nClick Finish to close this wizard."
+  ${EndIf}
+FunctionEnd
+
+; Hook WelcomePagePre into the MUI welcome page via customWelcomePage.
+; electron-builder's assistedInstaller.nsh calls this macro if defined
+; (via !ifmacrodef), so defining it here overrides the default.
+!macro customWelcomePage
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE WelcomePagePre
+  !insertmacro MUI_PAGE_WELCOME
+!macroend
+
+; Hook FinishPagePre into the MUI finish page via customFinishPage.
+!macro customFinishPage
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE FinishPagePre
+  !insertmacro MUI_PAGE_FINISH
+!macroend
 
 !macro customHeader
-  Var IsUpdate
-
-  Function WelcomePagePre
-    ${If} $IsUpdate == "1"
-      SendMessage $mui.WelcomePage.Title ${WM_SETTEXT} 0 \
-        "STR:Update AeroNav AI"
-      SendMessage $mui.WelcomePage.Text ${WM_SETTEXT} 0 \
-        "STR:AeroNav AI is already installed on this computer.$\r$\n$\r$\nThis wizard will update it to v${VERSION}.$\r$\n$\r$\nClose AeroNav AI before continuing, then click Next."
-    ${EndIf}
-  FunctionEnd
-  !define MUI_PAGE_CUSTOMFUNCTION_PRE WelcomePagePre
-
-  Function FinishPagePre
-    ${If} $IsUpdate == "1"
-      SendMessage $mui.FinishPage.Title ${WM_SETTEXT} 0 \
-        "STR:AeroNav AI Updated"
-      SendMessage $mui.FinishPage.Text ${WM_SETTEXT} 0 \
-        "STR:AeroNav AI has been successfully updated to v${VERSION}.$\r$\n$\r$\nClick Finish to close this wizard."
-    ${EndIf}
-  FunctionEnd
+  ; Var IsUpdate is declared at file scope above.
 !macroend
 
 !macro customInit
-  ; Check HKLM first (all-users install), then HKCU (per-user install)
+  ; Check HKLM first (all-users install), then HKCU (per-user install).
   ReadRegStr $0 HKLM \
     "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.aeronav.ai" \
     "DisplayVersion"
