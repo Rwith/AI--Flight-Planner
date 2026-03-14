@@ -3124,7 +3124,10 @@ function updateProfile() {
         },
         tooltip: {
           callbacks: {
-            label: ctx => `Alt: ${ctx.parsed.y.toFixed(0)}m AGL | ${ctx.parsed.x.toFixed(2)} ${unit}`
+            label: ctx => {
+              const wpPart = ctx.datasetIndex === missionDsIdx ? `WP${ctx.dataIndex + 1} · ` : '';
+              return `${wpPart}Alt: ${ctx.parsed.y.toFixed(0)}m AGL | ${ctx.parsed.x.toFixed(2)} ${unit}`;
+            }
           }
         }
       },
