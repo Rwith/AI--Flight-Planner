@@ -329,6 +329,23 @@
   .wm-tile svg    { width:44px; height:30px; display:block; }
   .wm-tile-label  { font-size:9px; color:var(--sec); text-align:center; line-height:1.2; }
   .wm-tile.active .wm-tile-label { color:var(--blue); }
+  /* Speed-unit / settings button group */
+  .su-btn-grp { display:flex; gap:5px; flex-wrap:wrap; }
+  .su-btn {
+    padding:5px 12px; border:1px solid var(--border); border-radius:6px;
+    background:var(--card); color:var(--sec); font-size:12px; cursor:pointer;
+    transition:border-color .15s, color .15s, background .15s;
+  }
+  .su-btn:hover   { border-color:var(--blue); color:var(--blue); }
+  .su-btn.su-active { border-color:var(--blue); background:rgba(88,166,255,.18); color:var(--blue); }
+  .settings-inline-row { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
+  .settings-field { display:flex; flex-direction:column; gap:6px; }
+  .settings-field label { font-size:11px; color:var(--sec); }
+  .settings-field input {
+    background:var(--bg); border:1px solid var(--border); border-radius:6px;
+    color:var(--text); padding:5px 8px; font-size:12px; outline:none; width:90px;
+  }
+  .settings-field input:focus { border-color:var(--blue); }
   /* Make app title a clickable link */
   #topbar .title { cursor:pointer; }
   #topbar .title:hover { opacity:.8; }
@@ -501,15 +518,6 @@
   <span id="fly-status">LOADING</span>
   <span id="weather-summary">Fetching weather…</span>
   <div id="topbar-mission-btns" style="display:flex;align-items:center;gap:4px;flex-wrap:nowrap">
-    <label style="font-size:11px;color:var(--sec);white-space:nowrap">Default Alt (m):</label>
-    <input id="default-alt" type="number" value="50" min="0" max="500" style="width:60px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 6px;font-size:12px;outline:none">
-    <select id="speed-unit-sel" onchange="changeSpeedUnit(this.value)" title="Speed units"
-      style="background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 6px;font-size:12px;outline:none;cursor:pointer">
-      <option value="kmh">km/h</option>
-      <option value="kts">kts</option>
-      <option value="mph">mph</option>
-      <option value="ms">m/s</option>
-    </select>
     <div class="spacer"></div>
     <button class="topbtn" id="undo-btn" onclick="undo()" style="opacity:.4" disabled title="Undo (Ctrl+Z)">↩ Undo</button>
     <button class="topbtn" id="redo-btn" onclick="redo()" style="opacity:.4" disabled title="Redo (Ctrl+Y)">↪ Redo</button>
@@ -1446,7 +1454,9 @@ function _applySpeedUnitLabels() {
   const wsu = document.getElementById('w-speed-unit');   if (wsu) wsu.textContent = l;
   const wgu = document.getElementById('w-gust-unit');    if (wgu) wgu.textContent = l;
   const csu = document.getElementById('cruise-spd-unit'); if (csu) csu.textContent = l;
-  const su  = document.getElementById('speed-unit-sel'); if (su && su.value !== speedUnit) su.value = speedUnit;
+  // sync settings panel speed-unit buttons if open
+  document.querySelectorAll('#settings-su-btn').forEach(b =>
+    b.classList.toggle('su-active', b.dataset.unit === speedUnit));
 }
 
 function changeSpeedUnit(u) {
@@ -1480,7 +1490,11 @@ function initSpeedUnit() {
   }
   _applySpeedUnitLabels();
 }
-let logbookEntries = [];
+let _defaultAlt = (() => { try { return parseInt(localStorage.getItem('defaultAlt')) || 50; } catch { return 50; } })();
+let logbookEntries = (() => {
+  try { return JSON.parse(localStorage.getItem('logbookEntries') || '[]'); }
+  catch { return []; }
+})();
 let wpIdCounter = 0;
 // Undo/Redo
 let undoStack = [], redoStack = [];
@@ -1567,7 +1581,7 @@ homeMarker.on('click', e => { L.DomEvent.stopPropagation(e); });
 // Map click => add waypoint
 map.on('click', e => {
   if (_gcsActive) return; // GCS mode: no waypoint placement
-  const defaultAlt = parseInt(document.getElementById('default-alt').value) || 50;
+  const defaultAlt = _defaultAlt;
   const prevAlt = waypoints.length > 0 ? waypoints[waypoints.length - 1].alt : null;
   // Use prev WP altitude when it differs from the default (pilot intentionally set it),
   // otherwise fall back to the current default.
@@ -3269,6 +3283,7 @@ function openLogbook() {
   document.getElementById('logbook-panel').classList.add('open');
   document.getElementById('logbook-overlay').classList.add('open');
   document.getElementById('log-date').value = new Date().toISOString().split('T')[0];
+  renderLogbook(); // ensure entries loaded from storage are shown
 }
 function closeLogbook() {
   document.getElementById('logbook-panel').classList.remove('open');
@@ -3281,6 +3296,10 @@ function prefillLog() {
   document.getElementById('log-location').value = `${center.lat.toFixed(4)}, ${center.lng.toFixed(4)}`;
   const actions = [...new Set(waypoints.map(w => w.action))];
   document.getElementById('log-notes').value = `Mission: ${waypoints.length} waypoints, actions: ${actions.join(', ')}. Max alt: ${waypoints.length > 0 ? Math.max(...waypoints.map(w => w.alt)) : 0}m AGL.`;
+}
+
+function _saveLogbook() {
+  try { localStorage.setItem('logbookEntries', JSON.stringify(logbookEntries)); } catch {}
 }
 
 function addLogEntry() {
@@ -3301,12 +3320,14 @@ function addLogEntry() {
     try { localStorage.setItem('tlog_' + entry.id, header + '\n' + pending.join('\n')); } catch {}
     window._pendingTelLog = null;
   }
+  _saveLogbook();
   renderLogbook();
 }
 
 function deleteLogEntry(id) {
   logbookEntries = logbookEntries.filter(e => e.id !== id);
   try { localStorage.removeItem('tlog_' + id); } catch {}
+  _saveLogbook();
   renderLogbook();
 }
 
@@ -5731,6 +5752,30 @@ function parseDataFlashBin(buffer) {
       <button id="settings-close-btn" onclick="closeSettings()">✕</button>
     </div>
 
+    <!-- Defaults: Alt + Speed Units -->
+    <div class="settings-section">
+      <div class="settings-section-title">Defaults</div>
+      <div class="settings-inline-row">
+        <div class="settings-field">
+          <label>Default Altitude</label>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="number" id="settings-default-alt" min="0" max="2000"
+              oninput="settingsUpdateDefaultAlt(this.value)">
+            <span style="font-size:11px;color:var(--sec)">m AGL</span>
+          </div>
+        </div>
+        <div class="settings-field">
+          <label>Speed Units</label>
+          <div class="su-btn-grp">
+            <button class="su-btn" id="settings-su-btn" data-unit="kmh" onclick="settingsChangeSpeedUnit('kmh')">km/h</button>
+            <button class="su-btn" id="settings-su-btn" data-unit="kts" onclick="settingsChangeSpeedUnit('kts')">kts</button>
+            <button class="su-btn" id="settings-su-btn" data-unit="mph" onclick="settingsChangeSpeedUnit('mph')">mph</button>
+            <button class="su-btn" id="settings-su-btn" data-unit="ms"  onclick="settingsChangeSpeedUnit('ms')">m/s</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Window mode on startup -->
     <div class="settings-section">
       <div class="settings-section-title">Window Mode on Startup</div>
@@ -5803,7 +5848,7 @@ const _WM_MODES = [
 let _currentWindowMode = 'fullscreen';
 
 async function openSettings() {
-  // Load persisted setting
+  // Load persisted window mode
   if (window.electronBridge?.settings) {
     try {
       const s = await window.electronBridge.settings.get();
@@ -5813,7 +5858,13 @@ async function openSettings() {
     _currentWindowMode = localStorage.getItem('windowMode') || 'fullscreen';
   }
 
-  // Render tiles
+  // Populate Defaults section
+  const daEl = document.getElementById('settings-default-alt');
+  if (daEl) daEl.value = _defaultAlt;
+  document.querySelectorAll('#settings-su-btn').forEach(b =>
+    b.classList.toggle('su-active', b.dataset.unit === speedUnit));
+
+  // Render window-mode tiles
   const picker = document.getElementById('wm-picker');
   picker.innerHTML = _WM_MODES.map(m =>
     `<div class="wm-tile${m.id === _currentWindowMode ? ' active' : ''}"
@@ -5824,6 +5875,19 @@ async function openSettings() {
   ).join('');
 
   document.getElementById('settings-overlay').classList.remove('hidden');
+}
+
+function settingsUpdateDefaultAlt(v) {
+  const val = parseInt(v);
+  if (!isNaN(val) && val >= 0) {
+    _defaultAlt = val;
+    try { localStorage.setItem('defaultAlt', val); } catch {}
+  }
+}
+
+function settingsChangeSpeedUnit(u) {
+  changeSpeedUnit(u);
+  // changeSpeedUnit already calls _applySpeedUnitLabels which syncs the buttons
 }
 
 function closeSettings() {
