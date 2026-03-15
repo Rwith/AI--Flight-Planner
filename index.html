@@ -1361,7 +1361,7 @@ function _updateUndoBtns() {
   if (r) { r.disabled = !redoStack.length;  r.style.opacity = redoStack.length  ? '1' : '0.4'; }
 }
 function _restoreSnapshot(snap) {
-  waypoints.forEach(wp => { _removeWpRoiMarker(wp); map.removeLayer(wp.marker); });
+  waypoints.forEach(wp => { _removeWpRoiMarker(wp); _removeLoiterCircle(wp); map.removeLayer(wp.marker); });
   waypoints = []; selectedIdx = snap.selIdx;
   snap.wps.forEach(d => addWaypointSilent(d.lat, d.lon, d.alt, d.action, d));
   waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, i === selectedIdx)));
@@ -1421,6 +1421,7 @@ function _attachMarkerEvents(marker, wp) {
       e.target.setLatLng([slat, slon]);
       pos = { lat: slat, lng: slon };
     }
+    if (wp._loiterCircle) wp._loiterCircle.setLatLng([pos.lat, pos.lng]);
     updatePolyline();
   });
   marker.on('dragend', e => {
@@ -1431,6 +1432,7 @@ function _attachMarkerEvents(marker, wp) {
       p = { lat: slat, lng: slon };
     }
     wp.lat = p.lat; wp.lon = p.lng;
+    _refreshLoiterCircle(wp);
     updatePolyline(); updateProfile();
     const i = waypoints.indexOf(wp);
     if (selectedIdx === i) renderWPList();
@@ -1464,6 +1466,7 @@ function addWaypoint(lat, lon, alt, action) {
   };
   waypoints.push(wp);
   _attachMarkerEvents(marker, wp);
+  _refreshLoiterCircle(wp);
   selectWP(idx);
   updatePolyline();
   updateProfile();
@@ -1917,6 +1920,7 @@ function wpInlineUpdate(idx, field, value) {
     case 'action': {
       wp.action = value;
       wp.marker.setIcon(makeWPIcon(idx, value, idx === selectedIdx));
+      _refreshLoiterCircle(wp);
       updatePolyline(); updateProfile(); renderWPList();
       const _p = document.querySelector(`#wp-list .wp-inline-params[data-wp="${idx}"]`);
       const _b = document.getElementById(`wp-act-btn-${idx}`);
@@ -1948,7 +1952,7 @@ function wpInlineUpdate(idx, field, value) {
     }
     case 'alt':          wp.alt          = parseFloat(value) || 50;  break;
     case 'holdTime':     wp.holdTime     = parseFloat(value) || 0;   break;
-    case 'loiterR':      wp.loiterR      = parseFloat(value) || 20;  break;
+    case 'loiterR':      wp.loiterR      = parseFloat(value) || 20;  _refreshLoiterCircle(wp); break;
     case 'loiterTime':   wp.loiterTime   = parseFloat(value) || 10;  break;
     case 'loiterTurns':  wp.loiterTurns  = parseFloat(value) || 1;   break;
     case 'speed_disp':   wp.speed        = dispToMs(parseFloat(value) || _SPD_CFG[speedUnit].def); break;
@@ -2179,6 +2183,22 @@ function _createWpRoiMarker(wp) {
 }
 function _removeWpRoiMarker(wp) {
   if (wp._roiMarker) { map.removeLayer(wp._roiMarker); wp._roiMarker = null; }
+}
+
+// ---- Loiter radius circle helpers ----
+function _refreshLoiterCircle(wp) {
+  if (wp._loiterCircle) { map.removeLayer(wp._loiterCircle); wp._loiterCircle = null; }
+  if (!LOITER_ACTIONS.has(wp.action)) return;
+  const r = wp.loiterR || 20;
+  const col = ACTION_COLORS[wp.action] || '#a29bfe';
+  wp._loiterCircle = L.circle([wp.lat, wp.lon], {
+    radius: r, color: col, fillColor: col,
+    fillOpacity: 0.08, weight: 1.5, dashArray: '6 4', opacity: 0.7,
+    interactive: false
+  }).addTo(map);
+}
+function _removeLoiterCircle(wp) {
+  if (wp._loiterCircle) { map.removeLayer(wp._loiterCircle); wp._loiterCircle = null; }
 }
 
 // ---- ROI marker helpers (function block) ----
@@ -2459,6 +2479,7 @@ function deleteWPByIdx(idx) {
   pushUndo();
   terrainElevations = null;
   _removeWpRoiMarker(waypoints[idx]);
+  _removeLoiterCircle(waypoints[idx]);
   map.removeLayer(waypoints[idx].marker);
   waypoints.splice(idx, 1);
   if (selectedIdx === idx) { selectedIdx = -1; }
@@ -2481,7 +2502,7 @@ function clearMission() {
   pushUndo();
   stopPlane();
   terrainElevations = null;
-  waypoints.forEach(wp => { _removeWpRoiMarker(wp); map.removeLayer(wp.marker); });
+  waypoints.forEach(wp => { _removeWpRoiMarker(wp); _removeLoiterCircle(wp); map.removeLayer(wp.marker); });
   waypoints = []; selectedIdx = -1;
   funcBlocks.forEach(blk => { if (blk._roiMarker) map.removeLayer(blk._roiMarker); });
   funcBlocks = []; // function blocks are also cleared with the mission
@@ -2573,7 +2594,7 @@ function importWaypoints(event) {
   reader.onload = e => {
     const lines = e.target.result.split('\n').map(l => l.trim()).filter(Boolean);
     if (!lines[0].startsWith('QGC WPL')) { alert('Not a valid QGC waypoints file'); return; }
-    waypoints.forEach(wp => map.removeLayer(wp.marker));
+    waypoints.forEach(wp => { _removeLoiterCircle(wp); map.removeLayer(wp.marker); });
     waypoints = []; selectedIdx = -1;
     if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
     _splinePolylines.forEach(l => map.removeLayer(l)); _splinePolylines = [];
@@ -2697,6 +2718,7 @@ function addWaypointSilent(lat, lon, alt, action, extra) {
     marker, id };
   waypoints.push(wp);
   _attachMarkerEvents(marker, wp);
+  _refreshLoiterCircle(wp);
   if (ex.preAction === 'set_roi') _createWpRoiMarker(wp);
 }
 
@@ -5175,7 +5197,7 @@ function bbLoadWaypoints() {
       !confirm(`Replace the current ${waypoints.length} waypoint(s) with ${navItems.length} from the log?`)) return;
 
   // Clear existing mission
-  waypoints.forEach(wp => { _removeWpRoiMarker(wp); map.removeLayer(wp.marker); });
+  waypoints.forEach(wp => { _removeWpRoiMarker(wp); _removeLoiterCircle(wp); map.removeLayer(wp.marker); });
   waypoints = [];
   updatePolyline();
 
