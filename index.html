@@ -1117,6 +1117,7 @@ let homeMarker = null;
 let homeLat = (() => { try { return parseFloat(localStorage.getItem('homeLat')) || -26.65; } catch { return -26.65; } })();
 let homeLon = (() => { try { return parseFloat(localStorage.getItem('homeLon')) || 153.06; } catch { return 153.06; } })();
 let missionPolyline = null;
+let _splinePolylines = [];
 let profileChart = null;
 let profileCollapsed = false;
 let weatherData = null;
@@ -1471,10 +1472,41 @@ function addWaypoint(lat, lon, alt, action) {
   fetchTerrainSilent();
 }
 
+// ====================== CATMULL-ROM SPLINE ======================
+function _crVal(p0, p1, p2, p3, t) {
+  return 0.5 * (
+    (2 * p1) +
+    (-p0 + p2) * t +
+    (2*p0 - 5*p1 + 4*p2 - p3) * t * t +
+    (-p0 + 3*p1 - 3*p2 + p3) * t * t * t
+  );
+}
+
+function _buildSplinePath(pts) {
+  const n = pts.length;
+  const out = [];
+  const STEPS = 20;
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[Math.min(n - 1, i + 2)];
+    out.push(p1);
+    for (let s = 1; s < STEPS; s++) {
+      const t = s / STEPS;
+      out.push([_crVal(p0[0], p1[0], p2[0], p3[0], t),
+                _crVal(p0[1], p1[1], p2[1], p3[1], t)]);
+    }
+  }
+  out.push(pts[n - 1]);
+  return out;
+}
+
 // ====================== POLYLINE ======================
 function updatePolyline() {
   _saveWaypoints();
   if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
+  _splinePolylines.forEach(l => map.removeLayer(l)); _splinePolylines = [];
   if (homeToFirstLine) { map.removeLayer(homeToFirstLine); homeToFirstLine = null; }
   clearInsertMarker();
 
@@ -1486,16 +1518,48 @@ function updatePolyline() {
   }
 
   if (waypoints.length < 2) return;
-  const lls = waypoints.map(w => [w.lat, w.lon]);
-  missionPolyline = L.polyline(lls, {
-    color: '#58a6ff', weight: 2.5, dashArray: '10,6', opacity: 0.9, className: 'mission-path'
-  }).addTo(map);
 
-  missionPolyline.on('mousemove', onSegmentMousemove);
-  missionPolyline.on('mouseout', () => {
-    clearTimeout(insertHideTimer);
-    insertHideTimer = setTimeout(clearInsertMarker, 120);
+  const n = waypoints.length;
+
+  // Group consecutive segments by straight vs spline.
+  // A segment i→i+1 is "spline" if either endpoint has action='spline'.
+  const groups = [];
+  let i = 0;
+  while (i < n - 1) {
+    const isSplineSeg = waypoints[i].action === 'spline' || waypoints[i + 1].action === 'spline';
+    const grpIndices = [i];
+    while (i < n - 1) {
+      const seg = waypoints[i].action === 'spline' || waypoints[i + 1].action === 'spline';
+      if (seg !== isSplineSeg) break;
+      grpIndices.push(i + 1);
+      i++;
+    }
+    groups.push({ spline: isSplineSeg, wpIndices: grpIndices });
+  }
+
+  const _addHoverEvents = pl => {
+    pl.on('mousemove', onSegmentMousemove);
+    pl.on('mouseout', () => { clearTimeout(insertHideTimer); insertHideTimer = setTimeout(clearInsertMarker, 120); });
+  };
+
+  let firstPolyline = null;
+  groups.forEach(grp => {
+    const pts = grp.wpIndices.map(idx => [waypoints[idx].lat, waypoints[idx].lon]);
+    let pl;
+    if (grp.spline) {
+      pl = L.polyline(_buildSplinePath(pts), {
+        color: '#74b9ff', weight: 3, opacity: 0.95, className: 'spline-path'
+      }).addTo(map);
+    } else {
+      pl = L.polyline(pts, {
+        color: '#58a6ff', weight: 2.5, dashArray: '10,6', opacity: 0.9, className: 'mission-path'
+      }).addTo(map);
+    }
+    _addHoverEvents(pl);
+    if (!firstPolyline) { firstPolyline = pl; } else { _splinePolylines.push(pl); }
   });
+  missionPolyline = firstPolyline;
+
   updateGimbalLines();
 }
 
@@ -2394,6 +2458,7 @@ function clearMission() {
   funcBlocks.forEach(blk => { if (blk._roiMarker) map.removeLayer(blk._roiMarker); });
   funcBlocks = []; // function blocks are also cleared with the mission
   if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
+  _splinePolylines.forEach(l => map.removeLayer(l)); _splinePolylines = [];
   updateGimbalLines();
   updateProfile(); renderWPList();
   _saveWaypoints();
@@ -2472,7 +2537,8 @@ function importWaypoints(event) {
     if (!lines[0].startsWith('QGC WPL')) { alert('Not a valid QGC waypoints file'); return; }
     waypoints.forEach(wp => map.removeLayer(wp.marker));
     waypoints = []; selectedIdx = -1;
-      if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
+    if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
+    _splinePolylines.forEach(l => map.removeLayer(l)); _splinePolylines = [];
 
     // NAV commands that create a waypoint marker
     const NAV_CMDS = new Set([16, 82, 17, 19, 18, 31, 22, 84, 21, 85, 20]);

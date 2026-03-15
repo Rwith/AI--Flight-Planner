@@ -1163,7 +1163,10 @@
   function toggleLogPause () {
     logPaused = !logPaused;
     const btn = document.getElementById('tele-pause-btn');
-    if (btn) btn.textContent = logPaused ? '▶ Resume Log' : '⏸ Pause Log';
+    if (btn) {
+      btn.textContent = logPaused ? '▶ Resume Log' : '⏸ Pause Log';
+      btn.dataset.paused = logPaused ? '1' : '0';
+    }
   }
 
   // ─── Finish Flight — pause log + pre-fill logbook ────────────────────────
@@ -1172,7 +1175,7 @@
     if (!logPaused) {
       logPaused = true;
       const btn = document.getElementById('tele-pause-btn');
-      if (btn) btn.textContent = '▶ Resume Log';
+      if (btn) { btn.textContent = '▶ Resume Log'; btn.dataset.paused = '1'; }
     }
 
     // Duration from first position telemetry to now
