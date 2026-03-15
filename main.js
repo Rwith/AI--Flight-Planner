@@ -184,6 +184,7 @@ ipcMain.handle('set-window-mode',   (_, mode)  => {
 });
 // Re-focus the renderer's Chromium context after native dialogs (confirm/alert) steal it.
 ipcMain.on('focus-window', () => mainWin?.webContents.focus());
+ipcMain.on('blur-window',  () => { mainWin?.blur(); setTimeout(() => mainWin?.focus(), 50); });
 
 // ── Electron window ───────────────────────────────────────────────────────────
 function createWindow () {

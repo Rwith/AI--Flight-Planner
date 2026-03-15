@@ -35,4 +35,5 @@ contextBridge.exposeInMainWorld('electronBridge', {
   },
   // Re-focus the Chromium renderer after native dialogs steal focus (Electron quirk).
   focusWindow: () => ipcRenderer.send('focus-window'),
+  blurWindow:  () => ipcRenderer.send('blur-window'),
 });

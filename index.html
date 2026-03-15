@@ -5978,7 +5978,7 @@ function _saveMission(name) {
 function _loadMission(id) {
   const m = _getMissions().find(x => x.id === id);
   if (!m) return;
-  if (waypoints.length > 0 && !confirm(`Load "${m.name}"?\nThis replaces the current mission.`)) { window.electronBridge.focusWindow(); return; }
+  if (waypoints.length > 0 && !confirm(`Load "${m.name}"?\nThis replaces the current mission.`)) { window.electronBridge.blurWindow(); return; }
   pushUndo(); stopPlane(); terrainElevations = null;
   waypoints.forEach(wp => { _removeWpRoiMarker(wp); _removeLoiterCircle(wp); map.removeLayer(wp.marker); });
   waypoints = []; selectedIdx = -1;
@@ -6005,10 +6005,10 @@ function _loadMission(id) {
 function _deleteMission(id) {
   const m = _getMissions().find(x => x.id === id);
   if (!m) return;
-  if (!confirm(`Delete "${m.name}"?`)) { window.electronBridge.focusWindow(); return; }
+  if (!confirm(`Delete "${m.name}"?`)) { window.electronBridge.blurWindow(); return; }
   _setMissions(_getMissions().filter(x => x.id !== id));
   _renderMissionList();
-  window.electronBridge.focusWindow();
+  window.electronBridge.blurWindow();
 }
 
 function _renderMissionList() {
@@ -6058,7 +6058,7 @@ function closeMissionsPanel() {
   if (document.activeElement === inp) inp.blur();
   document.getElementById('missions-panel').classList.remove('open');
   document.getElementById('missions-overlay').classList.remove('open');
-  window.electronBridge.focusWindow();
+  window.electronBridge.blurWindow();
 }
 function saveMissionFromInput() {
   const inp = document.getElementById('mission-name-input');
