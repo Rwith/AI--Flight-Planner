@@ -1503,6 +1503,7 @@ function _loadMission(id) {
   }
   updateGimbalLines();
   updatePolyline(); updateProfile(); renderWPList(); _saveWaypoints();
+  if (waypoints.length >= 2) startPlane(true);
   closeMissionsPanel();
 }
 
@@ -1679,6 +1680,8 @@ function _attachMarkerEvents(marker, wp) {
     if (planeAnimRunning) {
       planeAnimPath = _buildAnimPath();
       planePathT = Math.min(planePathT, planeAnimPath.length - 2);
+    } else if (waypoints.length >= 2) {
+      startPlane(true);
     }
     updatePolyline(); updateProfile();
     const i = waypoints.indexOf(wp);
@@ -4199,7 +4202,7 @@ function animatePlane() {
   // 0.1 path-steps/frame × 20 steps/waypoint-segment ≈ same speed as before (0.005 seg/frame)
   const SPEED = 0.1;
   planePathT += SPEED;
-  if (planePathT >= planeAnimPath.length - 1) { stopPlane(); return; }
+  if (planePathT >= planeAnimPath.length - 1) planePathT = 0;  // loop back to start
 
   const idx = Math.floor(planePathT);
   const frac = planePathT - idx;
