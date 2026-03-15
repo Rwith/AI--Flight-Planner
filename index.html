@@ -5583,6 +5583,30 @@ document.getElementById('settings-overlay').addEventListener('click', function(e
   if (e.target === this) closeSettings();
 });
 
+// Auto-dismiss map popups after 10 seconds of no interaction
+(function () {
+  let _popupTimer = null;
+
+  function _resetPopupTimer() {
+    clearTimeout(_popupTimer);
+    _popupTimer = setTimeout(() => { map.closePopup(); }, 10000);
+  }
+
+  map.on('popupopen', function (e) {
+    _resetPopupTimer();
+    const container = e.popup.getElement();
+    if (container) {
+      container.addEventListener('mousemove', _resetPopupTimer);
+      container.addEventListener('click',     _resetPopupTimer);
+    }
+  });
+
+  map.on('popupclose', function () {
+    clearTimeout(_popupTimer);
+    _popupTimer = null;
+  });
+})();
+
 // Keyboard shortcut: Escape closes settings
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !document.getElementById('settings-overlay').classList.contains('hidden'))
