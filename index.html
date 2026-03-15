@@ -5978,7 +5978,7 @@ function _saveMission(name) {
 function _loadMission(id) {
   const m = _getMissions().find(x => x.id === id);
   if (!m) return;
-  if (waypoints.length > 0 && !confirm(`Load "${m.name}"?\nThis replaces the current mission.`)) return;
+  if (waypoints.length > 0 && !confirm(`Load "${m.name}"?\nThis replaces the current mission.`)) { window.electronBridge.focusWindow(); return; }
   pushUndo(); stopPlane(); terrainElevations = null;
   waypoints.forEach(wp => { _removeWpRoiMarker(wp); _removeLoiterCircle(wp); map.removeLayer(wp.marker); });
   waypoints = []; selectedIdx = -1;
@@ -6004,9 +6004,11 @@ function _loadMission(id) {
 
 function _deleteMission(id) {
   const m = _getMissions().find(x => x.id === id);
-  if (!m || !confirm(`Delete "${m.name}"?`)) return;
+  if (!m) return;
+  if (!confirm(`Delete "${m.name}"?`)) { window.electronBridge.focusWindow(); return; }
   _setMissions(_getMissions().filter(x => x.id !== id));
   _renderMissionList();
+  window.electronBridge.focusWindow();
 }
 
 function _renderMissionList() {
