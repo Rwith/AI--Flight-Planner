@@ -179,8 +179,9 @@
     // the two streams that carry battery and speed data.
     const ids = [
       0,  // ALL            → broad enable
-      2,  // EXTENDED_STATUS → SYS_STATUS (battery voltage/current/%)
+      2,  // EXTENDED_STATUS → SYS_STATUS (battery voltage/current/%), BATTERY_STATUS (mAh consumed)
       11, // EXTRA2          → VFR_HUD (airspeed, groundspeed, throttle)
+      12, // EXTRA3          → ESC_TELEMETRY_1_TO_4 (ESC temp/RPM/current)
     ];
     for (const s of ids) {
       const frame = buildRequestDataStream(s, 2, ts, tc);
@@ -453,6 +454,27 @@
         }
         if (payload.length >= 18) tele.heading  = dv.getInt16(16, true);
         tele.throttle = payload.length >= 20 ? dv.getUint16(18, true) : 0;
+        renderTele();
+        break;
+      }
+      case 147: { // BATTERY_STATUS
+        // Wire: current_consumed(i32,0), energy_consumed(i32,4), temperature(i16,8),
+        //        voltages[10](u16×10,10), current_battery(i16,30), id(u8,32),
+        //        battery_function(u8,33), type(u8,34), battery_remaining(i8,35)
+        if (payload.length >= 4) {
+          const consumed = dv.getInt32(0, true);
+          if (consumed >= 0) tele.battConsumedMah = consumed; // -1 = unknown
+        }
+        renderTele();
+        break;
+      }
+      case 11030: { // ESC_TELEMETRY_1_TO_4 (ArduPilot)
+        // Wire: temperature[4](u8,0..3), voltage[4](u16,4..11), current[4](u16,12..19),
+        //        totalcurrent[4](u16,20..27), rpm[4](u16,28..35), count[4](u16,36..43)
+        // Display ESC 1 (index 0) values
+        if (payload.length >= 4)  tele.escTemp = payload[0]; // degC
+        if (payload.length >= 30) tele.escRpm  = dv.getUint16(28, true);
+        if (payload.length >= 14) tele.escCurr = dv.getUint16(12, true) / 100; // cA → A
         renderTele();
         break;
       }

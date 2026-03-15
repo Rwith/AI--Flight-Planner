@@ -624,6 +624,10 @@
         <span style="color:var(--sec)">HDOP</span>        <span id="gcs-info-hdop">--</span>
         <span style="color:var(--sec)">Voltage</span>    <span id="gcs-info-volt">--</span>
         <span style="color:var(--sec)">Current</span>    <span id="gcs-info-curr">--</span>
+        <span style="color:var(--sec)">Batt Used</span>  <span id="gcs-info-batt-mah">--</span>
+        <span style="color:var(--sec)">ESC Temp</span>   <span id="gcs-info-esc-temp">--</span>
+        <span style="color:var(--sec)">ESC RPM</span>    <span id="gcs-info-esc-rpm">--</span>
+        <span style="color:var(--sec)">ESC Curr</span>   <span id="gcs-info-esc-curr">--</span>
       </div>
     </div>
   </div>
@@ -4552,8 +4556,12 @@ window.gcsUpdate = function(tele) {
     sg('gcs-info-fix',     GPS_FIX[tele.gpsFix] || null);
     sg('gcs-info-sats',    tele.gpsSats);
     sg('gcs-info-hdop',    tele.hdop   != null ? tele.hdop.toFixed(2)              : null);
-    sg('gcs-info-volt',    tele.voltageMv != null ? (tele.voltageMv/1000).toFixed(2)+' V' : null);
-    sg('gcs-info-curr',    tele.currentCa != null ? (tele.currentCa/100).toFixed(1)+' A' : null);
+    sg('gcs-info-volt',     tele.voltageMv      != null ? (tele.voltageMv/1000).toFixed(2)+' V' : null);
+    sg('gcs-info-curr',     tele.currentCa      != null ? (tele.currentCa/100).toFixed(1)+' A' : null);
+    sg('gcs-info-batt-mah', tele.battConsumedMah != null ? tele.battConsumedMah + ' mAh'        : null);
+    sg('gcs-info-esc-temp', tele.escTemp        != null ? tele.escTemp + ' °C'                  : null);
+    sg('gcs-info-esc-rpm',  tele.escRpm         != null ? tele.escRpm.toLocaleString()           : null);
+    sg('gcs-info-esc-curr', tele.escCurr        != null ? tele.escCurr.toFixed(1) + ' A'        : null);
   }
 };
 
