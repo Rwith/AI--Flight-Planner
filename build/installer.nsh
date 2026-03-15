@@ -7,9 +7,17 @@
 !define MUI_HEADERIMAGE_RIGHT
 !define MUI_HEADERIMAGE_BITMAP "${BUILD_RESOURCES_DIR}\header.bmp"
 
-; electron-builder v25 multiuser template defines welcomePagePre but omits the
-; MUI_PAGE_CUSTOMFUNCTION_PRE reference, so NSIS 3.x warns "function not
-; referenced" and exits with code 1.  Setting it here (file scope, before any
-; page macros run) lets MUI2 wire it up during MUI_PAGE_WELCOME and then
-; !undef it automatically, so the uninstaller pages never see it.
-!define MUI_PAGE_CUSTOMFUNCTION_PRE welcomePagePre
+; electron-builder v25 compiles the same NSI template twice:
+;   pass 1  BUILD_UNINSTALLER defined   — uninstaller stub
+;   pass 2  BUILD_UNINSTALLER undefined — main installer
+;
+; In both passes assistedinstaller.nsh calls MUI_PAGE_WELCOME.  In pass 1
+; welcomePagePre does not exist (it is an installer-only function), so we
+; must NOT set MUI_PAGE_CUSTOMFUNCTION_PRE there.  In pass 2 the template
+; generates welcomePagePre but forgets to reference it (NSIS warning 6010,
+; exit code 1).  Setting MUI_PAGE_CUSTOMFUNCTION_PRE here (pass 2 only)
+; gives MUI2 the reference it needs; MUI2 !undefs it after MUI_PAGE_WELCOME
+; so no later page is affected.
+!ifndef BUILD_UNINSTALLER
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE welcomePagePre
+!endif
