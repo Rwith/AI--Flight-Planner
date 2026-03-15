@@ -182,6 +182,8 @@ ipcMain.handle('set-window-mode',   (_, mode)  => {
   if (mainWin) applyWindowMode(mainWin, mode);
   return true;
 });
+// Re-focus the renderer's Chromium context after native dialogs (confirm/alert) steal it.
+ipcMain.on('focus-window', () => mainWin?.webContents.focus());
 
 // ── Electron window ───────────────────────────────────────────────────────────
 function createWindow () {

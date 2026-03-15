@@ -33,4 +33,6 @@ contextBridge.exposeInMainWorld('electronBridge', {
     save:          (data)   => ipcRenderer.invoke('save-settings', data),
     setWindowMode: (mode)   => ipcRenderer.invoke('set-window-mode', mode),
   },
+  // Re-focus the Chromium renderer after native dialogs steal focus (Electron quirk).
+  focusWindow: () => ipcRenderer.send('focus-window'),
 });
