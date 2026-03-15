@@ -1433,6 +1433,10 @@ function _attachMarkerEvents(marker, wp) {
     }
     wp.lat = p.lat; wp.lon = p.lng;
     _refreshLoiterCircle(wp);
+    if (planeAnimRunning) {
+      planeAnimPath = _buildAnimPath();
+      planePathT = Math.min(planePathT, planeAnimPath.length - 2);
+    }
     updatePolyline(); updateProfile();
     const i = waypoints.indexOf(wp);
     if (selectedIdx === i) renderWPList();
@@ -1886,6 +1890,11 @@ function _closeWPPanel(idx) {
 function _resetWPPanelTimer(idx) {
   clearTimeout(_wpPanelTimer);
   _wpPanelTimer = setTimeout(() => _closeWPPanel(idx), 10000);
+  // Reset the selection deselect timer while user is actively editing
+  if (_wpDeselectTimer && selectedIdx === idx) {
+    clearTimeout(_wpDeselectTimer);
+    _wpDeselectTimer = setTimeout(() => { _wpDeselectTimer = null; deselectWP(); }, 10000);
+  }
 }
 
 function toggleWPActions(idx) {
@@ -2449,7 +2458,10 @@ function checkLoiterOverlaps() {
 }
 
 // ====================== SELECT / DESELECT ======================
+let _wpDeselectTimer = null;
+
 function selectWP(idx) {
+  if (_wpDeselectTimer) { clearTimeout(_wpDeselectTimer); _wpDeselectTimer = null; }
   if (selectedIdx >= 0 && selectedIdx < waypoints.length) {
     const prev = waypoints[selectedIdx];
     prev.marker.setIcon(makeWPIcon(selectedIdx, prev.action, false));
@@ -2460,11 +2472,13 @@ function selectWP(idx) {
     wp.marker.setIcon(makeWPIcon(idx, wp.action, true));
     map.panTo([wp.lat, wp.lon]);
     highlightProfilePoint(idx);
+    _wpDeselectTimer = setTimeout(() => { _wpDeselectTimer = null; deselectWP(); }, 10000);
   }
   renderWPList();
 }
 
 function deselectWP() {
+  if (_wpDeselectTimer) { clearTimeout(_wpDeselectTimer); _wpDeselectTimer = null; }
   if (selectedIdx >= 0 && selectedIdx < waypoints.length) {
     const prev = waypoints[selectedIdx];
     prev.marker.setIcon(makeWPIcon(selectedIdx, prev.action, false));
@@ -3938,7 +3952,8 @@ function animatePlane() {
 
   // 0.1 path-steps/frame × 20 steps/waypoint-segment ≈ same speed as before (0.005 seg/frame)
   const SPEED = 0.1;
-  planePathT = (planePathT + SPEED) % (planeAnimPath.length - 1);
+  planePathT += SPEED;
+  if (planePathT >= planeAnimPath.length - 1) { stopPlane(); return; }
 
   const idx = Math.floor(planePathT);
   const frac = planePathT - idx;
