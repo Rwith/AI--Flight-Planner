@@ -2146,20 +2146,20 @@ function _fbHeaderHTML(bIdx) {
   let controls = '';
   if (blk.type === 'set_alt') {
     controls = `<input class="fb-input" type="number" min="0" max="2000" value="${blk.params.alt ?? 50}"
-        onclick="event.stopPropagation()" oninput="updateFuncBlock(${bIdx},'alt',this.value)">
+        onclick="event.stopPropagation()" onchange="updateFuncBlock(${bIdx},'alt',this.value)">
       <span class="fb-input-unit">m AGL</span>`;
   } else if (blk.type === 'set_speed') {
     const _sc = _SPD_CFG[speedUnit];
     const _sv = +msToDisp(blk.params.speed ?? 15).toFixed(1);
     controls = `<input class="fb-input" type="number" min="${_sc.min}" max="${_sc.max}" step="${_sc.step}" value="${_sv}"
-        onclick="event.stopPropagation()" oninput="updateFuncBlock(${bIdx},'speed',this.value)">
+        onclick="event.stopPropagation()" onchange="updateFuncBlock(${bIdx},'speed',this.value)">
       <span class="fb-input-unit">${spdLabel()}</span>`;
   } else if (blk.type === 'set_roi') {
     const latStr = blk.params.lat != null ? blk.params.lat.toFixed(5) : '—';
     const lonStr = blk.params.lon != null ? blk.params.lon.toFixed(5) : '—';
     controls = `<span class="fb-input-unit" style="font-size:10px;opacity:0.9;letter-spacing:0.02em">${latStr}, ${lonStr}</span>
       <input class="fb-input" type="number" min="0" max="2000" style="width:54px" value="${blk.params.alt ?? 50}"
-        onclick="event.stopPropagation()" oninput="updateFuncBlock(${bIdx},'alt',this.value)">
+        onclick="event.stopPropagation()" onchange="updateFuncBlock(${bIdx},'alt',this.value)">
       <span class="fb-input-unit">m</span>`;
   }
 
@@ -2296,7 +2296,9 @@ function updateFuncBlock(bIdx, key, value) {
   funcBlocks[bIdx].params[key] = (key === 'speed') ? (dispToMs(parseFloat(value)) || 0) : (parseFloat(value) || 0);
   _applyFuncBlock(bIdx);
   _saveFuncBlocks();
+  const focused = document.activeElement;
   renderWPList();
+  if (focused && focused.tagName === 'INPUT') focused.focus();
 }
 
 function deleteFuncBlock(bIdx) {
