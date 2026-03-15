@@ -1440,13 +1440,14 @@ const LOITER_ACTIONS = new Set(['loiter','loiter_time','loiter_turns','loiter_to
 // ---- Function block type registry ----
 const FUNC_BLOCK_TYPES = {
   set_alt:   { label:'Set Altitude', rgba:'253,152,0',  icon:'▲',
-               defaultParams: () => ({ alt: 50 }) },
+               defaultParams: () => ({ alt: 50, altMode: 'agl' }) },
   set_speed: { label:'Set Speed',    rgba:'0,180,216',  icon:'⚡',
                defaultParams: () => ({ speed: 15 }) },
   set_roi:   { label:'Set ROI',      rgba:'0,184,148',  icon:'◎',
                defaultParams: () => ({ lat: null, lon: null, alt: 50 }) },
 };
 let terrainElevations = null;
+let homeElevationMSL = null; // absolute MSL elevation of home/launch point (metres)
 let nfzEnabled = false;
 let nfzLayers = [];
 let insertMarker = null;
@@ -2149,9 +2150,17 @@ function _fbHeaderHTML(bIdx) {
 
   let controls = '';
   if (blk.type === 'set_alt') {
-    controls = `<input class="fb-input" type="number" min="0" max="2000" value="${blk.params.alt ?? 50}"
+    const _altMode = blk.params.altMode ?? 'agl';
+    const _nextMode = _altMode === 'agl' ? 'msl' : 'agl';
+    const _modeTitle = _altMode === 'agl'
+      ? 'AGL — altitude above terrain at each waypoint. Click to switch to MSL.'
+      : 'MSL — altitude above mean sea level. Click to switch to AGL.';
+    controls = `<input class="fb-input" type="number" min="0" max="9000" value="${blk.params.alt ?? 50}"
         onclick="event.stopPropagation()" onchange="updateFuncBlock(${bIdx},'alt',this.value)">
-      <span class="fb-input-unit">m AGL</span>`;
+      <span class="fb-input-unit">m</span>
+      <button onclick="event.stopPropagation();updateFuncBlockStr(${bIdx},'altMode','${_nextMode}')"
+        title="${_modeTitle}"
+        style="background:rgba(255,255,255,0.22);border:1px solid rgba(255,255,255,0.4);color:#fff;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.6px;line-height:18px">${_altMode.toUpperCase()}</button>`;
   } else if (blk.type === 'set_speed') {
     const _sc = _SPD_CFG[speedUnit];
     const _sv = +msToDisp(blk.params.speed ?? 15).toFixed(1);
@@ -2285,7 +2294,18 @@ function _applyFuncBlock(bIdx) {
   const e = Math.max(s, Math.min(blk.endWpIdx, waypoints.length - 1));
   for (let i = s; i <= e; i++) {
     if (blk.type === 'set_alt') {
-      waypoints[i].alt = parseFloat(blk.params.alt) || 50;
+      const _mode = blk.params.altMode ?? 'agl';
+      const _setAlt = parseFloat(blk.params.alt) || 50;
+      if (_mode === 'agl' && terrainElevations && terrainElevations[i] != null) {
+        // AGL: altitude above terrain — add terrain elevation (relative to home) to AGL offset
+        waypoints[i].alt = Math.round(terrainElevations[i] + _setAlt);
+      } else if (_mode === 'msl' && homeElevationMSL != null) {
+        // MSL: convert absolute altitude to home-relative
+        waypoints[i].alt = Math.max(0, Math.round(_setAlt - homeElevationMSL));
+      } else {
+        // No terrain data yet — use value as-is (flat altitude above home)
+        waypoints[i].alt = _setAlt;
+      }
     } else if (blk.type === 'set_speed') {
       waypoints[i].speed = parseFloat(blk.params.speed) || 15; // already m/s
     }
@@ -2303,6 +2323,14 @@ function updateFuncBlock(bIdx, key, value) {
   const focused = document.activeElement;
   renderWPList();
   if (focused && focused.tagName === 'INPUT') focused.focus();
+}
+
+function updateFuncBlockStr(bIdx, key, value) {
+  if (!funcBlocks[bIdx]) return;
+  funcBlocks[bIdx].params[key] = value;
+  _applyFuncBlock(bIdx);
+  _saveFuncBlocks();
+  renderWPList();
 }
 
 function deleteFuncBlock(bIdx) {
@@ -3909,6 +3937,7 @@ async function fetchTerrainSilent() {
     const data = await res.json();
     const elev = data.elevation;
     const homeElev = elev[0];
+    homeElevationMSL = homeElev;
     terrainElevations = elev.slice(1).map(e => Math.max(0, e - homeElev));
     updateProfile();
   } catch (_) { /* silent */ }
@@ -3929,6 +3958,7 @@ async function runTerrainFollow() {
     const data = await res.json();
     const elev = data.elevation;
     const homeElev = elev[0];
+    homeElevationMSL = homeElev;
     terrainElevations = elev.slice(1).map(e => Math.max(0, e - homeElev));
 
     // Use configurable clearance
