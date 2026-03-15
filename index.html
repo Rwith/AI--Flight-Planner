@@ -6043,8 +6043,8 @@ function _renderMissionList() {
       <div class="mission-entry-date">${ds}</div>
       <div class="mission-stats-grid">
         <div class="mission-stat-chip">${s.distStr ?? '—'}</div>
-        <div class="mission-stat-chip">max <b>${s.maxAlt ?? '?'} m</b></div>
-        <div class="mission-stat-chip">range <b>${s.rangeStr ?? '—'}</b></div>
+        <div class="mission-stat-chip">Max Height <b>${s.maxAlt ?? '?'} m</b></div>
+        <div class="mission-stat-chip">Max Range <b>${s.rangeStr ?? '—'}</b></div>
       </div>
       <div class="mission-stats-grid" style="margin-top:3px">
         ${s.typeCounts ? Object.entries(s.typeCounts).map(([a,c]) => `<div class="mission-stat-chip" style="border-color:${ACTION_COLORS[a]||'#58a6ff'}33;color:${ACTION_COLORS[a]||'#58a6ff'}"><b>${c}</b>× ${ACTION_LABELS[a]||a}</div>`).join('') : `<div class="mission-stat-chip"><b>${s.wpCount ?? '?'}</b> WPs</div>`}
