@@ -1502,6 +1502,34 @@ function _buildSplinePath(pts) {
   return out;
 }
 
+// Build a uniform-density path for plane animation (spline or straight, 20 steps per segment).
+function _buildAnimPath() {
+  const n = waypoints.length;
+  if (n < 2) return [];
+  const STEPS = 20;
+  const out = [];
+  for (let i = 0; i < n - 1; i++) {
+    const isSpline = waypoints[i].action === 'spline' || waypoints[i + 1].action === 'spline';
+    const p0 = [waypoints[Math.max(0, i - 1)].lat, waypoints[Math.max(0, i - 1)].lon];
+    const p1 = [waypoints[i].lat, waypoints[i].lon];
+    const p2 = [waypoints[i + 1].lat, waypoints[i + 1].lon];
+    const p3 = [waypoints[Math.min(n - 1, i + 2)].lat, waypoints[Math.min(n - 1, i + 2)].lon];
+    out.push(p1);
+    for (let s = 1; s < STEPS; s++) {
+      const t = s / STEPS;
+      if (isSpline) {
+        out.push([_crVal(p0[0], p1[0], p2[0], p3[0], t),
+                  _crVal(p0[1], p1[1], p2[1], p3[1], t)]);
+      } else {
+        out.push([p1[0] + (p2[0] - p1[0]) * t,
+                  p1[1] + (p2[1] - p1[1]) * t]);
+      }
+    }
+  }
+  out.push([waypoints[n - 1].lat, waypoints[n - 1].lon]);
+  return out;
+}
+
 // ====================== POLYLINE ======================
 function updatePolyline() {
   _saveWaypoints();
@@ -3846,8 +3874,8 @@ async function loadNFZLayers(lat, lon) {
 let planeMarker = null;
 let planeAnimRunning = false;
 let planeAnimFrame = null;
-let planeSegIdx = 0;
-let planeSegT = 0;
+let planeAnimPath = [];  // precomputed [lat, lon] array following spline
+let planePathT = 0;      // float index into planeAnimPath
 
 const PLANE_ARROW_SVG = `<svg xmlns="http://www.w3.org/2000/svg" id="plane-icon" width="18" height="26" viewBox="0 0 18 26"
   style="display:block;filter:drop-shadow(0 1px 5px rgba(0,0,0,.9));transform-origin:9px 13px">
@@ -3856,10 +3884,11 @@ const PLANE_ARROW_SVG = `<svg xmlns="http://www.w3.org/2000/svg" id="plane-icon"
 
 function startPlane(silent = false) {
   if (waypoints.length < 2) { if (!silent) alert('Add at least 2 waypoints first'); return; }
-  planeSegIdx = 0; planeSegT = 0;
+  planeAnimPath = _buildAnimPath();
+  planePathT = 0;
   planeAnimRunning = true;
   if (planeMarker) map.removeLayer(planeMarker);
-  planeMarker = L.marker([waypoints[0].lat, waypoints[0].lon], {
+  planeMarker = L.marker([planeAnimPath[0][0], planeAnimPath[0][1]], {
     icon: L.divIcon({ className: '', html: PLANE_ARROW_SVG, iconSize: [18, 26], iconAnchor: [9, 13] }),
     zIndexOffset: 2000, interactive: false
   }).addTo(map);
@@ -3873,25 +3902,24 @@ function stopPlane() {
 }
 
 function animatePlane() {
-  if (!planeAnimRunning || waypoints.length < 2) { stopPlane(); return; }
+  if (!planeAnimRunning || planeAnimPath.length < 2) { stopPlane(); return; }
 
-  const SPEED = 0.005; // fraction of segment per frame (~60fps → loops in ~3s per segment)
-  planeSegT += SPEED;
-  if (planeSegT >= 1) {
-    planeSegT -= 1;
-    planeSegIdx = (planeSegIdx + 1) % (waypoints.length - 1);
-  }
+  // 0.1 path-steps/frame × 20 steps/waypoint-segment ≈ same speed as before (0.005 seg/frame)
+  const SPEED = 0.1;
+  planePathT = (planePathT + SPEED) % (planeAnimPath.length - 1);
 
-  const a = waypoints[planeSegIdx];
-  const b = waypoints[planeSegIdx + 1];
-  const lat = a.lat + (b.lat - a.lat) * planeSegT;
-  const lon = a.lon + (b.lon - a.lon) * planeSegT;
+  const idx = Math.floor(planePathT);
+  const frac = planePathT - idx;
+  const a = planeAnimPath[idx];
+  const b = planeAnimPath[idx + 1];
+  const lat = a[0] + (b[0] - a[0]) * frac;
+  const lon = a[1] + (b[1] - a[1]) * frac;
   planeMarker.setLatLng([lat, lon]);
 
-  // Bearing: 0° = North (up on map), rotate ✈ which points East by default
-  const dLat = b.lat - a.lat;
-  const dLon = b.lon - a.lon;
-  const bearing = Math.atan2(dLon * Math.cos(a.lat * Math.PI / 180), dLat) * 180 / Math.PI;
+  // Bearing: 0° = North
+  const dLat = b[0] - a[0];
+  const dLon = b[1] - a[1];
+  const bearing = Math.atan2(dLon * Math.cos(a[0] * Math.PI / 180), dLat) * 180 / Math.PI;
   const icon = document.getElementById('plane-icon');
   if (icon) icon.style.transform = `rotate(${bearing}deg)`;
 
