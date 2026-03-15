@@ -4049,18 +4049,155 @@ let view3dOpen = false;
 let maplibreMap = null;
 
 function getMLStyle() {
-  const t = document.getElementById('tile-select')?.value || 'dark';
-  if (t === 'dark') return 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
-  if (t === 'satellite') return {
-    version: 8, sources: { sat: { type: 'raster', tileSize: 256, attribution: '© Esri',
-      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'] } },
-    layers: [{ id: 'sat', type: 'raster', source: 'sat' }]
+  const t = _currentTileType || 'satellite';
+  if (t === 'dark')  return 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+  if (t === 'light') return 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json';
+  const rasterUrls = {
+    satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    topo:      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+    osm:       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
   };
-  return {
-    version: 8, sources: { topo: { type: 'raster', tileSize: 256, attribution: '© Esri',
-      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}'] } },
-    layers: [{ id: 'topo', type: 'raster', source: 'topo' }]
-  };
+  const url = rasterUrls[t] || rasterUrls.satellite;
+  return { version: 8, sources: { rs: { type: 'raster', tileSize: 256, tiles: [url] } },
+           layers: [{ id: 'rs', type: 'raster', source: 'rs' }] };
+}
+
+// Marker list kept so they can be cleared before re-adding on style change.
+let _ml3dMarkers = [];
+
+function _add3DLayers(m) {
+  _ml3dMarkers.forEach(mk => mk.remove());
+  _ml3dMarkers = [];
+
+  // Terrain elevation
+  try {
+    if (!m.getSource('terrain-dem')) {
+      m.addSource('terrain-dem', {
+        type: 'raster-dem',
+        tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+        encoding: 'terrarium', tileSize: 256, maxzoom: 14
+      });
+    }
+    m.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 });
+  } catch (e) { /* terrain not critical */ }
+
+  // Sky (vector styles only)
+  if (typeof getMLStyle() === 'string') {
+    try {
+      if (!m.getLayer('sky')) {
+        m.addLayer({ id: 'sky', type: 'sky', paint: {
+          'sky-type': 'atmosphere',
+          'sky-atmosphere-sun': [0.0, 90.0],
+          'sky-atmosphere-sun-intensity': 15,
+          'sky-atmosphere-color': 'rgba(85,151,210,1)',
+          'sky-atmosphere-halo-color': 'rgba(255,255,255,0.5)',
+          'sky-opacity': ['interpolate', ['linear'], ['zoom'], 0, 0, 5, 0.3, 8, 1]
+        }});
+      }
+    } catch (e) { /* optional */ }
+  }
+
+  // Home marker
+  _ml3dMarkers.push(new maplibregl.Marker({ color: '#db6d28' }).setLngLat([homeLon, homeLat]).addTo(m));
+
+  if (waypoints.length < 2) return;
+
+  // Ground shadow line
+  if (!m.getSource('shadow')) {
+    m.addSource('shadow', { type: 'geojson', data: {
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: waypoints.map(w => [w.lon, w.lat]) }
+    }});
+  }
+  if (!m.getLayer('shadow')) {
+    m.addLayer({ id: 'shadow', type: 'line', source: 'shadow',
+      paint: { 'line-color': 'rgba(88,166,255,0.25)', 'line-width': 2, 'line-dasharray': [4, 4] }
+    });
+  }
+
+  // Waypoint pillars
+  const pillars = waypoints.map(w => ({
+    type: 'Feature',
+    geometry: { type: 'Polygon', coordinates: [[
+      [w.lon - 0.00004, w.lat - 0.00004], [w.lon + 0.00004, w.lat - 0.00004],
+      [w.lon + 0.00004, w.lat + 0.00004], [w.lon - 0.00004, w.lat + 0.00004],
+      [w.lon - 0.00004, w.lat - 0.00004]
+    ]]},
+    properties: { height: Math.max(w.alt, 1) }
+  }));
+  if (!m.getSource('pillars')) {
+    m.addSource('pillars', { type: 'geojson', data: { type: 'FeatureCollection', features: pillars } });
+  }
+  if (!m.getLayer('pillars')) {
+    m.addLayer({ id: 'pillars', type: 'fill-extrusion', source: 'pillars',
+      paint: { 'fill-extrusion-color': '#58a6ff', 'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-opacity': 0.9 }
+    });
+  }
+
+  // Three.js flight tube + loiter rings
+  if (typeof window._addTubePath === 'function') {
+    window._addTubePath(m, waypoints);
+  } else {
+    setTimeout(() => { if (m && typeof window._addTubePath === 'function') window._addTubePath(m, waypoints); }, 800);
+  }
+
+  // Numbered WP markers
+  waypoints.forEach((w, i) => {
+    const el = document.createElement('div');
+    el.style.cssText = 'display:flex;flex-direction:column;align-items:center;pointer-events:none';
+    const dot = document.createElement('div');
+    dot.textContent = i + 1;
+    dot.style.cssText = 'width:20px;height:20px;border-radius:50%;background:#58a6ff;color:#000;display:flex;align-items:center;justify-content:center;font:700 10px sans-serif;border:2px solid rgba(0,0,0,.5)';
+    const lbl = document.createElement('div');
+    lbl.textContent = w.alt + 'm';
+    lbl.style.cssText = 'font:600 9px sans-serif;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9);margin-top:2px;white-space:nowrap;background:rgba(0,0,0,.45);padding:0 3px;border-radius:3px';
+    el.appendChild(dot); el.appendChild(lbl);
+    _ml3dMarkers.push(new maplibregl.Marker({ element: el }).setLngLat([w.lon, w.lat]).addTo(m));
+  });
+
+  // Loiter circles (flat 2D rings on terrain)
+  const loiterWPs = waypoints.filter(w => LOITER_ACTIONS.has(w.action));
+  if (loiterWPs.length) {
+    function geoCircle(lat, lon, radiusM, steps = 64) {
+      const pts = [], R = 6378137;
+      for (let k = 0; k <= steps; k++) {
+        const a = (k / steps) * 2 * Math.PI;
+        pts.push([lon + (radiusM * Math.sin(a)) / (R * Math.cos(lat * Math.PI / 180)) * (180 / Math.PI),
+                  lat + (radiusM * Math.cos(a)) / R * (180 / Math.PI)]);
+      }
+      return pts;
+    }
+    const loiterFeatures = loiterWPs.map(w => ({
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [geoCircle(w.lat, w.lon, w.loiterR || 20)] },
+      properties: { color: ACTION_COLORS[w.action] || '#a29bfe' }
+    }));
+    if (!m.getSource('loiter-circles')) {
+      m.addSource('loiter-circles', { type: 'geojson', data: { type: 'FeatureCollection', features: loiterFeatures } });
+    }
+    if (!m.getLayer('loiter-fill')) {
+      m.addLayer({ id: 'loiter-fill',   type: 'fill', source: 'loiter-circles',
+        paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.12 } });
+    }
+    if (!m.getLayer('loiter-border')) {
+      m.addLayer({ id: 'loiter-border', type: 'line', source: 'loiter-circles',
+        paint: { 'line-color': ['get', 'color'], 'line-width': 1.5, 'line-dasharray': [4, 3], 'line-opacity': 0.8 } });
+    }
+  }
+}
+
+function set3DStyle(type) {
+  if (!maplibreMap) return;
+  _currentTileType = type;
+  try { localStorage.setItem('tileType', type); } catch {}
+  document.querySelectorAll('#ml3d-tile-bar button').forEach(b => {
+    const on = b.dataset.tileKey === type;
+    b.style.fontWeight = on ? '700' : '400';
+    b.style.color      = on ? '#58a6ff' : '#ccc';
+    b.style.background = on ? 'rgba(88,166,255,.15)' : 'none';
+  });
+  maplibreMap.once('style.load', () => _add3DLayers(maplibreMap));
+  maplibreMap.setStyle(getMLStyle());
 }
 
 function toggle3DView() {
@@ -4070,6 +4207,9 @@ function toggle3DView() {
   btn.textContent = view3dOpen ? '3D ▼' : '3D View';
 
   if (view3dOpen) {
+    // Default to satellite (or topo) when current tile is dark — much easier to see
+    if (_currentTileType === 'dark') _currentTileType = 'satellite';
+
     const center = map.getCenter();
     const zoom   = map.getZoom();
     document.getElementById('map').style.visibility = 'hidden';
@@ -4082,17 +4222,11 @@ function toggle3DView() {
       container: 'ml3d',
       style: getMLStyle(),
       center: [center.lng, center.lat],
-      zoom: zoom,
-      pitch: 60,
-      bearing: -20,
-      antialias: true,
-      maxPitch: 85
+      zoom, pitch: 60, bearing: -20, antialias: true, maxPitch: 85
     });
 
-    // Zoom / rotate / pitch-tilt wheel controls
     maplibreMap.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
 
-    // "Fit mission" custom control
     if (waypoints.length >= 1) {
       const fitCtrl = {
         onAdd(m) {
@@ -4103,10 +4237,8 @@ function toggle3DView() {
           this._btn.onclick = () => {
             const lons = [homeLon, ...waypoints.map(w => w.lon)];
             const lats = [homeLat, ...waypoints.map(w => w.lat)];
-            m.fitBounds(
-              [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
-              { padding: 80, pitch: 60, duration: 800 }
-            );
+            m.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+              { padding: 80, pitch: 60, duration: 800 });
           };
           this._container = document.createElement('div');
           this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
@@ -4118,136 +4250,29 @@ function toggle3DView() {
       maplibreMap.addControl(fitCtrl, 'top-right');
     }
 
-    maplibreMap.on('load', () => {
-      // Terrain elevation (Mapzen Terrarium tiles — free, no key needed)
-      try {
-        maplibreMap.addSource('terrain-dem', {
-          type: 'raster-dem',
-          tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
-          encoding: 'terrarium',
-          tileSize: 256,
-          maxzoom: 14
-        });
-        maplibreMap.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 });
-      } catch (e) { /* terrain not critical */ }
+    maplibreMap.on('load', () => _add3DLayers(maplibreMap));
 
-      // Sky / atmosphere (only meaningful for the dark vector style)
-      const mlStyle = getMLStyle();
-      if (typeof mlStyle === 'string') {
-        try {
-          maplibreMap.addLayer({
-            id: 'sky', type: 'sky',
-            paint: {
-              'sky-type': 'atmosphere',
-              'sky-atmosphere-sun': [0.0, 90.0],
-              'sky-atmosphere-sun-intensity': 15,
-              'sky-atmosphere-color': 'rgba(85, 151, 210, 1)',
-              'sky-atmosphere-halo-color': 'rgba(255, 255, 255, 0.5)',
-              'sky-opacity': ['interpolate', ['linear'], ['zoom'], 0, 0, 5, 0.3, 8, 1]
-            }
-          });
-        } catch (e) { /* sky layer optional */ }
-      }
-
-      // Home marker
-      new maplibregl.Marker({ color: '#db6d28' }).setLngLat([homeLon, homeLat]).addTo(maplibreMap);
-
-      if (waypoints.length < 2) return;
-
-      // Ground shadow line
-      maplibreMap.addSource('shadow', { type: 'geojson', data: {
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: waypoints.map(w => [w.lon, w.lat]) }
-      }});
-      maplibreMap.addLayer({ id: 'shadow', type: 'line', source: 'shadow',
-        paint: { 'line-color': 'rgba(88,166,255,0.25)', 'line-width': 2, 'line-dasharray': [4, 4] }
-      });
-
-      // Waypoint pillars — small blue square extruded to each WP altitude
-      const pillars = waypoints.map(w => ({
-        type: 'Feature',
-        geometry: { type: 'Polygon', coordinates: [[
-          [w.lon - 0.00004, w.lat - 0.00004], [w.lon + 0.00004, w.lat - 0.00004],
-          [w.lon + 0.00004, w.lat + 0.00004], [w.lon - 0.00004, w.lat + 0.00004],
-          [w.lon - 0.00004, w.lat - 0.00004]
-        ]]},
-        properties: { height: Math.max(w.alt, 1) }
-      }));
-      maplibreMap.addSource('pillars', { type: 'geojson',
-        data: { type: 'FeatureCollection', features: pillars }
-      });
-      maplibreMap.addLayer({ id: 'pillars', type: 'fill-extrusion', source: 'pillars',
-        paint: {
-          'fill-extrusion-color': '#58a6ff',
-          'fill-extrusion-height': ['get', 'height'],
-          'fill-extrusion-opacity': 0.9
-        }
-      });
-
-      // Three.js TubeGeometry — smooth 3D cylinder along the flight path at exact altitudes.
-      // Built by the ES-module script at the bottom of this file via window._addTubePath.
-      // waypoints is `let`-scoped — pass it directly so flight-tube.js can access it.
-      if (typeof window._addTubePath === 'function') {
-        window._addTubePath(maplibreMap, waypoints);
-      } else {
-        // Module may still be initialising — retry once after a short delay
-        setTimeout(() => {
-          if (maplibreMap && typeof window._addTubePath === 'function')
-            window._addTubePath(maplibreMap, waypoints);
-        }, 800);
-      }
-
-      // Numbered WP markers with altitude label
-      waypoints.forEach((w, i) => {
-        const el = document.createElement('div');
-        el.style.cssText = 'display:flex;flex-direction:column;align-items:center;pointer-events:none';
-        const circle = document.createElement('div');
-        circle.textContent = i + 1;
-        circle.style.cssText = 'width:20px;height:20px;border-radius:50%;background:#58a6ff;color:#000;display:flex;align-items:center;justify-content:center;font:700 10px sans-serif;border:2px solid rgba(0,0,0,.5)';
-        const altLabel = document.createElement('div');
-        altLabel.textContent = w.alt + 'm';
-        altLabel.style.cssText = 'font:600 9px sans-serif;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9);margin-top:2px;white-space:nowrap;background:rgba(0,0,0,.45);padding:0 3px;border-radius:3px';
-        el.appendChild(circle);
-        el.appendChild(altLabel);
-        new maplibregl.Marker({ element: el }).setLngLat([w.lon, w.lat]).addTo(maplibreMap);
-      });
-
-      // Loiter circles — geographic ring polygons for each loiter waypoint
-      const loiterWPs = waypoints.filter(w => LOITER_ACTIONS.has(w.action));
-      if (loiterWPs.length) {
-        function geoCircle(lat, lon, radiusM, steps = 64) {
-          const pts = [];
-          const earthR = 6378137;
-          for (let k = 0; k <= steps; k++) {
-            const angle = (k / steps) * 2 * Math.PI;
-            const dLat = (radiusM * Math.cos(angle)) / earthR * (180 / Math.PI);
-            const dLon = (radiusM * Math.sin(angle)) / (earthR * Math.cos(lat * Math.PI / 180)) * (180 / Math.PI);
-            pts.push([lon + dLon, lat + dLat]);
-          }
-          return pts;
-        }
-        const loiterFeatures = loiterWPs.map(w => ({
-          type: 'Feature',
-          geometry: { type: 'Polygon', coordinates: [geoCircle(w.lat, w.lon, w.loiterR || 20)] },
-          properties: { color: ACTION_COLORS[w.action] || '#a29bfe' }
-        }));
-        maplibreMap.addSource('loiter-circles', {
-          type: 'geojson',
-          data: { type: 'FeatureCollection', features: loiterFeatures }
-        });
-        maplibreMap.addLayer({ id: 'loiter-fill', type: 'fill', source: 'loiter-circles',
-          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.12 }
-        });
-        maplibreMap.addLayer({ id: 'loiter-border', type: 'line', source: 'loiter-circles',
-          paint: { 'line-color': ['get', 'color'], 'line-width': 1.5, 'line-dasharray': [4, 3], 'line-opacity': 0.8 }
-        });
-      }
+    // Tile-style switcher bar (bottom-centre of 3D view)
+    const tileBar = document.createElement('div');
+    tileBar.id = 'ml3d-tile-bar';
+    tileBar.style.cssText = 'position:absolute;bottom:36px;left:50%;transform:translateX(-50%);z-index:600;display:flex;gap:3px;background:rgba(0,0,0,.6);border-radius:20px;padding:4px 8px;border:1px solid rgba(255,255,255,.12);pointer-events:all';
+    [['satellite','Satellite'],['topo','Topo'],['light','Light'],['dark','Dark']].forEach(([key, label]) => {
+      const b = document.createElement('button');
+      b.dataset.tileKey = key;
+      b.textContent = label;
+      const on = key === _currentTileType;
+      b.style.cssText = `background:${on?'rgba(88,166,255,.18)':'none'};border:none;cursor:pointer;padding:3px 9px;border-radius:12px;font-size:11px;font-weight:${on?'700':'400'};color:${on?'#58a6ff':'#ccc'};transition:color .15s,background .15s`;
+      b.onclick = () => set3DStyle(key);
+      tileBar.appendChild(b);
     });
+    document.getElementById('map-area').appendChild(tileBar);
 
   } else {
     if (maplibreMap) { maplibreMap.remove(); maplibreMap = null; }
     const mlDiv = document.getElementById('ml3d');
     if (mlDiv) mlDiv.remove();
+    const tileBar = document.getElementById('ml3d-tile-bar');
+    if (tileBar) tileBar.remove();
     document.getElementById('map').style.visibility = '';
     map.invalidateSize();
   }
