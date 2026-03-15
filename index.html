@@ -1079,6 +1079,7 @@
     <button class="btn danger" onclick="closeMissionsPanel()" style="font-size:11px;padding:4px 8px">✕</button>
   </div>
   <div id="missions-body">
+    <div id="mission-update-row" style="display:none"></div>
     <div id="mission-save-row">
       <input type="text" id="mission-name-input" placeholder="Name this mission…" maxlength="60"
         onkeydown="if(event.key==='Enter')saveMissionFromInput()">
@@ -5899,6 +5900,7 @@ document.addEventListener('keydown', e => {
 // ====================== NAMED MISSION SAVE / LOAD ======================
 const _MISSIONS_KEY = 'aeronavMissions';
 const _MISSIONS_MAX = 50;
+let _currentMissionId = null;
 
 function _getMissions() {
   try { const r = localStorage.getItem(_MISSIONS_KEY); const p = r ? JSON.parse(r) : null; return (p && Array.isArray(p.missions)) ? p.missions : []; } catch { return []; }
@@ -6009,6 +6011,7 @@ function _loadMission(id) {
   }
   updateGimbalLines(); updatePolyline(); updateProfile(); renderWPList(); _saveWaypoints();
   if (waypoints.length >= 2) startPlane(true);
+  _currentMissionId = id;
   closeMissionsPanel();
 }
 
@@ -6017,8 +6020,79 @@ function _deleteMission(id) {
   if (!m) return;
   if (!confirm(`Delete "${m.name}"?`)) { window.electronBridge.blurWindow(); return; }
   _setMissions(_getMissions().filter(x => x.id !== id));
+  if (_currentMissionId === id) { _currentMissionId = null; _refreshUpdateRow(); }
   _renderMissionList();
   window.electronBridge.blurWindow();
+}
+
+function _refreshUpdateRow() {
+  const row = document.getElementById('mission-update-row');
+  if (!row) return;
+  if (!_currentMissionId) { row.style.display = 'none'; return; }
+  const m = _getMissions().find(x => x.id === _currentMissionId);
+  if (!m) { _currentMissionId = null; row.style.display = 'none'; return; }
+  const s = m.stats || {};
+  const esc = m.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const thumbHtml = m.thumb
+    ? `<img src="${m.thumb}" style="width:80px;height:52px;display:block;object-fit:contain;border-radius:4px;flex-shrink:0">`
+    : `<div style="width:80px;height:52px;display:flex;align-items:center;justify-content:center;color:var(--sec);font-size:10px;flex-shrink:0">No preview</div>`;
+  const chips = [
+    s.distStr ? `<div class="mission-stat-chip">${s.distStr}</div>` : '',
+    s.maxAlt != null ? `<div class="mission-stat-chip">Max Height <b>${s.maxAlt} m</b></div>` : '',
+    s.rangeStr ? `<div class="mission-stat-chip">Max Range <b>${s.rangeStr}</b></div>` : ''
+  ].join('');
+  row.style.display = 'block';
+  row.innerHTML = `<div style="background:var(--panel);border:1.5px solid var(--orange,#db6d28);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+  <div style="font-size:10px;color:var(--orange,#db6d28);font-weight:600;letter-spacing:.04em;margin-bottom:6px;text-transform:uppercase">Currently Loaded</div>
+  <div style="display:flex;gap:10px;align-items:center">
+    ${thumbHtml}
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px">${esc}</div>
+      <div class="mission-stats-grid" style="margin-bottom:0">${chips}</div>
+    </div>
+    <button id="mission-update-btn" class="btn" style="font-size:11px;padding:5px 11px;border-color:var(--orange,#db6d28);color:var(--orange,#db6d28);flex-shrink:0" onclick="_updateCurrentMission()">↑ Update</button>
+  </div>
+</div>`;
+}
+
+function _updateCurrentMission() {
+  if (!_currentMissionId) return;
+  if (waypoints.length === 0) { alert('No waypoints to update with.'); return; }
+  const arr = _getMissions();
+  const idx = arr.findIndex(x => x.id === _currentMissionId);
+  if (idx === -1) { _currentMissionId = null; _refreshUpdateRow(); return; }
+  const m = arr[idx];
+  arr[idx] = {
+    ...m,
+    savedAt: Date.now(),
+    home: { lat: homeLat, lon: homeLon },
+    thumb: _generateMissionThumb(waypoints, homeLat, homeLon),
+    stats: _missionStats(),
+    waypoints: waypoints.map(wp => ({
+      lat:wp.lat, lon:wp.lon, alt:wp.alt, action:wp.action, preAction:wp.preAction,
+      roiLat:wp.roiLat, roiLon:wp.roiLon, roiAlt:wp.roiAlt,
+      holdTime:wp.holdTime, loiterR:wp.loiterR, loiterTime:wp.loiterTime, loiterTurns:wp.loiterTurns,
+      speedType:wp.speedType, speed:wp.speed, delayTime:wp.delayTime,
+      yawHeading:wp.yawHeading, yawSpeed:wp.yawSpeed, yawRel:wp.yawRel,
+      jumpWP:wp.jumpWP, jumpRepeat:wp.jumpRepeat,
+      servoNum:wp.servoNum, servoPWM:wp.servoPWM, servoCycles:wp.servoCycles, servoDwell:wp.servoDwell,
+      condDist:wp.condDist, relayNum:wp.relayNum, relayState:wp.relayState,
+      relayCycles:wp.relayCycles, relayDwell:wp.relayDwell,
+      camDist:wp.camDist, gripperNum:wp.gripperNum, gripperAction:wp.gripperAction,
+      parachuteCmd:wp.parachuteCmd, mountPitch:wp.mountPitch, mountRoll:wp.mountRoll, mountYaw:wp.mountYaw,
+      id:wp.id
+    })),
+    funcBlocks: funcBlocks.map(b => ({ id:b.id, type:b.type, startWpIdx:b.startWpIdx, endWpIdx:b.endWpIdx, params:{...b.params} }))
+  };
+  _setMissions(arr);
+  _renderMissionList();
+  _refreshUpdateRow();
+  const btn = document.getElementById('mission-update-btn');
+  if (btn) {
+    const orig = btn.textContent; btn.textContent = '✓ Updated!';
+    btn.style.borderColor = 'var(--green)'; btn.style.color = 'var(--green)';
+    setTimeout(() => { btn.textContent = orig; btn.style.borderColor = 'var(--orange,#db6d28)'; btn.style.color = 'var(--orange,#db6d28)'; }, 1800);
+  }
 }
 
 function _renderMissionList() {
@@ -6030,16 +6104,22 @@ function _renderMissionList() {
   if (arr.length === 0) { list.innerHTML = ''; empty.style.display = 'block'; return; }
   empty.style.display = 'none';
   list.innerHTML = arr.map(m => {
+    const isCurrent = m.id === _currentMissionId;
     const d = new Date(m.savedAt);
     const ds = d.toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' }) + ' · ' + d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' });
     const s = m.stats || {};
     const esc = m.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const thumbHtml = m.thumb ? `<img src="${m.thumb}" style="width:120px;height:78px;display:block;object-fit:contain">` : `<div style="width:120px;height:78px;display:flex;align-items:center;justify-content:center;color:var(--sec);font-size:10px">No preview</div>`;
-    return `<div class="mission-entry">
+    const activeStyle = isCurrent ? 'border-color:var(--orange,#db6d28);' : '';
+    const activeBadge = isCurrent ? `<span style="font-size:9px;font-weight:700;color:var(--orange,#db6d28);background:rgba(219,109,40,.13);border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:middle;text-transform:uppercase;letter-spacing:.04em">Active</span>` : '';
+    const actionBtns = isCurrent
+      ? `<button class="btn primary" style="flex:1;font-size:11px;border-color:var(--orange,#db6d28);color:var(--orange,#db6d28);background:rgba(219,109,40,.10)" onclick="_updateCurrentMission()">↑ Update</button>`
+      : `<button class="btn primary" style="flex:1;font-size:11px" onclick="_loadMission('${m.id}')">⬇ Load</button>`;
+    return `<div class="mission-entry" style="${activeStyle}">
   <div class="mission-entry-body">
     <div class="mission-thumb">${thumbHtml}</div>
     <div class="mission-entry-info">
-      <div class="mission-entry-name">${esc}</div>
+      <div class="mission-entry-name">${esc}${activeBadge}</div>
       <div class="mission-entry-date">${ds}</div>
       <div class="mission-stats-grid">
         <div class="mission-stat-chip">${s.distStr ?? '—'}</div>
@@ -6052,7 +6132,7 @@ function _renderMissionList() {
     </div>
   </div>
   <div class="mission-entry-btns">
-    <button class="btn primary" style="flex:1;font-size:11px" onclick="_loadMission('${m.id}')">⬇ Load</button>
+    ${actionBtns}
     <button class="btn danger" style="font-size:11px;padding:4px 10px" onclick="_deleteMission('${m.id}')">✕</button>
   </div>
 </div>`;
@@ -6061,6 +6141,7 @@ function _renderMissionList() {
 
 function openMissionsPanel() {
   _renderMissionList();
+  _refreshUpdateRow();
   document.getElementById('missions-panel').classList.add('open');
   document.getElementById('missions-overlay').classList.add('open');
   document.getElementById('mission-name-input').value = '';
