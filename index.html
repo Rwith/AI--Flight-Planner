@@ -177,38 +177,7 @@
   #logbook-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
   #logbook-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 3999; }
   #logbook-overlay.open { display: block; }
-  /* MISSIONS PANEL */
-  #missions-panel {
-    position: fixed; top: 0; right: -460px; width: 460px; height: 100vh;
-    background: var(--panel); border-left: 1px solid var(--border); z-index: 4000;
-    display: flex; flex-direction: column; transition: right .3s ease; overflow: hidden;
-    pointer-events: none;
-  }
-  #missions-panel.open { right: 0; pointer-events: auto; }
-  #missions-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-  #missions-header h3 { font-size: 14px; font-weight: 700; flex: 1; }
-  #missions-header .missions-count { font-size: 11px; color: var(--sec); }
-  #missions-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-  #missions-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 3999; pointer-events: none; }
-  #missions-overlay.open { display: block; pointer-events: auto; }
-  #mission-save-row { display: flex; gap: 6px; align-items: center; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
-  #mission-name-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 5px 8px; font-size: 12px; outline: none; min-width: 0; }
-  #mission-name-input:focus { border-color: var(--blue); }
-  #missions-empty { color: var(--sec); font-size: 12px; text-align: center; padding: 24px 12px; }
-  .mission-entry { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; transition: border-color .15s; }
-  .mission-entry:hover { border-color: var(--blue); }
-  .mission-entry-top { display: flex; align-items: flex-start; gap: 8px; }
-  .mission-entry-name { font-size: 14px; font-weight: 700; color: var(--text); flex: 1; word-break: break-word; }
-  .mission-entry-date { font-size: 10px; color: var(--sec); margin-top: 2px; }
-  .mission-stats-grid { display: flex; gap: 5px; flex-wrap: wrap; }
-  .mission-stat-chip { font-size: 10px; color: var(--sec); background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; white-space: nowrap; }
-  .mission-stat-chip b { color: var(--text); font-weight: 600; }
-  .mission-action-tags { display: flex; gap: 5px; flex-wrap: wrap; }
-  .mission-action-tag { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; color: var(--sec); background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1px 7px; }
-  .mission-action-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-  .mission-entry-btns { display: flex; gap: 6px; }
-  @media (max-width: 767px) { #missions-panel { width: 100%; right: -100%; } #missions-panel.open { right: 0; } }
-  /* SPINNER */
+/* SPINNER */
   .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 6px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   /* MISC */
@@ -525,8 +494,7 @@
     <div class="spacer"></div>
     <button class="topbtn" id="undo-btn" onclick="undo()" style="opacity:.4" disabled title="Undo (Ctrl+Z)">↩ Undo</button>
     <button class="topbtn" id="redo-btn" onclick="redo()" style="opacity:.4" disabled title="Redo (Ctrl+Y)">↪ Redo</button>
-    <button class="topbtn primary" onclick="openMissionsPanel()" title="Save, load and manage named missions">☰ Missions</button>
-    <button class="topbtn" onclick="exportWaypoints()">Export .waypoints</button>
+<button class="topbtn" onclick="exportWaypoints()">Export .waypoints</button>
     <button class="topbtn" onclick="exportKML()">Export KML</button>
     <label class="topbtn" style="cursor:pointer">Import <input type="file" id="import-file" accept=".waypoints,.txt" style="display:none" onchange="importWaypoints(event)"></label>
     <button class="topbtn" onclick="reverseMission()">↩ Reverse</button>
@@ -1070,24 +1038,6 @@
   </div>
 </div>
 
-<!-- MISSIONS PANEL -->
-<div id="missions-overlay" onclick="closeMissionsPanel()"></div>
-<div id="missions-panel">
-  <div id="missions-header">
-    <h3>Saved Missions</h3>
-    <span class="missions-count" id="missions-count"></span>
-    <button class="btn danger" onclick="closeMissionsPanel()" style="font-size:11px;padding:4px 8px">✕</button>
-  </div>
-  <div id="missions-body">
-    <div id="mission-save-row">
-      <input type="text" id="mission-name-input" placeholder="Name this mission…" maxlength="60"
-        onkeydown="if(event.key==='Enter')saveMissionFromInput()">
-      <button class="btn primary" id="mission-save-btn" onclick="saveMissionFromInput()">Save Current</button>
-    </div>
-    <div id="missions-list"></div>
-    <div id="missions-empty">No saved missions yet.<br>Build a mission and hit "Save Current" to store it.</div>
-  </div>
-</div>
 
 <!-- LOGBOOK PANEL -->
 <div id="logbook-overlay" onclick="closeLogbook()"></div>
@@ -1399,209 +1349,6 @@ function _loadFuncBlocks() {
     _fbIdCounter = funcBlocks.reduce((mx, b) => Math.max(mx, b.id || 0), _fbIdCounter);
     _rebuildRoiMarkers();
   } catch {}
-}
-// ====================== NAMED MISSION SAVE / LOAD ======================
-// Stored under 'aeronavMissions' — a key that is intentionally NOT cleared
-// by the app-version cache-invalidation block, so saved missions survive updates.
-const _MISSIONS_KEY = 'aeronavMissions';
-const _MISSIONS_MAX = 50;
-
-function _getMissions() {
-  try {
-    const raw = localStorage.getItem(_MISSIONS_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (parsed && Array.isArray(parsed.missions)) return parsed.missions;
-  } catch {}
-  return [];
-}
-function _setMissions(arr) {
-  try { localStorage.setItem(_MISSIONS_KEY, JSON.stringify({ version: 1, missions: arr })); } catch {}
-}
-
-// Full waypoint snapshot — includes every field consumed by addWaypointSilent.
-function _fullSnapshotWPs() {
-  return waypoints.map(wp => ({
-    lat: wp.lat, lon: wp.lon, alt: wp.alt, action: wp.action,
-    preAction: wp.preAction,
-    roiLat: wp.roiLat, roiLon: wp.roiLon, roiAlt: wp.roiAlt,
-    holdTime: wp.holdTime, loiterR: wp.loiterR, loiterTime: wp.loiterTime, loiterTurns: wp.loiterTurns,
-    speedType: wp.speedType, speed: wp.speed, delayTime: wp.delayTime,
-    yawHeading: wp.yawHeading, yawSpeed: wp.yawSpeed, yawRel: wp.yawRel,
-    jumpWP: wp.jumpWP, jumpRepeat: wp.jumpRepeat,
-    servoNum: wp.servoNum, servoPWM: wp.servoPWM, servoCycles: wp.servoCycles, servoDwell: wp.servoDwell,
-    condDist: wp.condDist, relayNum: wp.relayNum, relayState: wp.relayState,
-    relayCycles: wp.relayCycles, relayDwell: wp.relayDwell,
-    camDist: wp.camDist, gripperNum: wp.gripperNum, gripperAction: wp.gripperAction,
-    parachuteCmd: wp.parachuteCmd, mountPitch: wp.mountPitch, mountRoll: wp.mountRoll, mountYaw: wp.mountYaw,
-    id: wp.id
-  }));
-}
-
-function _calcMissionStats() {
-  const n = waypoints.length;
-  if (n === 0) return { wpCount: 0, distM: 0, timeSec: 0, maxAltM: 0, maxRangeM: 0, actions: [] };
-  let totalDist = 0, totalTime = 0;
-  for (let i = 1; i < n; i++) {
-    const d = haversine(waypoints[i-1].lat, waypoints[i-1].lon, waypoints[i].lat, waypoints[i].lon);
-    totalDist += d;
-    totalTime += d / _legSpeed(i);
-  }
-  const maxAlt   = Math.max(...waypoints.map(w => w.alt));
-  const maxRange = Math.max(...waypoints.map(w => haversine(homeLat, homeLon, w.lat, w.lon)));
-  const actions  = [...new Set(waypoints.map(w => w.action))];
-  return { wpCount: n, distM: Math.round(totalDist), timeSec: Math.round(totalTime), maxAltM: maxAlt, maxRangeM: Math.round(maxRange), actions };
-}
-
-function _saveMission(name) {
-  if (!name.trim()) return false;
-  if (waypoints.length === 0) { alert('Add waypoints before saving a mission.'); return false; }
-  const stats = _calcMissionStats();
-  const mission = {
-    id: Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-    name: name.trim(),
-    savedAt: Date.now(),
-    home: { lat: homeLat, lon: homeLon },
-    waypoints: _fullSnapshotWPs(),
-    funcBlocks: funcBlocks.map(b => ({ id: b.id, type: b.type, startWpIdx: b.startWpIdx, endWpIdx: b.endWpIdx, params: {...b.params} })),
-    stats
-  };
-  let missions = _getMissions();
-  missions.unshift(mission);
-  if (missions.length > _MISSIONS_MAX) missions = missions.slice(0, _MISSIONS_MAX);
-  _setMissions(missions);
-  return true;
-}
-
-function _loadMission(id) {
-  const missions = _getMissions();
-  const m = missions.find(x => x.id === id);
-  if (!m) return;
-  if (waypoints.length > 0 && !confirm(`Load "${m.name}"?\nThis will replace the current mission.`)) { window.electronBridge.focusWindow(); return; }
-  window.electronBridge.focusWindow();
-  pushUndo();
-  stopPlane();
-  terrainElevations = null;
-  waypoints.forEach(wp => { _removeWpRoiMarker(wp); _removeLoiterCircle(wp); map.removeLayer(wp.marker); });
-  waypoints = []; selectedIdx = -1;
-  funcBlocks.forEach(blk => { if (blk._roiMarker) map.removeLayer(blk._roiMarker); });
-  funcBlocks = [];
-  if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
-  _splinePolylines.forEach(l => map.removeLayer(l)); _splinePolylines = [];
-  if (m.home) {
-    homeLat = m.home.lat; homeLon = m.home.lon;
-    homeMarker.setLatLng([homeLat, homeLon]);
-    try { localStorage.setItem('homeLat', homeLat); localStorage.setItem('homeLon', homeLon); } catch {}
-  }
-  m.waypoints.forEach(d => addWaypointSilent(d.lat, d.lon, d.alt, d.action, d));
-  waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, false)));
-  if (Array.isArray(m.funcBlocks) && m.funcBlocks.length > 0) {
-    funcBlocks = m.funcBlocks;
-    _fbIdCounter = funcBlocks.reduce((mx, b) => Math.max(mx, b.id || 0), _fbIdCounter);
-    _rebuildRoiMarkers();
-  }
-  if (waypoints.length > 0) {
-    const lats = waypoints.map(w => w.lat), lons = waypoints.map(w => w.lon);
-    map.fitBounds([[Math.min(...lats), Math.min(...lons)], [Math.max(...lats), Math.max(...lons)]], { padding: [50, 50] });
-  }
-  updateGimbalLines();
-  updatePolyline(); updateProfile(); renderWPList(); _saveWaypoints();
-  if (waypoints.length >= 2) startPlane(true);
-  closeMissionsPanel();
-}
-
-function _deleteMission(id) {
-  const missions = _getMissions();
-  const m = missions.find(x => x.id === id);
-  if (!m || !confirm(`Delete "${m.name}"?`)) { window.electronBridge.focusWindow(); return; }
-  window.electronBridge.focusWindow();
-  _setMissions(missions.filter(x => x.id !== id));
-  _renderMissionList();
-}
-
-function _fmtDist(m) { return m >= 1000 ? (m / 1000).toFixed(2) + ' km' : m + ' m'; }
-function _fmtTime(s) { return s >= 3600 ? (s / 3600).toFixed(1) + ' h' : s >= 60 ? (s / 60).toFixed(1) + ' min' : s + ' s'; }
-
-const _ACTION_COLORS_MISSIONS = {
-  waypoint:'#58a6ff', spline:'#74b9ff', loiter:'#a29bfe', loiter_time:'#a29bfe',
-  loiter_turns:'#a29bfe', loiter_to_alt:'#c7b3ff', photo:'#00cec9', set_speed:'#fdcb6e',
-  delay:'#b2bec3', cond_yaw:'#fd79a8', do_jump:'#e17055', set_roi:'#00b894',
-  set_servo:'#fdcb6e', takeoff:'#26de81', vtol_takeoff:'#20bf6b', land:'#ee5a24',
-  vtol_land:'#d63031', rtl:'#e17055'
-};
-
-function _renderMissionList() {
-  const list  = document.getElementById('missions-list');
-  const empty = document.getElementById('missions-empty');
-  const count = document.getElementById('missions-count');
-  const missions = _getMissions();
-  count.textContent = missions.length ? missions.length + ' saved' : '';
-  if (missions.length === 0) { list.innerHTML = ''; empty.style.display = 'block'; return; }
-  empty.style.display = 'none';
-  list.innerHTML = missions.map(m => {
-    const d   = new Date(m.savedAt);
-    const ds  = d.toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' })
-              + ' · ' + d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' });
-    const s   = m.stats || {};
-    const tags = (s.actions || []).map(a => {
-      const col = _ACTION_COLORS_MISSIONS[a] || '#58a6ff';
-      return `<span class="mission-action-tag"><span class="mission-action-dot" style="background:${col}"></span>${a.replace('_',' ')}</span>`;
-    }).join('');
-    const esc = m.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    return `<div class="mission-entry">
-  <div class="mission-entry-top">
-    <div style="flex:1;min-width:0">
-      <div class="mission-entry-name">${esc}</div>
-      <div class="mission-entry-date">${ds}</div>
-    </div>
-    <button class="btn danger" style="font-size:10px;padding:3px 8px;flex-shrink:0" onclick="_deleteMission('${m.id}')" title="Delete mission">✕</button>
-  </div>
-  <div class="mission-stats-grid">
-    <div class="mission-stat-chip"><b>${s.wpCount ?? '?'}</b> waypoints</div>
-    <div class="mission-stat-chip">dist <b>${_fmtDist(s.distM ?? 0)}</b></div>
-    <div class="mission-stat-chip">time <b>${_fmtTime(s.timeSec ?? 0)}</b></div>
-    <div class="mission-stat-chip">max alt <b>${s.maxAltM ?? '?'} m</b></div>
-    <div class="mission-stat-chip">range <b>${_fmtDist(s.maxRangeM ?? 0)}</b></div>
-  </div>
-  ${tags ? `<div class="mission-action-tags">${tags}</div>` : ''}
-  <div class="mission-entry-btns">
-    <button class="btn primary" style="font-size:11px;flex:1" onclick="_loadMission('${m.id}')">⬇ Load Mission</button>
-  </div>
-</div>`;
-  }).join('');
-}
-
-let _missionsPanelFocusTimer = null;
-function openMissionsPanel() {
-  _renderMissionList();
-  document.getElementById('missions-panel').classList.add('open');
-  document.getElementById('missions-overlay').classList.add('open');
-  document.getElementById('mission-name-input').value = '';
-  _missionsPanelFocusTimer = setTimeout(() => { _missionsPanelFocusTimer = null; document.getElementById('mission-name-input').focus(); }, 320);
-}
-function closeMissionsPanel() {
-  if (_missionsPanelFocusTimer) { clearTimeout(_missionsPanelFocusTimer); _missionsPanelFocusTimer = null; }
-  // Blur any focused element inside the panel before it slides off-screen.
-  // Without this, webContents.focus() restores focus to the off-screen input,
-  // silently swallowing all subsequent keystrokes and clicks on other inputs.
-  const panelInput = document.getElementById('mission-name-input');
-  if (document.activeElement === panelInput) panelInput.blur();
-  document.getElementById('missions-panel').classList.remove('open');
-  document.getElementById('missions-overlay').classList.remove('open');
-  window.electronBridge.focusWindow();
-}
-function saveMissionFromInput() {
-  const inp = document.getElementById('mission-name-input');
-  const name = inp.value.trim();
-  if (!name) { inp.focus(); inp.style.borderColor = 'var(--red)'; setTimeout(() => { inp.style.borderColor = ''; }, 1200); return; }
-  if (_saveMission(name)) {
-    inp.value = '';
-    _renderMissionList();
-    const btn = document.getElementById('mission-save-btn');
-    const orig = btn.textContent;
-    btn.textContent = '✓ Saved!';
-    btn.style.borderColor = 'var(--green)'; btn.style.color = 'var(--green)';
-    setTimeout(() => { btn.textContent = orig; btn.style.borderColor = ''; btn.style.color = ''; }, 1800);
-  }
 }
 
 function pushUndo() {
@@ -6083,11 +5830,10 @@ document.getElementById('settings-overlay').addEventListener('click', function(e
   });
 })();
 
-// Keyboard shortcut: Escape closes settings / missions panel
+// Keyboard shortcut: Escape closes settings
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if (!document.getElementById('settings-overlay').classList.contains('hidden')) closeSettings();
-    if (document.getElementById('missions-panel').classList.contains('open')) closeMissionsPanel();
   }
 });
 </script>
