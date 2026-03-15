@@ -1682,6 +1682,17 @@ function _wpInlineParamsHTML(wp, idx) {
     ['rtl','RTL'],['photo','Cam Trigger']
   ]));
 
+  // Pre-Action — always shown second
+  parts.push(sel('Pre-Action', 'preAction', pa, [
+    ['none','None'],
+    ['delay','Delay'],['set_speed','Set Speed'],['cond_yaw','Yaw'],['cond_distance','Cond Dist'],
+    ['do_jump','Jump'],['set_roi','Set ROI'],
+    ['set_servo','Servo'],['do_repeat_servo','Repeat Servo'],
+    ['do_set_relay','Relay'],['do_repeat_relay','Repeat Relay'],
+    ['cam_trigg_dist','Cam Dist'],['do_gripper','Gripper'],['do_parachute','Parachute'],
+    ['do_mount_control','Mount']
+  ]));
+
   // Alt — always a quick-edit field
   parts.push(inp('Alt', 'alt', 'number', wp.alt, 'min="0" max="2000" style="width:54px"') +
     '<span class="wp-inline-unit">m</span>');
@@ -1783,6 +1794,15 @@ function wpInlineUpdate(idx, field, value) {
       const _p = document.querySelector(`#wp-list .wp-inline-params[data-wp="${idx}"]`);
       const _b = document.getElementById(`wp-act-btn-${idx}`);
       if (_p) { _p.classList.add('open'); if (_b) _b.classList.add('open'); }
+      return;
+    }
+    case 'preAction': {
+      wp.preAction = value;
+      if (value === 'set_roi') _createWpRoiMarker(wp); else _removeWpRoiMarker(wp);
+      updatePolyline(); updateProfile(); renderWPList();
+      const _pp = document.querySelector(`#wp-list .wp-inline-params[data-wp="${idx}"]`);
+      const _pb = document.getElementById(`wp-act-btn-${idx}`);
+      if (_pp) { _pp.classList.add('open'); if (_pb) _pb.classList.add('open'); }
       return;
     }
     case 'alt':          wp.alt          = parseFloat(value) || 50;  break;
