@@ -9,29 +9,6 @@
 !define MUI_HEADERIMAGE_RIGHT
 !define MUI_HEADERIMAGE_BITMAP "${BUILD_RESOURCES_DIR}\header.bmp"
 
-; ---------- Detect existing install → swap Install/Update text ------
-Var IsUpdate
-
-!macro customHeader
-  ; Var IsUpdate declared at file scope above.
-!macroend
-
-!macro customInit
-  ReadRegStr $0 HKLM \
-    "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.aeronav.ai" \
-    "DisplayVersion"
-  ${If} $0 == ""
-    ReadRegStr $0 HKCU \
-      "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.aeronav.ai" \
-      "DisplayVersion"
-  ${EndIf}
-  ${If} $0 != ""
-    StrCpy $IsUpdate "1"
-  ${Else}
-    StrCpy $IsUpdate "0"
-  ${EndIf}
-!macroend
-
 ; ---------- Welcome page copy ------------------------------------
 !define MUI_WELCOMEPAGE_TITLE "Welcome to AeroNav AI"
 !define MUI_WELCOMEPAGE_TEXT "AeroNav AI is your intelligent waypoint mission and flight planning assistant — powered by AI.$\r$\n$\r$\nThis wizard will install or update AeroNav AI v${VERSION} on your computer.$\r$\n$\r$\nClose AeroNav AI if it is already running, then click Next."
