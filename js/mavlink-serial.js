@@ -1098,11 +1098,20 @@
 
     const home = window._serialGetHome?.() ?? { lat: wps[0].lat, lon: wps[0].lon };
     const hLat = home.lat, hLon = home.lon;
-    // Expand: nav item first, then photo digicam, then post-action DO/CONDITION.
+    const funcBlocks = window._serialGetFuncBlocks?.() ?? [];
+    // Expand: nav item first, then photo digicam, then speed-block DO_CHANGE_SPEED, then post-action DO/CONDITION.
     const list = [{ lat: hLat, lon: hLon, alt: 0, action: 'home' }];
-    for (const wp of wps) {
+    for (let wpIdx = 0; wpIdx < wps.length; wpIdx++) {
+      const wp = wps[wpIdx];
       list.push(wp);
       if (wp.action === 'photo') list.push({ lat: 0, lon: 0, alt: 0, action: '_digicam' });
+      // Auto-inject DO_CHANGE_SPEED for WPs covered by a set_speed func block
+      if (wp.preAction !== 'set_speed') {
+        const speedBlk = funcBlocks.find(b => b.type === 'set_speed' && b.startWpIdx <= wpIdx && b.endWpIdx >= wpIdx);
+        if (speedBlk) {
+          list.push({ lat: 0, lon: 0, alt: 0, action: 'set_speed', speedType: 1, speed: parseFloat(speedBlk.params.speed) || 15 });
+        }
+      }
       if (wp.preAction && wp.preAction !== 'none') {
         // Synthetic item: carries post-action type + all params from the parent wp
         list.push({ ...wp, action: wp.preAction });

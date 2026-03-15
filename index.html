@@ -2498,7 +2498,7 @@ function exportWaypoints() {
   // Home
   lines.push(`0\t1\t0\t16\t0\t0\t0\t0\t${homeLat.toFixed(7)}\t${homeLon.toFixed(7)}\t${10}\t1`);
   let idx = 1;
-  waypoints.forEach(wp => {
+  waypoints.forEach((wp, wpIdx) => {
     const a = wp.action;
     const pa = wp.preAction || 'none';
 
@@ -2525,6 +2525,16 @@ function exportWaypoints() {
       // DO_DIGICAM_CONTROL immediately after the nav waypoint
       lines.push(`${idx}\t0\t3\t203\t0\t0\t0\t1\t0\t0\t0\t1`);
       idx++;
+    }
+
+    // ── Speed block: auto-inject DO_CHANGE_SPEED (cmd 178) for WPs covered by a set_speed func block ──
+    if (pa !== 'set_speed') {
+      const speedBlk = funcBlocks.find(b => b.type === 'set_speed' && b.startWpIdx <= wpIdx && b.endWpIdx >= wpIdx);
+      if (speedBlk) {
+        const spdMs = parseFloat(speedBlk.params.speed) || 15;
+        lines.push(`${idx}\t0\t3\t178\t1\t${spdMs}\t-1\t0\t0\t0\t0\t1`);
+        idx++;
+      }
     }
 
     // ── Post-action (DO / CONDITION) emitted after the nav item ──
@@ -4820,8 +4830,9 @@ initWindParticles();
 setTimeout(() => startPlane(true), 20000);
 
 // Bridge closures so external scripts can read `let`-scoped globals.
-window._serialGetWaypoints = () => waypoints;
-window._serialGetHome      = () => ({ lat: homeLat, lon: homeLon });
+window._serialGetWaypoints  = () => waypoints;
+window._serialGetHome       = () => ({ lat: homeLat, lon: homeLon });
+window._serialGetFuncBlocks = () => funcBlocks;
 
 // Set the initial USB hint once the DOM is ready.
 window.addEventListener('load', () => { toggleConnMode(); initSpeedUnit(); });
