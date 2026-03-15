@@ -2323,7 +2323,7 @@ function renderWPList() {
     }
     const _inlineHTML = _wpInlineParamsHTML(wp, i);
     html += `<div class="wp-item${selectedIdx === i ? ' selected' : ''}${openStack.length ? ' fb-covered' : ''}"
-        style="${fbStyle}" onclick="selectWP(${i})" draggable="true" data-wpidx="${i}"
+        style="${fbStyle}" onclick="if(!event.target.closest('input,select,textarea,button,label'))selectWP(${i})" draggable="true" data-wpidx="${i}"
         ondragstart="wpDragStart(event,${i})"
         ondragover="wpDragOver(event)"
         ondragleave="wpDragLeave(event)"
