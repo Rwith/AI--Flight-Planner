@@ -1293,7 +1293,7 @@ let currentTileLayer = null;
 
 // ====================== MAP INIT ======================
 const _savedView = (() => { try { const v = localStorage.getItem('mapView'); return v ? JSON.parse(v) : null; } catch { return null; } })();
-const map = L.map('map', { center: _savedView ? [_savedView.lat, _savedView.lng] : [homeLat, homeLon], zoom: _savedView ? _savedView.zoom : 14, zoomControl: false });
+const map = L.map('map', { center: _savedView ? [_savedView.lat, _savedView.lng] : [homeLat, homeLon], zoom: _savedView ? _savedView.zoom : 14, zoomControl: false, keyboard: false });
 map.on('moveend', () => { try { const c = map.getCenter(); localStorage.setItem('mapView', JSON.stringify({lat:c.lat,lng:c.lng,zoom:map.getZoom()})); } catch {} });
 // CachedTileLayer is defined later in the script block but hoisted — use L.tileLayer here
 // then swap to CachedTileLayer once it's available (see INIT section).
