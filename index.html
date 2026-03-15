@@ -1269,6 +1269,14 @@ const ACTION_COLORS = {
   takeoff: '#26de81', vtol_takeoff: '#20bf6b',
   land: '#ee5a24', vtol_land: '#d63031', rtl: '#e17055'
 };
+const ACTION_LABELS = {
+  waypoint: 'Waypoint', spline: 'Spline',
+  loiter: 'Loiter', loiter_time: 'Loiter (Time)', loiter_turns: 'Loiter (Turns)', loiter_to_alt: 'Loiter to Alt',
+  photo: 'Take Photo', set_speed: 'Set Speed', delay: 'Delay',
+  cond_yaw: 'Condition Yaw', do_jump: 'Jump', set_roi: 'Set ROI', set_servo: 'Set Servo',
+  takeoff: 'Takeoff', vtol_takeoff: 'VTOL Takeoff',
+  land: 'Land', vtol_land: 'VTOL Land', rtl: 'RTL'
+};
 const LOITER_ACTIONS = new Set(['loiter','loiter_time','loiter_turns','loiter_to_alt']);
 
 // ---- Function block type registry ----
@@ -2146,7 +2154,7 @@ function renderWPList() {
         <span style="color:var(--sec);font-size:14px;cursor:grab;padding:0 2px">⠿</span>
         <div class="wp-dot" style="background:${col};color:#000">${i + 1}</div>
         <div class="wp-info">
-          <div class="wp-num">WP${i + 1} — ${wp.action}${wp.preAction && wp.preAction !== 'none' ? ` <span style="color:var(--sec);font-weight:400">+ ${wp.preAction}</span>` : ''}</div>
+          <div class="wp-num">WP${i + 1} — ${ACTION_LABELS[wp.action] || wp.action}${wp.preAction && wp.preAction !== 'none' ? ` <span style="color:var(--sec);font-weight:400">+ ${ACTION_LABELS[wp.preAction] || wp.preAction}</span>` : ''}</div>
           <div class="wp-details" data-details="${i}">${wp.alt}m AGL${legStr}</div>
           ${wp.preAction === 'do_mount_control' ? `<div class="wp-details" style="color:var(--sec)">Cam: Pitch ${wp.mountPitch||0}° Yaw ${wp.mountYaw||0}°</div>` : ''}
           ${wp.preAction === 'set_roi' ? `<div class="wp-details" style="color:var(--sec)">◎ ROI: ${(wp.roiLat??wp.lat).toFixed(5)}, ${(wp.roiLon??wp.lon).toFixed(5)}, ${wp.roiAlt??wp.alt}m</div>` : ''}
