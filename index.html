@@ -1339,6 +1339,8 @@ map.on('click', e => {
   // otherwise fall back to the current default.
   const alt = (prevAlt !== null && prevAlt !== defaultAlt) ? prevAlt : defaultAlt;
   addWaypoint(e.latlng.lat, e.latlng.lng, alt, 'waypoint');
+  // Restore renderer focus so sidebar inputs remain clickable after a map click (Electron quirk).
+  window.focus();
 });
 
 // Shift key tracking (for snap-to-bearing)
@@ -1569,16 +1571,19 @@ function _renderMissionList() {
   }).join('');
 }
 
+let _missionsPanelFocusTimer = null;
 function openMissionsPanel() {
   _renderMissionList();
   document.getElementById('missions-panel').classList.add('open');
   document.getElementById('missions-overlay').classList.add('open');
   document.getElementById('mission-name-input').value = '';
-  setTimeout(() => document.getElementById('mission-name-input').focus(), 320);
+  _missionsPanelFocusTimer = setTimeout(() => { _missionsPanelFocusTimer = null; document.getElementById('mission-name-input').focus(); }, 320);
 }
 function closeMissionsPanel() {
+  if (_missionsPanelFocusTimer) { clearTimeout(_missionsPanelFocusTimer); _missionsPanelFocusTimer = null; }
   document.getElementById('missions-panel').classList.remove('open');
   document.getElementById('missions-overlay').classList.remove('open');
+  window.focus();
 }
 function saveMissionFromInput() {
   const inp = document.getElementById('mission-name-input');
