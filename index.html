@@ -4088,7 +4088,66 @@ function toggle3DView() {
       antialias: true
     });
 
+    // Zoom / rotate / pitch-tilt wheel controls
+    maplibreMap.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+
+    // "Fit mission" custom control
+    if (waypoints.length >= 1) {
+      const fitCtrl = {
+        onAdd(m) {
+          this._btn = document.createElement('button');
+          this._btn.title = 'Fit mission';
+          this._btn.textContent = '⊡';
+          this._btn.style.cssText = 'font-size:16px;line-height:1;padding:0;width:29px;height:29px;cursor:pointer;background:none;border:none;color:#333;';
+          this._btn.onclick = () => {
+            const lons = [homeLon, ...waypoints.map(w => w.lon)];
+            const lats = [homeLat, ...waypoints.map(w => w.lat)];
+            m.fitBounds(
+              [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+              { padding: 80, pitch: 60, duration: 800 }
+            );
+          };
+          this._container = document.createElement('div');
+          this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+          this._container.appendChild(this._btn);
+          return this._container;
+        },
+        onRemove() {}
+      };
+      maplibreMap.addControl(fitCtrl, 'top-right');
+    }
+
     maplibreMap.on('load', () => {
+      // Terrain elevation (Mapzen Terrarium tiles — free, no key needed)
+      try {
+        maplibreMap.addSource('terrain-dem', {
+          type: 'raster-dem',
+          tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+          encoding: 'terrarium',
+          tileSize: 256,
+          maxzoom: 14
+        });
+        maplibreMap.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 });
+      } catch (e) { /* terrain not critical */ }
+
+      // Sky / atmosphere (only meaningful for the dark vector style)
+      const mlStyle = getMLStyle();
+      if (typeof mlStyle === 'string') {
+        try {
+          maplibreMap.addLayer({
+            id: 'sky', type: 'sky',
+            paint: {
+              'sky-type': 'atmosphere',
+              'sky-atmosphere-sun': [0.0, 90.0],
+              'sky-atmosphere-sun-intensity': 15,
+              'sky-atmosphere-color': 'rgba(85, 151, 210, 1)',
+              'sky-atmosphere-halo-color': 'rgba(255, 255, 255, 0.5)',
+              'sky-opacity': ['interpolate', ['linear'], ['zoom'], 0, 0, 5, 0.3, 8, 1]
+            }
+          });
+        } catch (e) { /* sky layer optional */ }
+      }
+
       // Home marker
       new maplibregl.Marker({ color: '#db6d28' }).setLngLat([homeLon, homeLat]).addTo(maplibreMap);
 
@@ -4127,14 +4186,28 @@ function toggle3DView() {
       // Three.js TubeGeometry — smooth 3D cylinder along the flight path at exact altitudes.
       // Built by the ES-module script at the bottom of this file via window._addTubePath.
       // waypoints is `let`-scoped — pass it directly so flight-tube.js can access it.
-      if (typeof window._addTubePath === 'function') window._addTubePath(maplibreMap, waypoints);
+      if (typeof window._addTubePath === 'function') {
+        window._addTubePath(maplibreMap, waypoints);
+      } else {
+        // Module may still be initialising — retry once after a short delay
+        setTimeout(() => {
+          if (maplibreMap && typeof window._addTubePath === 'function')
+            window._addTubePath(maplibreMap, waypoints);
+        }, 800);
+      }
 
-      // Numbered WP markers
+      // Numbered WP markers with altitude label
       waypoints.forEach((w, i) => {
-        const el = Object.assign(document.createElement('div'), {
-          textContent: i + 1,
-          style: 'width:20px;height:20px;border-radius:50%;background:#58a6ff;color:#000;display:flex;align-items:center;justify-content:center;font:700 10px sans-serif;border:2px solid rgba(0,0,0,.5);pointer-events:none'
-        });
+        const el = document.createElement('div');
+        el.style.cssText = 'display:flex;flex-direction:column;align-items:center;pointer-events:none';
+        const circle = document.createElement('div');
+        circle.textContent = i + 1;
+        circle.style.cssText = 'width:20px;height:20px;border-radius:50%;background:#58a6ff;color:#000;display:flex;align-items:center;justify-content:center;font:700 10px sans-serif;border:2px solid rgba(0,0,0,.5)';
+        const altLabel = document.createElement('div');
+        altLabel.textContent = w.alt + 'm';
+        altLabel.style.cssText = 'font:600 9px sans-serif;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9);margin-top:2px;white-space:nowrap;background:rgba(0,0,0,.45);padding:0 3px;border-radius:3px';
+        el.appendChild(circle);
+        el.appendChild(altLabel);
         new maplibregl.Marker({ element: el }).setLngLat([w.lon, w.lat]).addTo(maplibreMap);
       });
     });
