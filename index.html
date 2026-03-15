@@ -5948,7 +5948,9 @@ function _missionStats() {
   const maxRange = Math.max(...waypoints.map(w => haversine(homeLat, homeLon, w.lat, w.lon)));
   const distStr = dist >= 1000 ? (dist/1000).toFixed(2)+' km' : Math.round(dist)+' m';
   const rangeStr = maxRange >= 1000 ? (maxRange/1000).toFixed(2)+' km' : Math.round(maxRange)+' m';
-  return { wpCount: n, distStr, maxAlt, rangeStr };
+  const typeCounts = {};
+  waypoints.forEach(w => { typeCounts[w.action] = (typeCounts[w.action] || 0) + 1; });
+  return { wpCount: n, distStr, maxAlt, rangeStr, typeCounts };
 }
 
 function _saveMission(name) {
@@ -6040,10 +6042,12 @@ function _renderMissionList() {
       <div class="mission-entry-name">${esc}</div>
       <div class="mission-entry-date">${ds}</div>
       <div class="mission-stats-grid">
-        <div class="mission-stat-chip"><b>${s.wpCount ?? '?'}</b> WPs</div>
         <div class="mission-stat-chip">${s.distStr ?? '—'}</div>
         <div class="mission-stat-chip">max <b>${s.maxAlt ?? '?'} m</b></div>
         <div class="mission-stat-chip">range <b>${s.rangeStr ?? '—'}</b></div>
+      </div>
+      <div class="mission-stats-grid" style="margin-top:3px">
+        ${s.typeCounts ? Object.entries(s.typeCounts).map(([a,c]) => `<div class="mission-stat-chip" style="border-color:${ACTION_COLORS[a]||'#58a6ff'}33;color:${ACTION_COLORS[a]||'#58a6ff'}"><b>${c}</b>× ${ACTION_LABELS[a]||a}</div>`).join('') : `<div class="mission-stat-chip"><b>${s.wpCount ?? '?'}</b> WPs</div>`}
       </div>
     </div>
   </div>
