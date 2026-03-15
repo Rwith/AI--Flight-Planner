@@ -4085,7 +4085,8 @@ function toggle3DView() {
       zoom: zoom,
       pitch: 60,
       bearing: -20,
-      antialias: true
+      antialias: true,
+      maxPitch: 85
     });
 
     // Zoom / rotate / pitch-tilt wheel controls
@@ -4210,6 +4211,37 @@ function toggle3DView() {
         el.appendChild(altLabel);
         new maplibregl.Marker({ element: el }).setLngLat([w.lon, w.lat]).addTo(maplibreMap);
       });
+
+      // Loiter circles — geographic ring polygons for each loiter waypoint
+      const loiterWPs = waypoints.filter(w => LOITER_ACTIONS.has(w.action));
+      if (loiterWPs.length) {
+        function geoCircle(lat, lon, radiusM, steps = 64) {
+          const pts = [];
+          const earthR = 6378137;
+          for (let k = 0; k <= steps; k++) {
+            const angle = (k / steps) * 2 * Math.PI;
+            const dLat = (radiusM * Math.cos(angle)) / earthR * (180 / Math.PI);
+            const dLon = (radiusM * Math.sin(angle)) / (earthR * Math.cos(lat * Math.PI / 180)) * (180 / Math.PI);
+            pts.push([lon + dLon, lat + dLat]);
+          }
+          return pts;
+        }
+        const loiterFeatures = loiterWPs.map(w => ({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [geoCircle(w.lat, w.lon, w.loiterR || 20)] },
+          properties: { color: ACTION_COLORS[w.action] || '#a29bfe' }
+        }));
+        maplibreMap.addSource('loiter-circles', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: loiterFeatures }
+        });
+        maplibreMap.addLayer({ id: 'loiter-fill', type: 'fill', source: 'loiter-circles',
+          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.12 }
+        });
+        maplibreMap.addLayer({ id: 'loiter-border', type: 'line', source: 'loiter-circles',
+          paint: { 'line-color': ['get', 'color'], 'line-width': 1.5, 'line-dasharray': [4, 3], 'line-opacity': 0.8 }
+        });
+      }
     });
 
   } else {
