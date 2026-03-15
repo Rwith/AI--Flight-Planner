@@ -46,20 +46,21 @@ window._addTubePath = function (mlMap, wps) {
       const r = Math.max(w.loiterR || 20, 5); // orbit radius in metres
       const c = toLocal(w);                    // centre of the orbit
 
-      // Start angle: tangent entry from the previous waypoint's direction.
-      // If first WP, use the direction toward the next.
+      // Start angle: direction from center toward the previous waypoint so the
+      // first arc point is on the near side of the circle (the side the path
+      // arrives from), avoiding any cross-through the centre.
       let startAngle = 0;
       if (i > 0) {
         const prev = toLocal(waypoints[i - 1]);
-        startAngle = Math.atan2(c.x - prev.x, c.z - prev.z);
+        startAngle = Math.atan2(prev.x - c.x, prev.z - c.z);
       } else if (i < waypoints.length - 1) {
         const next = toLocal(waypoints[i + 1]);
-        startAngle = Math.atan2(next.x - c.x, next.z - c.z);
+        startAngle = Math.atan2(c.x - next.x, c.z - next.z);
       }
 
-      // Full orbit (360°) as arc points at the waypoint's altitude.
-      // The last point equals the first so CatmullRom closes the loop cleanly.
-      for (let k = 0; k <= ORBIT_STEPS; k++) {
+      // Full orbit arc. Don't repeat the start point at the end — leave a tiny
+      // gap so CatmullRom doesn't get duplicate control points.
+      for (let k = 0; k < ORBIT_STEPS; k++) {
         const a = startAngle + (k / ORBIT_STEPS) * 2 * Math.PI;
         out.push(new THREE.Vector3(
           c.x + r * Math.sin(a),
