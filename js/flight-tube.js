@@ -6,6 +6,9 @@
 // Three.js local metres (x=east, y=altitude, z=south) to MapLibre Mercator space.
 import * as THREE from 'three';
 
+const LOITER_TYPES = new Set(['loiter','loiter_time','loiter_turns','loiter_to_alt']);
+const ORBIT_STEPS  = 32; // arc points per loiter orbit
+
 window._addTubePath = function (mlMap, wps) {
   if (!wps || wps.length < 2) return;
 
@@ -20,14 +23,55 @@ window._addTubePath = function (mlMap, wps) {
   // Therefore:  x_t = (m.x − origin.x)/sc  (east, metres)
   //             y_t = m.z / sc             (altitude, metres ≈ w.alt)
   //             z_t = (m.y − origin.y)/sc  (south, metres)
-  const pts = wps.map(w => {
+  function toLocal(w) {
     const m = maplibregl.MercatorCoordinate.fromLngLat([w.lon, w.lat], w.alt);
     return new THREE.Vector3(
       (m.x - origin.x) / sc,
        m.z / sc,
       (m.y - origin.y) / sc
     );
-  });
+  }
+
+  // Expand loiter waypoints into a circular orbit arc so the tube smoothly
+  // loops around each loiter zone instead of passing through the centre point.
+  function expandPath(waypoints) {
+    const out = [];
+    for (let i = 0; i < waypoints.length; i++) {
+      const w = waypoints[i];
+      if (!LOITER_TYPES.has(w.action)) {
+        out.push(toLocal(w));
+        continue;
+      }
+
+      const r = Math.max(w.loiterR || 20, 5); // orbit radius in metres
+      const c = toLocal(w);                    // centre of the orbit
+
+      // Start angle: tangent entry from the previous waypoint's direction.
+      // If first WP, use the direction toward the next.
+      let startAngle = 0;
+      if (i > 0) {
+        const prev = toLocal(waypoints[i - 1]);
+        startAngle = Math.atan2(c.x - prev.x, c.z - prev.z);
+      } else if (i < waypoints.length - 1) {
+        const next = toLocal(waypoints[i + 1]);
+        startAngle = Math.atan2(next.x - c.x, next.z - c.z);
+      }
+
+      // Full orbit (360°) as arc points at the waypoint's altitude.
+      // The last point equals the first so CatmullRom closes the loop cleanly.
+      for (let k = 0; k <= ORBIT_STEPS; k++) {
+        const a = startAngle + (k / ORBIT_STEPS) * 2 * Math.PI;
+        out.push(new THREE.Vector3(
+          c.x + r * Math.sin(a),
+          c.y,
+          c.z + r * Math.cos(a)
+        ));
+      }
+    }
+    return out;
+  }
+
+  const pts = expandPath(wps);
 
   mlMap.addLayer({
     id: 'flight-tube', type: 'custom', renderingMode: '3d',
@@ -48,7 +92,7 @@ window._addTubePath = function (mlMap, wps) {
 
       // Catmull-Rom spline smooths sharp kinks at waypoint turns.
       const curve    = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.5);
-      const segments = Math.max(wps.length * 20, 80);
+      const segments = Math.max(pts.length * 8, 80);
 
       // radius = 5 m, 12 radial segments → visually smooth circle at drone
       // planning zoom levels (zoom 15–18).
