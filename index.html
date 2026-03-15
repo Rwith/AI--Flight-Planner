@@ -2156,11 +2156,12 @@ function toggleWPActions(idx) {
     if (_wpPanelIdx !== null && _wpPanelIdx !== idx) _closeWPPanel(_wpPanelIdx);
     _wpPanelIdx = idx;
     _resetWPPanelTimer(idx);
-    // Reset timer on any interaction inside the panel
-    panel.addEventListener('mousemove', () => _resetWPPanelTimer(idx));
-    panel.addEventListener('click',     () => _resetWPPanelTimer(idx));
-    panel.addEventListener('change',    () => _resetWPPanelTimer(idx));
-    panel.addEventListener('input',     () => _resetWPPanelTimer(idx));
+    // Use property assignment (not addEventListener) to avoid stacking duplicate
+    // listeners every time the panel is toggled open.
+    panel.onmousemove = () => _resetWPPanelTimer(idx);
+    panel.onclick     = () => _resetWPPanelTimer(idx);
+    panel.onchange    = () => _resetWPPanelTimer(idx);
+    panel.oninput     = () => _resetWPPanelTimer(idx);
   } else {
     clearTimeout(_wpPanelTimer);
     _wpPanelTimer = null;
@@ -2177,7 +2178,9 @@ function wpInlineUpdate(idx, field, value) {
       wp.action = value;
       wp.marker.setIcon(makeWPIcon(idx, value, idx === selectedIdx));
       _refreshLoiterCircle(wp);
+      const _focusedAction = document.activeElement;
       updatePolyline(); updateProfile(); renderWPList();
+      if (_focusedAction && _focusedAction.tagName === 'INPUT') _focusedAction.focus();
       if (planeAnimRunning) { planeAnimPath = _buildAnimPath(); planePathT = Math.min(planePathT, planeAnimPath.length - 2); }
       else if (waypoints.length >= 2) startPlane(true);
       const _p = document.querySelector(`#wp-list .wp-inline-params[data-wp="${idx}"]`);
@@ -2185,26 +2188,28 @@ function wpInlineUpdate(idx, field, value) {
       if (_p) {
         _p.classList.add('open'); if (_b) _b.classList.add('open');
         _wpPanelIdx = idx; _resetWPPanelTimer(idx);
-        _p.addEventListener('mousemove', () => _resetWPPanelTimer(idx));
-        _p.addEventListener('click',     () => _resetWPPanelTimer(idx));
-        _p.addEventListener('change',    () => _resetWPPanelTimer(idx));
-        _p.addEventListener('input',     () => _resetWPPanelTimer(idx));
+        _p.onmousemove = () => _resetWPPanelTimer(idx);
+        _p.onclick     = () => _resetWPPanelTimer(idx);
+        _p.onchange    = () => _resetWPPanelTimer(idx);
+        _p.oninput     = () => _resetWPPanelTimer(idx);
       }
       return;
     }
     case 'preAction': {
       wp.preAction = value;
       if (value === 'set_roi') _createWpRoiMarker(wp); else _removeWpRoiMarker(wp);
+      const _focusedPreAction = document.activeElement;
       updatePolyline(); updateProfile(); renderWPList();
+      if (_focusedPreAction && _focusedPreAction.tagName === 'INPUT') _focusedPreAction.focus();
       const _pp = document.querySelector(`#wp-list .wp-inline-params[data-wp="${idx}"]`);
       const _pb = document.getElementById(`wp-act-btn-${idx}`);
       if (_pp) {
         _pp.classList.add('open'); if (_pb) _pb.classList.add('open');
         _wpPanelIdx = idx; _resetWPPanelTimer(idx);
-        _pp.addEventListener('mousemove', () => _resetWPPanelTimer(idx));
-        _pp.addEventListener('click',     () => _resetWPPanelTimer(idx));
-        _pp.addEventListener('change',    () => _resetWPPanelTimer(idx));
-        _pp.addEventListener('input',     () => _resetWPPanelTimer(idx));
+        _pp.onmousemove = () => _resetWPPanelTimer(idx);
+        _pp.onclick     = () => _resetWPPanelTimer(idx);
+        _pp.onchange    = () => _resetWPPanelTimer(idx);
+        _pp.oninput     = () => _resetWPPanelTimer(idx);
       }
       return;
     }
@@ -2324,7 +2329,7 @@ function renderWPList() {
     const _inlineHTML = _wpInlineParamsHTML(wp, i);
     html += `<div class="wp-item${selectedIdx === i ? ' selected' : ''}${openStack.length ? ' fb-covered' : ''}"
         style="${fbStyle}" onclick="if(!event.target.closest('input,select,textarea,button,label'))selectWP(${i})" draggable="true" data-wpidx="${i}"
-        ondragstart="wpDragStart(event,${i})"
+        ondragstart="if(event.target.closest('input,select,textarea'))event.preventDefault();else wpDragStart(event,${i})"
         ondragover="wpDragOver(event)"
         ondragleave="wpDragLeave(event)"
         ondrop="wpDrop(event,${i})"
