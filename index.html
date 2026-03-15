@@ -1475,7 +1475,8 @@ function _loadMission(id) {
   const missions = _getMissions();
   const m = missions.find(x => x.id === id);
   if (!m) return;
-  if (waypoints.length > 0 && !confirm(`Load "${m.name}"?\nThis will replace the current mission.`)) return;
+  if (waypoints.length > 0 && !confirm(`Load "${m.name}"?\nThis will replace the current mission.`)) { window.focus(); return; }
+  window.focus();
   pushUndo();
   stopPlane();
   terrainElevations = null;
@@ -1510,7 +1511,8 @@ function _loadMission(id) {
 function _deleteMission(id) {
   const missions = _getMissions();
   const m = missions.find(x => x.id === id);
-  if (!m || !confirm(`Delete "${m.name}"?`)) return;
+  if (!m || !confirm(`Delete "${m.name}"?`)) { window.focus(); return; }
+  window.focus();
   _setMissions(missions.filter(x => x.id !== id));
   _renderMissionList();
 }
