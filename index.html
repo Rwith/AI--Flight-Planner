@@ -188,8 +188,8 @@
   #missions-header h3 { font-size: 14px; font-weight: 700; flex: 1; }
   #missions-header .missions-count { font-size: 11px; color: var(--sec); }
   #missions-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-  #missions-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 3999; }
-  #missions-overlay.open { display: block; }
+  #missions-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 3999; pointer-events: none; }
+  #missions-overlay.open { display: block; pointer-events: auto; }
   #mission-save-row { display: flex; gap: 6px; align-items: center; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
   #mission-name-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 5px 8px; font-size: 12px; outline: none; min-width: 0; }
   #mission-name-input:focus { border-color: var(--blue); }
