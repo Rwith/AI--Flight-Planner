@@ -1477,6 +1477,7 @@ function addWaypoint(lat, lon, alt, action) {
   renderWPList();
   toggleWPActions(idx);
   fetchTerrainSilent();
+  if (waypoints.length >= 2 && !planeAnimRunning) startPlane(true);
 }
 
 // ====================== CATMULL-ROM SPLINE ======================
@@ -1931,6 +1932,8 @@ function wpInlineUpdate(idx, field, value) {
       wp.marker.setIcon(makeWPIcon(idx, value, idx === selectedIdx));
       _refreshLoiterCircle(wp);
       updatePolyline(); updateProfile(); renderWPList();
+      if (planeAnimRunning) { planeAnimPath = _buildAnimPath(); planePathT = Math.min(planePathT, planeAnimPath.length - 2); }
+      else if (waypoints.length >= 2) startPlane(true);
       const _p = document.querySelector(`#wp-list .wp-inline-params[data-wp="${idx}"]`);
       const _b = document.getElementById(`wp-act-btn-${idx}`);
       if (_p) {
