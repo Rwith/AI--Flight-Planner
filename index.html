@@ -1774,12 +1774,47 @@ function _wpInlineParamsHTML(wp, idx) {
   return `<div class="wp-inline-params" data-wp="${idx}">${parts.join('')}</div>`;
 }
 
+// Auto-dismiss timer for the WP inline edit panel
+let _wpPanelTimer = null;
+let _wpPanelIdx   = null;
+
+function _closeWPPanel(idx) {
+  const panel = document.querySelector(`#wp-list .wp-inline-params[data-wp="${idx}"]`);
+  const btn   = document.getElementById(`wp-act-btn-${idx}`);
+  if (panel) panel.classList.remove('open');
+  if (btn)   btn.classList.remove('open');
+  clearTimeout(_wpPanelTimer);
+  _wpPanelTimer = null;
+  _wpPanelIdx   = null;
+}
+
+function _resetWPPanelTimer(idx) {
+  clearTimeout(_wpPanelTimer);
+  _wpPanelTimer = setTimeout(() => _closeWPPanel(idx), 10000);
+}
+
 function toggleWPActions(idx) {
   const panel = document.querySelector(`#wp-list .wp-inline-params[data-wp="${idx}"]`);
   const btn   = document.getElementById(`wp-act-btn-${idx}`);
   if (!panel) return;
   const open = panel.classList.toggle('open');
   if (btn) btn.classList.toggle('open', open);
+
+  if (open) {
+    // Close any previously open panel first
+    if (_wpPanelIdx !== null && _wpPanelIdx !== idx) _closeWPPanel(_wpPanelIdx);
+    _wpPanelIdx = idx;
+    _resetWPPanelTimer(idx);
+    // Reset timer on any interaction inside the panel
+    panel.addEventListener('mousemove', () => _resetWPPanelTimer(idx));
+    panel.addEventListener('click',     () => _resetWPPanelTimer(idx));
+    panel.addEventListener('change',    () => _resetWPPanelTimer(idx));
+    panel.addEventListener('input',     () => _resetWPPanelTimer(idx));
+  } else {
+    clearTimeout(_wpPanelTimer);
+    _wpPanelTimer = null;
+    _wpPanelIdx   = null;
+  }
 }
 
 // Update a single WP field from inline panel without rebuilding the full list
@@ -1793,7 +1828,14 @@ function wpInlineUpdate(idx, field, value) {
       updatePolyline(); updateProfile(); renderWPList();
       const _p = document.querySelector(`#wp-list .wp-inline-params[data-wp="${idx}"]`);
       const _b = document.getElementById(`wp-act-btn-${idx}`);
-      if (_p) { _p.classList.add('open'); if (_b) _b.classList.add('open'); }
+      if (_p) {
+        _p.classList.add('open'); if (_b) _b.classList.add('open');
+        _wpPanelIdx = idx; _resetWPPanelTimer(idx);
+        _p.addEventListener('mousemove', () => _resetWPPanelTimer(idx));
+        _p.addEventListener('click',     () => _resetWPPanelTimer(idx));
+        _p.addEventListener('change',    () => _resetWPPanelTimer(idx));
+        _p.addEventListener('input',     () => _resetWPPanelTimer(idx));
+      }
       return;
     }
     case 'preAction': {
@@ -1802,7 +1844,14 @@ function wpInlineUpdate(idx, field, value) {
       updatePolyline(); updateProfile(); renderWPList();
       const _pp = document.querySelector(`#wp-list .wp-inline-params[data-wp="${idx}"]`);
       const _pb = document.getElementById(`wp-act-btn-${idx}`);
-      if (_pp) { _pp.classList.add('open'); if (_pb) _pb.classList.add('open'); }
+      if (_pp) {
+        _pp.classList.add('open'); if (_pb) _pb.classList.add('open');
+        _wpPanelIdx = idx; _resetWPPanelTimer(idx);
+        _pp.addEventListener('mousemove', () => _resetWPPanelTimer(idx));
+        _pp.addEventListener('click',     () => _resetWPPanelTimer(idx));
+        _pp.addEventListener('change',    () => _resetWPPanelTimer(idx));
+        _pp.addEventListener('input',     () => _resetWPPanelTimer(idx));
+      }
       return;
     }
     case 'alt':          wp.alt          = parseFloat(value) || 50;  break;
