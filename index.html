@@ -2619,7 +2619,8 @@ function deleteWPByIdx(idx) {
 }
 
 function clearMission() {
-  if (!confirm('Clear all waypoints?')) return;
+  if (!confirm('Clear all waypoints?')) { window.electronBridge.blurWindow(); return; }
+  window.electronBridge.focusWindow();
   const overlay = document.getElementById('page-refresh-overlay');
   overlay.classList.add('visible');
   setTimeout(() => {
