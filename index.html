@@ -1874,9 +1874,6 @@ function _wpInlineParamsHTML(wp, idx) {
     '<span class="wp-inline-unit">m</span>');
 
   // Navigation action params — row 2 left
-  if (a === 'waypoint' || a === 'spline')
-    actionNumParts.push(inp('Hold', 'holdTime', 'number', wp.holdTime ?? 0, 'min="0" max="3600" style="width:48px"') +
-      '<span class="wp-inline-unit">s</span>');
   if (LOITER_ACTIONS.has(a)) {
     actionNumParts.push(inp('R', 'loiterR', 'number', wp.loiterR ?? 20, 'min="1" max="2000" style="width:52px"') +
       '<span class="wp-inline-unit">m</span>');
