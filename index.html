@@ -1933,6 +1933,9 @@ function _wpInlineParamsHTML(wp, idx) {
     parts.push(inp('Yaw', 'mountYaw', 'number', wp.mountYaw ?? 0, 'min="-180" max="180" style="width:50px"') +
       '<span class="wp-inline-unit">°</span>');
   }
+  if (pa === 'set_roi')
+    parts.push(inp('Alt', 'roiAlt', 'number', wp.roiAlt ?? wp.alt, 'style="width:52px"') +
+      '<span class="wp-inline-unit">m</span>');
 
   return `<div class="wp-inline-params" data-wp="${idx}">${parts.join('')}</div>`;
 }
@@ -2059,6 +2062,7 @@ function wpInlineUpdate(idx, field, value) {
     case 'mountPitch':   wp.mountPitch   = parseFloat(value) || 0;   break;
     case 'mountRoll':    wp.mountRoll    = parseFloat(value) || 0;   break;
     case 'mountYaw':     wp.mountYaw     = parseFloat(value) || 0;   break;
+    case 'roiAlt':       wp.roiAlt       = parseFloat(value) ?? wp.alt; break;
   }
   // Update only the summary text line in the existing DOM node
   const detailEl = document.querySelector(`[data-details="${idx}"]`);
@@ -2255,8 +2259,8 @@ function _createWpRoiMarker(wp) {
     _saveWaypoints();
     const idx = waypoints.indexOf(wp);
     if (idx === selectedIdx) {
-      document.getElementById('ed-roi-lat').value = wp.roiLat;
-      document.getElementById('ed-roi-lon').value = wp.roiLon;
+      const _rl = document.getElementById('ed-roi-lat'); if (_rl) _rl.value = wp.roiLat;
+      const _rn = document.getElementById('ed-roi-lon'); if (_rn) _rn.value = wp.roiLon;
     }
   });
   wp._roiMarker = m;
