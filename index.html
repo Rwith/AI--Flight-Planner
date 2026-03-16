@@ -462,6 +462,25 @@
     box-sizing:border-box;
   }
   #gcs-panel.active { display:flex; }
+  /* VIDEO EXPAND SPLIT PANEL */
+  #video-expand-panel {
+    display:none; flex:1; flex-direction:column; background:#000;
+    border-left:1px solid var(--border); min-width:0; position:relative;
+  }
+  #main.video-split #video-expand-panel { display:flex; }
+  #main.video-split #sidebar { display:none; }
+  #video-expand-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:8px 12px; background:var(--panel); border-bottom:1px solid var(--border);
+    flex-shrink:0;
+  }
+  #video-expand-header span { font-size:12px; font-weight:600; color:var(--text); }
+  #video-expand-header button {
+    background:none; border:1px solid var(--border); color:var(--sec);
+    font-size:11px; cursor:pointer; padding:3px 8px; border-radius:4px;
+  }
+  #video-expand-header button:hover { color:var(--text); border-color:var(--sec); }
+  #gcs-video-el-expanded { flex:1; width:100%; object-fit:contain; background:#000; display:block; }
   .gcs-header {
     display:flex; align-items:center; justify-content:space-between;
     font-size:11px; font-weight:700; letter-spacing:1px; color:var(--sec);
@@ -824,6 +843,7 @@
     <!-- Snapshot controls -->
     <div id="gcs-video-controls" style="display:none;gap:6px">
       <button class="btn" onclick="gcsVideoSnapshot()" style="flex:1;font-size:11px">📷 Snapshot</button>
+      <button class="btn" id="gcs-video-expand-btn" onclick="gcsVideoExpand()" style="flex:1;font-size:11px" title="Split view with map">⤢ Expand</button>
     </div>
     <!-- Download status -->
     <div id="gcs-video-status" style="display:none;font-size:11px;font-weight:600;color:var(--blue);background:rgba(88,166,255,.1);border:1px solid rgba(88,166,255,.3);border-radius:5px;padding:5px 8px;text-align:center"></div>
@@ -943,6 +963,15 @@
         <canvas id="profile-chart"></canvas>
       </div>
     </div>
+  </div>
+
+  <!-- VIDEO EXPAND SPLIT PANEL -->
+  <div id="video-expand-panel">
+    <div id="video-expand-header">
+      <span>&#9654; Live Video Feed</span>
+      <button onclick="gcsVideoCollapse()" title="Exit split view">&#10005; Close</button>
+    </div>
+    <video id="gcs-video-el-expanded" autoplay playsinline muted></video>
   </div>
 
   <!-- SIDEBAR -->
@@ -5389,6 +5418,8 @@ function gcsVideoStop() {
   if (ctrl) { ctrl.style.display = 'none'; }
   if (btn)  { btn.textContent = '▶ Connect'; btn.classList.add('primary'); btn.classList.remove('danger'); }
   gcsVideoHideStatus();
+  // Collapse split view if active
+  if (document.getElementById('main').classList.contains('video-split')) gcsVideoCollapse();
 }
 
 function gcsVideoShowErr(msg) {
@@ -5436,6 +5467,25 @@ function gcsVideoSnapshot() {
     gcsVideoShowStatus('Snapshot failed');
     setTimeout(gcsVideoHideStatus, 2500);
   }
+}
+
+function gcsVideoExpand() {
+  if (!_gcsVideoStream) return;
+  const expandedVid = document.getElementById('gcs-video-el-expanded');
+  if (expandedVid) expandedVid.srcObject = _gcsVideoStream;
+  document.getElementById('main').classList.add('video-split');
+  // Close GCS panel so the map gets full left-half space
+  const panel = document.getElementById('gcs-panel');
+  if (panel && panel.classList.contains('active')) toggleGCS();
+  // Invalidate map size so Leaflet redraws correctly
+  if (typeof map !== 'undefined') setTimeout(() => map.invalidateSize(), 50);
+}
+
+function gcsVideoCollapse() {
+  const expandedVid = document.getElementById('gcs-video-el-expanded');
+  if (expandedVid) expandedVid.srcObject = null;
+  document.getElementById('main').classList.remove('video-split');
+  if (typeof map !== 'undefined') setTimeout(() => map.invalidateSize(), 50);
 }
 
 // Auto-enumerate devices when GCS panel opens
