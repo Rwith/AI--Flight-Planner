@@ -803,6 +803,29 @@
     <button class="btn success" onclick="serialFinishFlight()" style="flex:1">✓ Finish Flight</button>
   </div>
 
+  <!-- LIVE VIDEO FEED -->
+  <div class="gcs-section-title">Live Video Feed</div>
+  <div id="gcs-video-card" style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;gap:6px;align-items:center">
+      <input id="gcs-video-url" type="text" placeholder="http://10.0.0.1:8080/?action=stream"
+        style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:5px 8px;font-size:11px;outline:none;min-width:0">
+      <button id="gcs-video-toggle-btn" class="btn primary" onclick="gcsVideoToggle()" style="font-size:11px;padding:5px 10px;white-space:nowrap">▶ Start</button>
+    </div>
+    <!-- Feed display area -->
+    <div id="gcs-video-wrap" style="display:none;position:relative;background:#000;border-radius:6px;overflow:hidden;line-height:0">
+      <img id="gcs-video-img" alt="Live Feed"
+        style="width:100%;display:block;border-radius:6px"
+        onerror="gcsVideoError()">
+      <div id="gcs-video-err" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--red);font-size:11px;background:rgba(0,0,0,.7);border-radius:6px">Stream unavailable</div>
+    </div>
+    <!-- Snapshot controls -->
+    <div id="gcs-video-controls" style="display:none;gap:6px">
+      <button class="btn" onclick="gcsVideoSnapshot()" style="flex:1;font-size:11px">📷 Snapshot</button>
+    </div>
+    <!-- Download status -->
+    <div id="gcs-video-status" style="display:none;font-size:11px;font-weight:600;color:var(--blue);background:rgba(88,166,255,.1);border:1px solid rgba(88,166,255,.3);border-radius:5px;padding:5px 8px;text-align:center"></div>
+  </div>
+
   <div class="gcs-warning">⚠ Commands sent directly to aircraft. Ensure safe conditions.</div>
 </div>
 
@@ -5273,6 +5296,89 @@ function exportKML() {
   const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = 'mission.kml'; a.click();
+}
+
+// ====================== GCS LIVE VIDEO FEED ======================
+let _gcsVideoActive = false;
+
+function gcsVideoToggle() {
+  _gcsVideoActive ? gcsVideoStop() : gcsVideoStart();
+}
+
+function gcsVideoStart() {
+  const url = document.getElementById('gcs-video-url').value.trim();
+  if (!url) return;
+  _gcsVideoActive = true;
+  const img  = document.getElementById('gcs-video-img');
+  const wrap = document.getElementById('gcs-video-wrap');
+  const ctrl = document.getElementById('gcs-video-controls');
+  const btn  = document.getElementById('gcs-video-toggle-btn');
+  const err  = document.getElementById('gcs-video-err');
+  img.src = url;
+  wrap.style.display = 'block';
+  ctrl.style.display = 'flex';
+  err.style.display  = 'none';
+  btn.textContent    = '■ Stop';
+  btn.classList.add('danger');
+  btn.classList.remove('primary');
+}
+
+function gcsVideoStop() {
+  _gcsVideoActive = false;
+  const img  = document.getElementById('gcs-video-img');
+  const wrap = document.getElementById('gcs-video-wrap');
+  const ctrl = document.getElementById('gcs-video-controls');
+  const btn  = document.getElementById('gcs-video-toggle-btn');
+  img.src = '';
+  wrap.style.display = 'none';
+  ctrl.style.display = 'none';
+  btn.textContent    = '▶ Start';
+  btn.classList.add('primary');
+  btn.classList.remove('danger');
+  gcsVideoHideStatus();
+}
+
+function gcsVideoError() {
+  const err = document.getElementById('gcs-video-err');
+  if (err) { err.style.display = 'flex'; err.style.alignItems = 'center'; }
+}
+
+function gcsVideoShowStatus(msg) {
+  const el = document.getElementById('gcs-video-status');
+  if (!el) return;
+  el.textContent    = msg;
+  el.style.display  = 'block';
+}
+
+function gcsVideoHideStatus() {
+  const el = document.getElementById('gcs-video-status');
+  if (el) el.style.display = 'none';
+}
+
+function gcsVideoSnapshot() {
+  const img = document.getElementById('gcs-video-img');
+  if (!img || !img.src || !_gcsVideoActive) return;
+  gcsVideoShowStatus('Saving snapshot…');
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width  = img.naturalWidth  || img.width  || 640;
+    canvas.height = img.naturalHeight || img.height || 480;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => {
+      if (!blob) { gcsVideoShowStatus('Snapshot failed'); setTimeout(gcsVideoHideStatus, 2500); return; }
+      const a   = document.createElement('a');
+      const ts  = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      a.href     = URL.createObjectURL(blob);
+      a.download = `snapshot-${ts}.png`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      gcsVideoHideStatus();
+    }, 'image/png');
+  } catch (e) {
+    gcsVideoShowStatus('Snapshot failed (CORS?)');
+    setTimeout(gcsVideoHideStatus, 2500);
+  }
 }
 
 // ====================== HUD ======================
