@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Menu, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, screen, shell } = require('electron');
 const path   = require('path');
 const fs     = require('fs');
 const dgram  = require('dgram');
@@ -182,6 +182,29 @@ ipcMain.handle('set-window-mode',   (_, mode)  => {
   if (mainWin) applyWindowMode(mainWin, mode);
   return true;
 });
+
+// ── Tile cache file storage ────────────────────────────────────────────────────
+let tilesBasePath = null;
+
+ipcMain.handle('get-tiles-path', () => tilesBasePath);
+
+ipcMain.handle('open-tiles-folder', async () => {
+  if (!tilesBasePath) return;
+  try { fs.mkdirSync(tilesBasePath, { recursive: true }); } catch {}
+  await shell.openPath(tilesBasePath);
+});
+
+ipcMain.handle('save-tile-file', async (_, layerKey, z, x, y, arrayBuffer) => {
+  if (!tilesBasePath) return;
+  try {
+    const dir = path.join(tilesBasePath, layerKey, String(z), String(x));
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `${y}.png`);
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
+    }
+  } catch (e) { console.error('[tile-save]', e.message); }
+});
 // Re-focus the renderer's Chromium context after native dialogs (confirm/alert) steal it.
 ipcMain.on('focus-window', () => mainWin?.webContents.focus());
 ipcMain.on('blur-window',  () => { mainWin?.blur(); setTimeout(() => mainWin?.focus(), 50); });
@@ -208,7 +231,8 @@ function createWindow () {
 }
 
 app.whenReady().then(() => {
-  settingsPath = path.join(app.getPath('userData'), 'settings.json');
+  settingsPath  = path.join(app.getPath('userData'), 'settings.json');
+  tilesBasePath = path.join(app.getPath('userData'), 'tiles');
   Menu.setApplicationMenu(null);
   startWSServer();
   startUDP();

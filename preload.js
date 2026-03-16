@@ -36,4 +36,10 @@ contextBridge.exposeInMainWorld('electronBridge', {
   // Re-focus the Chromium renderer after native dialogs steal focus (Electron quirk).
   focusWindow: () => ipcRenderer.send('focus-window'),
   blurWindow:  () => ipcRenderer.send('blur-window'),
+  // Tile cache file storage
+  tiles: {
+    getPath:    ()                            => ipcRenderer.invoke('get-tiles-path'),
+    openFolder: ()                            => ipcRenderer.invoke('open-tiles-folder'),
+    saveFile:   (layerKey, z, x, y, buf)     => ipcRenderer.invoke('save-tile-file', layerKey, z, x, y, buf),
+  },
 });

@@ -1497,6 +1497,7 @@ let funcBlocks = [];
 let _fbIdCounter = 0;
 let _fbResizing  = null; // bIdx being resized
 let _fbDragIdx   = -1;   // bIdx being dragged
+let _suppressNextMapClick = false; // suppress map click after drag operations
 
 const ACTION_COLORS = {
   waypoint: '#58a6ff', spline: '#74b9ff',
@@ -1579,6 +1580,7 @@ homeMarker.on('click', e => { L.DomEvent.stopPropagation(e); });
 // Map click => add waypoint
 map.on('click', e => {
   if (_gcsActive) return; // GCS mode: no waypoint placement
+  if (_suppressNextMapClick) { _suppressNextMapClick = false; return; } // suppress after drag ops
   const defaultAlt = _defaultAlt;
   const prevAlt = waypoints.length > 0 ? waypoints[waypoints.length - 1].alt : null;
   // Use prev WP altitude when it differs from the default (pilot intentionally set it),
@@ -2688,6 +2690,14 @@ function fbDrop(e, bIdx) {
 function fbResizeStart(e, bIdx) {
   e.preventDefault();
   _fbResizing = bIdx;
+  // Store original alts for all WPs from startWpIdx onward so they can be restored if block shrinks
+  const blk = funcBlocks[bIdx];
+  if (blk) {
+    blk._origAlts = {};
+    for (let i = blk.startWpIdx; i < waypoints.length; i++) {
+      blk._origAlts[i] = waypoints[i].alt;
+    }
+  }
   document.addEventListener('mousemove', _fbResizeMove);
   document.addEventListener('mouseup', _fbResizeEnd, { once: true });
 }
@@ -2701,13 +2711,24 @@ function _fbResizeMove(e) {
   if (isNaN(wpIdx)) return;
   const blk = funcBlocks[_fbResizing];
   if (wpIdx >= blk.startWpIdx) {
+    const prevEnd = blk.endWpIdx;
     blk.endWpIdx = wpIdx;
+    // Restore original alts for WPs that are no longer in the block
+    if (blk.type === 'set_alt' && prevEnd > wpIdx && blk._origAlts) {
+      for (let i = wpIdx + 1; i <= prevEnd; i++) {
+        if (blk._origAlts[i] !== undefined) waypoints[i].alt = blk._origAlts[i];
+      }
+    }
     _applyFuncBlock(_fbResizing);
     renderWPList();
   }
 }
 function _fbResizeEnd() {
+  const bIdx = _fbResizing;
   _fbResizing = null;
+  _suppressNextMapClick = true; // prevent any accidental map click after the drag ends
+  setTimeout(() => { _suppressNextMapClick = false; }, 200);
+  if (bIdx !== null && funcBlocks[bIdx]) funcBlocks[bIdx]._origAlts = null;
   document.removeEventListener('mousemove', _fbResizeMove);
   _saveFuncBlocks();
 }
@@ -2927,7 +2948,7 @@ function exportWaypoints() {
       else if (pa === 'do_gripper')      { pcmd=187; pp1=wp.gripperNum??0; pp2=wp.gripperAction??0; }
       else if (pa === 'do_parachute')    { pcmd=208; pp1=wp.parachuteCmd??2; }
       else if (pa === 'do_mount_control'){ pcmd=205; pp1=wp.mountPitch||0; pp2=wp.mountRoll||0; pp3=wp.mountYaw||0; }
-      else if (pa === 'set_roi_none')    { pcmd=201; pp1=0; }
+      else if (pa === 'set_roi_none')    { pcmd=197; }
       if (pcmd) {
         const pfLat = plat ? plat.toFixed(7) : '0';
         const pfLon = plon ? plon.toFixed(7) : '0';
@@ -2959,7 +2980,7 @@ function importWaypoints(event) {
     // DO/CONDITION commands attached as post-action to the preceding nav wp
     const PA_CMD_MAP = {
       93:'delay', 114:'cond_distance', 115:'cond_yaw',
-      178:'set_speed', 177:'do_jump', 201:'set_roi',
+      178:'set_speed', 177:'do_jump', 201:'set_roi', 197:'set_roi_none',
       183:'set_servo', 184:'do_repeat_servo',
       181:'do_set_relay', 182:'do_repeat_relay',
       206:'cam_trigg_dist', 187:'do_gripper', 208:'do_parachute', 205:'do_mount_control',
@@ -4574,6 +4595,25 @@ async function getTileFromDB(url) {
   } catch { return null; }
 }
 
+function _parseTileUrl(url) {
+  // Esri: .../tile/z/y/x  (note: Esri uses y before x)
+  let m = url.match(/\/tile\/(\d+)\/(\d+)\/(\d+)/);
+  if (m) {
+    const z = parseInt(m[1]), y = parseInt(m[2]), x = parseInt(m[3]);
+    if (url.includes('World_Imagery'))    return { layerKey: 'satellite', z, x, y };
+    if (url.includes('World_Topo_Map'))   return { layerKey: 'topo',      z, x, y };
+    if (url.includes('World_Street_Map')) return { layerKey: 'osm',       z, x, y };
+  }
+  // CartoCDN: .../layername/z/x/y.png
+  m = url.match(/\/(\d+)\/(\d+)\/(\d+)(?:@\dx)?\.png/);
+  if (m) {
+    const z = parseInt(m[1]), x = parseInt(m[2]), y = parseInt(m[3]);
+    if (url.includes('dark_all'))  return { layerKey: 'dark',  z, x, y };
+    if (url.includes('light_all')) return { layerKey: 'light', z, x, y };
+  }
+  return null;
+}
+
 async function putTileToDB(url, blob) {
   try {
     const db = await openTileDB();
@@ -4582,6 +4622,15 @@ async function putTileToDB(url, blob) {
       const req = tx.objectStore(TILE_DB_STORE).put(blob, url);
       req.onsuccess = res; req.onerror = () => rej(req.error);
     });
+    // Also save to the app's file system, organized by layer
+    if (window.electronBridge?.tiles?.saveFile) {
+      const info = _parseTileUrl(url);
+      if (info) {
+        blob.arrayBuffer().then(ab => {
+          window.electronBridge.tiles.saveFile(info.layerKey, info.z, info.x, info.y, ab);
+        });
+      }
+    }
   } catch { /* non-fatal */ }
 }
 
@@ -4631,6 +4680,8 @@ function closeCacheManager() {
   document.getElementById('cache-mgr-panel').classList.remove('active');
   document.getElementById('offline-btn').classList.remove('offline-on');
   if (_cacheDrawing) cancelRegionDraw();
+  if (_cacheDrawRect) { map.removeLayer(_cacheDrawRect); _cacheDrawRect = null; }
+  _cacheBounds = null;
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -4741,6 +4792,8 @@ function startRegionDraw() {
     map.getContainer().style.cursor = '';
     document.getElementById('cache-draw-hint').style.display = 'none';
     _cacheDrawing = false;
+    _suppressNextMapClick = true; // prevent click-after-drag from placing a waypoint
+    setTimeout(() => { _suppressNextMapClick = false; }, 200);
     if (startLatLng) {
       _cacheBounds = L.latLngBounds(startLatLng, e.latlng);
       if (_cacheBounds.isValid() && _cacheBounds.getNorth() !== _cacheBounds.getSouth()) {
@@ -6592,6 +6645,18 @@ function parseDataFlashBin(buffer) {
         Click a layout to apply it now and save it as the startup default.
       </div>
     </div>
+
+    <!-- Offline Tile Cache -->
+    <div class="settings-section">
+      <div class="settings-section-title">Offline Tile Cache</div>
+      <div style="font-size:11px;color:var(--sec);margin-bottom:10px">
+        Cached tiles are saved per layer (satellite, topo, light, dark) and can be used externally.
+      </div>
+      <button class="btn" onclick="openTilesFolder()" style="font-size:11px">
+        ⬡ Go to Tile Location
+      </button>
+      <div id="settings-tiles-path" style="margin-top:8px;font-size:10px;color:var(--sec);word-break:break-all"></div>
+    </div>
   </div>
 </div>
 
@@ -6682,7 +6747,21 @@ async function openSettings() {
      </div>`
   ).join('');
 
+  // Show tile cache path
+  if (window.electronBridge?.tiles?.getPath) {
+    window.electronBridge.tiles.getPath().then(p => {
+      const el = document.getElementById('settings-tiles-path');
+      if (el && p) el.textContent = p;
+    });
+  }
+
   document.getElementById('settings-overlay').classList.remove('hidden');
+}
+
+async function openTilesFolder() {
+  if (window.electronBridge?.tiles?.openFolder) {
+    await window.electronBridge.tiles.openFolder();
+  }
 }
 
 function settingsUpdateDefaultAlt(v) {
@@ -6884,6 +6963,26 @@ function _loadMission(id) {
     _currentMissionId = id;
     overlay.classList.remove('visible');
     closeMissionsPanel();
+    // Refresh NFZ layers for new mission area if NFZ was enabled
+    if (nfzEnabled && waypoints.length > 0) {
+      nfzLayers.forEach(l => map.removeLayer(l));
+      nfzLayers = [];
+      const lats = waypoints.map(w => w.lat), lons = waypoints.map(w => w.lon);
+      const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+      const centerLon = (Math.min(...lons) + Math.max(...lons)) / 2;
+      const btn = document.getElementById('nfz-btn');
+      btn.textContent = 'Loading…'; _syncNFZCtx();
+      loadNFZLayers(centerLat, centerLon).then(() => {
+        btn.textContent = `NFZ (${nfzLayers.filter(l => l instanceof L.Circle).length})`;
+        btn.classList.add('nfz-on');
+        _syncNFZCtx();
+      }).catch(() => {
+        nfzEnabled = false;
+        btn.textContent = 'NFZ Off';
+        btn.classList.remove('nfz-on');
+        _syncNFZCtx();
+      });
+    }
   }, 250);
 }
 
