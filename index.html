@@ -520,6 +520,88 @@
   }
   .gcs-mavtype-tab.active { background:var(--card); color:var(--text); }
   .topbtn.gcs-on { border-color:var(--purple); color:var(--purple); background:rgba(162,155,254,.1); }
+  .topbtn.offline-on { border-color:var(--teal); color:var(--teal); background:rgba(0,206,201,.1); }
+
+  /* ── OFFLINE CACHE MANAGER ──────────────────────────────────────────────── */
+  #cache-mgr-panel {
+    display:none; position:fixed; right:0; top:48px; width:380px;
+    height:calc(100vh - 48px); background:var(--panel); border-left:1px solid var(--border);
+    z-index:3100; flex-direction:column; overflow:hidden; box-sizing:border-box;
+  }
+  #cache-mgr-panel.active { display:flex; }
+  .cache-mgr-hdr {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 14px 10px; border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .cache-mgr-hdr h3 { font-size:13px; font-weight:700; color:var(--text); letter-spacing:.3px; }
+  .cache-mgr-hdr button { background:none; border:none; color:var(--sec); font-size:16px; cursor:pointer; }
+  .cache-mgr-hdr button:hover { color:var(--text); }
+  .cache-mgr-tabs { display:flex; border-bottom:1px solid var(--border); flex-shrink:0; }
+  .cache-mgr-tab {
+    flex:1; padding:8px; text-align:center; cursor:pointer; font-size:12px;
+    color:var(--sec); border-bottom:2px solid transparent; transition:color .15s;
+  }
+  .cache-mgr-tab.active { color:var(--teal); border-bottom-color:var(--teal); }
+  .cache-mgr-body { flex:1; overflow-y:auto; padding:12px; }
+  .cache-field { margin-bottom:12px; }
+  .cache-field label { display:block; font-size:10px; color:var(--sec); margin-bottom:5px; text-transform:uppercase; letter-spacing:.6px; }
+  .cache-field input[type=text], .cache-field select {
+    width:100%; background:var(--card); border:1px solid var(--border); border-radius:6px;
+    color:var(--text); padding:6px 8px; font-size:12px; outline:none;
+  }
+  .cache-field input[type=text]:focus, .cache-field select:focus { border-color:var(--teal); }
+  .cache-zoom-row { display:flex; align-items:center; gap:8px; }
+  .cache-zoom-row input[type=range] { flex:1; accent-color:var(--teal); cursor:pointer; }
+  .cache-zoom-val { font-size:12px; color:var(--text); min-width:22px; text-align:center; font-weight:600; }
+  .cache-action-row { display:flex; gap:8px; margin-bottom:12px; }
+  .cache-btn {
+    flex:1; padding:7px 10px; border-radius:6px; border:1px solid var(--border);
+    background:var(--card); color:var(--text); cursor:pointer; font-size:12px; white-space:nowrap;
+    transition:background .15s;
+  }
+  .cache-btn:hover { background:var(--border); }
+  .cache-btn.primary { border-color:var(--teal); color:var(--teal); }
+  .cache-btn.primary:hover { background:rgba(0,206,201,.1); }
+  .cache-btn.danger { border-color:var(--red); color:var(--red); }
+  .cache-btn.danger:hover { background:rgba(248,81,73,.1); }
+  .cache-btn:disabled { opacity:.4; cursor:not-allowed; }
+  .cache-estimate-box {
+    background:var(--card); border:1px solid var(--border); border-radius:6px;
+    padding:9px 12px; margin-bottom:12px; font-size:12px; color:var(--sec); text-align:center; line-height:1.6;
+  }
+  .cache-estimate-box b { color:var(--text); }
+  .cache-progress-wrap { margin-bottom:12px; }
+  .cache-progress-bar-bg { height:8px; background:var(--border); border-radius:4px; overflow:hidden; margin:6px 0; }
+  .cache-progress-bar-fill { height:100%; background:var(--teal); transition:width .15s; width:0%; border-radius:4px; }
+  .cache-progress-text { font-size:11px; color:var(--sec); text-align:center; }
+  .cache-region-item {
+    background:var(--card); border:1px solid var(--border); border-radius:6px;
+    padding:9px 11px; margin-bottom:6px; display:flex; align-items:flex-start; gap:8px;
+  }
+  .cache-region-item:hover { border-color:var(--border); }
+  .cache-region-info { flex:1; min-width:0; }
+  .cache-region-name { font-size:13px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cache-region-meta { font-size:10px; color:var(--sec); margin-top:3px; line-height:1.6; }
+  .cache-region-del { color:var(--red); cursor:pointer; font-size:16px; padding:0 2px; flex-shrink:0; line-height:1; margin-top:2px; }
+  .cache-region-del:hover { color:#ff6b6b; }
+  .cache-stats-box {
+    background:var(--card); border:1px solid var(--border); border-radius:6px;
+    padding:10px 12px; margin-bottom:14px;
+  }
+  .cache-stats-row { display:flex; justify-content:space-between; font-size:12px; padding:3px 0; }
+  .cache-stats-row .cs-label { color:var(--sec); }
+  .cache-stats-row .cs-value { color:var(--text); font-weight:600; }
+  .cache-draw-hint {
+    position:fixed; top:66px; left:50%; transform:translateX(-50%);
+    background:rgba(0,0,0,.85); color:var(--text); padding:8px 20px; border-radius:20px;
+    font-size:12px; z-index:9999; pointer-events:none; display:none;
+    border:1px solid var(--teal); white-space:nowrap;
+  }
+  .cache-section-title {
+    font-size:10px; color:var(--sec); text-transform:uppercase; letter-spacing:.6px;
+    margin-bottom:8px; padding-bottom:5px; border-bottom:1px solid var(--border);
+  }
+  .cache-empty { text-align:center; color:var(--sec); font-size:12px; padding:20px 0; }
 
 </style>
 </head>
@@ -541,6 +623,7 @@
     <button class="topbtn" onclick="reverseMission()">↩ Reverse</button>
     <button class="topbtn" id="view3d-btn" onclick="toggle3DView()">3D View</button>
     <button class="topbtn" id="nfz-btn" style="display:none" onclick="toggleNFZ()">NFZ Off</button>
+    <button class="topbtn" id="offline-btn" onclick="openCacheManager()" title="Offline Map Cache Manager">⬡ Offline</button>
     <button class="topbtn danger" onclick="clearMission()">Clear</button>
   </div>
   <button class="topbtn" id="gcs-btn" onclick="toggleGCS()" title="Ground Control Station mode">⬢ GCS</button>
@@ -558,7 +641,7 @@
   <div class="ctx-item" id="ctx-home-item"   onclick="if(_ctxLatLng){homeLat=_ctxLatLng.lat;homeLon=_ctxLatLng.lng;homeMarker.setLatLng([homeLat,homeLon]);try{localStorage.setItem('homeLat',homeLat);localStorage.setItem('homeLon',homeLon);}catch{}updatePolyline();}closeMapCtx()">Move Home Here</div>
   <div style="height:1px;background:var(--border);margin:4px 0"></div>
   <div class="ctx-item" id="ctx-nfz-item"   onclick="toggleNFZ();closeMapCtx()">NFZ</div>
-  <div class="ctx-item" id="ctx-cache-item"  onclick="downloadTilesForView();closeMapCtx()">Cache Tiles</div>
+  <div class="ctx-item" id="ctx-cache-item"  onclick="openCacheManager();closeMapCtx()">Offline Cache…</div>
 </div>
 <!-- GCS CONTROL STATION PANEL -->
 <div id="gcs-panel">
@@ -723,13 +806,98 @@
   <div class="gcs-warning">⚠ Commands sent directly to aircraft. Ensure safe conditions.</div>
 </div>
 
-<!-- tile download progress bar -->
-<div id="tile-progress-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;height:22px;background:var(--panel);border-top:1px solid var(--border);z-index:9000;align-items:center;padding:0 10px;gap:8px;font-size:11px;color:var(--sec)">
-  <span id="tile-progress-msg">Caching tiles…</span>
-  <div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
-    <div id="tile-progress-fill" style="height:100%;width:0%;background:var(--blue);transition:width .15s"></div>
+<!-- tile download progress bar (legacy bottom bar kept for compat) -->
+<div id="tile-progress-bar" style="display:none"></div>
+
+<!-- draw region hint -->
+<div class="cache-draw-hint" id="cache-draw-hint">Click and drag on the map to draw your region — ESC to cancel</div>
+
+<!-- ====================== OFFLINE CACHE MANAGER PANEL ====================== -->
+<div id="cache-mgr-panel">
+  <div class="cache-mgr-hdr">
+    <h3>⬡ Offline Map Cache</h3>
+    <button onclick="closeCacheManager()" title="Close">✕</button>
   </div>
-  <span id="tile-progress-pct">0%</span>
+  <div class="cache-mgr-tabs">
+    <div class="cache-mgr-tab active" id="cmtab-download" onclick="showCacheTab('download')">Download</div>
+    <div class="cache-mgr-tab"        id="cmtab-manage"   onclick="showCacheTab('manage')">Manage</div>
+  </div>
+
+  <!-- ── DOWNLOAD TAB ─────────────────────────────────────────────────── -->
+  <div class="cache-mgr-body" id="cache-body-download">
+
+    <div class="cache-field">
+      <label>Region Name</label>
+      <input type="text" id="cache-region-name" placeholder="e.g. Mission Zone Alpha" maxlength="40">
+    </div>
+
+    <div class="cache-field">
+      <label>Map Layer</label>
+      <select id="cache-layer-select">
+        <option value="dark">Dark (CartoCDN)</option>
+        <option value="light">Light (CartoCDN)</option>
+        <option value="satellite" selected>Satellite (Esri)</option>
+        <option value="topo">Topography (Esri)</option>
+        <option value="osm">OpenStreetMap (Esri)</option>
+      </select>
+    </div>
+
+    <div class="cache-field">
+      <label>Zoom Range</label>
+      <div class="cache-zoom-row" style="margin-bottom:6px">
+        <span style="font-size:11px;color:var(--sec);min-width:28px">Min</span>
+        <input type="range" id="cache-zoom-min" min="8" max="17" value="11" oninput="onCacheZoomChange()">
+        <span class="cache-zoom-val" id="cache-zoom-min-val">11</span>
+      </div>
+      <div class="cache-zoom-row">
+        <span style="font-size:11px;color:var(--sec);min-width:28px">Max</span>
+        <input type="range" id="cache-zoom-max" min="8" max="17" value="16" oninput="onCacheZoomChange()">
+        <span class="cache-zoom-val" id="cache-zoom-max-val">16</span>
+      </div>
+    </div>
+
+    <div class="cache-section-title">Select Region</div>
+    <div class="cache-action-row">
+      <button class="cache-btn primary" onclick="startRegionDraw()">✏ Draw on Map</button>
+      <button class="cache-btn" onclick="useCurrentViewForCache()">⊞ Current View</button>
+    </div>
+
+    <div class="cache-estimate-box" id="cache-estimate-box">
+      No region selected.<br>Draw a rectangle or use the current map view.
+    </div>
+
+    <div class="cache-progress-wrap" id="cache-progress-wrap" style="display:none">
+      <div class="cache-progress-text" id="cache-progress-text">Starting…</div>
+      <div class="cache-progress-bar-bg">
+        <div class="cache-progress-bar-fill" id="cache-progress-fill"></div>
+      </div>
+      <div class="cache-progress-text" id="cache-progress-pct" style="color:var(--teal);font-weight:600">0%</div>
+    </div>
+
+    <div class="cache-action-row">
+      <button class="cache-btn primary" id="cache-download-btn" onclick="startCacheDownload()" disabled>⬇ Download Region</button>
+      <button class="cache-btn danger"  id="cache-cancel-btn"  onclick="cancelCacheDownload()" style="display:none">✕ Cancel</button>
+    </div>
+
+  </div>
+
+  <!-- ── MANAGE TAB ──────────────────────────────────────────────────── -->
+  <div class="cache-mgr-body" id="cache-body-manage" style="display:none">
+
+    <div class="cache-stats-box" id="cache-stats-box">
+      <div class="cache-stats-row"><span class="cs-label">Cached Tiles</span><span class="cs-value" id="cm-stat-tiles">—</span></div>
+      <div class="cache-stats-row"><span class="cs-label">Est. Storage</span><span class="cs-value" id="cm-stat-size">—</span></div>
+      <div class="cache-stats-row"><span class="cs-label">Saved Regions</span><span class="cs-value" id="cm-stat-regions">—</span></div>
+    </div>
+
+    <div class="cache-section-title">Saved Regions</div>
+    <div id="cache-regions-list"></div>
+
+    <div class="cache-action-row" style="margin-top:14px">
+      <button class="cache-btn danger" onclick="clearAllCacheConfirm()">🗑 Clear All Cache</button>
+    </div>
+
+  </div>
 </div>
 
 <!-- MAIN -->
@@ -4384,71 +4552,368 @@ function latToTileY(lat, z) {
   return Math.floor((1 - Math.log(Math.tan(lr) + 1 / Math.cos(lr)) / Math.PI) / 2 * (1 << z));
 }
 
-async function downloadTilesForView() {
-  const btn = document.getElementById('cache-btn');
-  const bar = document.getElementById('tile-progress-bar');
-  const msg = document.getElementById('tile-progress-msg');
-  const fill = document.getElementById('tile-progress-fill');
-  const pct = document.getElementById('tile-progress-pct');
+// ====================== OFFLINE CACHE MANAGER ======================
+let _cacheBounds    = null;   // L.LatLngBounds of selected region
+let _cacheDrawRect  = null;   // L.Rectangle drawn on map
+let _cacheDrawing   = false;  // true while user is dragging
+let _cacheAbort     = false;  // set to true to cancel active download
+let _cacheActive    = false;  // download in progress
 
-  const bounds = map.getBounds();
-  const tileType = document.getElementById('map-tile-select').value;
-  const cfg = TILE_LAYERS[tileType] || TILE_LAYERS.dark;
+const CACHE_REGIONS_KEY = 'offlineCacheRegions';
+const CACHE_MAX_TILES   = 15000;
+const CACHE_CONCURRENCY = 8;
 
-  // Collect all tile URLs for zoom 11–16
-  const MIN_Z = 11, MAX_Z = 16;
-  const tilesToFetch = [];
-  for (let z = MIN_Z; z <= MAX_Z; z++) {
+// ── Panel open/close ──────────────────────────────────────────────────────────
+function openCacheManager() {
+  document.getElementById('cache-mgr-panel').classList.add('active');
+  document.getElementById('offline-btn').classList.add('offline-on');
+  // Sync layer select to current map tile
+  document.getElementById('cache-layer-select').value = _currentTileType || 'satellite';
+  showCacheTab('download');
+}
+
+function closeCacheManager() {
+  document.getElementById('cache-mgr-panel').classList.remove('active');
+  document.getElementById('offline-btn').classList.remove('offline-on');
+  if (_cacheDrawing) cancelRegionDraw();
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function showCacheTab(tab) {
+  document.getElementById('cache-body-download').style.display = tab === 'download' ? '' : 'none';
+  document.getElementById('cache-body-manage').style.display   = tab === 'manage'   ? '' : 'none';
+  document.getElementById('cmtab-download').classList.toggle('active', tab === 'download');
+  document.getElementById('cmtab-manage').classList.toggle('active',   tab === 'manage');
+  if (tab === 'manage') refreshCacheStats();
+}
+
+// ── Zoom sliders ──────────────────────────────────────────────────────────────
+function onCacheZoomChange() {
+  let minZ = parseInt(document.getElementById('cache-zoom-min').value);
+  let maxZ = parseInt(document.getElementById('cache-zoom-max').value);
+  if (minZ > maxZ) { maxZ = minZ; document.getElementById('cache-zoom-max').value = maxZ; }
+  document.getElementById('cache-zoom-min-val').textContent = minZ;
+  document.getElementById('cache-zoom-max-val').textContent = maxZ;
+  updateCacheEstimate();
+}
+
+// ── Region helpers ────────────────────────────────────────────────────────────
+function _buildTileUrls(bounds, minZ, maxZ, layerKey) {
+  const cfg = TILE_LAYERS[layerKey] || TILE_LAYERS.dark;
+  const urls = [];
+  for (let z = minZ; z <= maxZ; z++) {
     const x0 = lonToTileX(bounds.getWest(),  z), x1 = lonToTileX(bounds.getEast(),  z);
     const y0 = latToTileY(bounds.getNorth(), z), y1 = latToTileY(bounds.getSouth(), z);
     for (let x = x0; x <= x1; x++) {
       for (let y = y0; y <= y1; y++) {
-        // Build concrete URL (pick subdomain 'a', no retina suffix)
-        const url = cfg.url
+        urls.push(cfg.url
           .replace('{s}', 'a')
           .replace('{z}', z).replace('{x}', x).replace('{y}', y)
-          .replace('{r}', '');
-        tilesToFetch.push(url);
+          .replace('{r}', ''));
       }
     }
   }
+  return urls;
+}
 
-  if (tilesToFetch.length > 2000) {
-    alert(`Too many tiles (${tilesToFetch.length}). Zoom in closer and try again.`);
+function _countTiles(bounds, minZ, maxZ) {
+  let n = 0;
+  for (let z = minZ; z <= maxZ; z++) {
+    const x0 = lonToTileX(bounds.getWest(),  z), x1 = lonToTileX(bounds.getEast(),  z);
+    const y0 = latToTileY(bounds.getNorth(), z), y1 = latToTileY(bounds.getSouth(), z);
+    n += (x1 - x0 + 1) * (y1 - y0 + 1);
+  }
+  return n;
+}
+
+function _fmtBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+  return (n / 1073741824).toFixed(2) + ' GB';
+}
+
+function updateCacheEstimate() {
+  const box = document.getElementById('cache-estimate-box');
+  const btn = document.getElementById('cache-download-btn');
+  if (!_cacheBounds) {
+    box.innerHTML = 'No region selected.<br>Draw a rectangle or use the current map view.';
+    btn.disabled = true;
     return;
   }
+  const minZ = parseInt(document.getElementById('cache-zoom-min').value);
+  const maxZ = parseInt(document.getElementById('cache-zoom-max').value);
+  const count = _countTiles(_cacheBounds, minZ, maxZ);
+  const estBytes = count * 22000; // ~22 KB avg per tile
+  const warn = count > CACHE_MAX_TILES
+    ? `<br><span style="color:var(--red)">⚠ Exceeds ${CACHE_MAX_TILES.toLocaleString()} tile limit — zoom in or narrow zoom range.</span>`
+    : '';
+  box.innerHTML = `<b>${count.toLocaleString()} tiles</b> &nbsp;·&nbsp; ~${_fmtBytes(estBytes)}<br>Zoom ${minZ}–${maxZ}${warn}`;
+  btn.disabled = count === 0 || count > CACHE_MAX_TILES || _cacheActive;
+}
 
-  btn.disabled = true;
-  bar.style.display = 'flex';
-  let done = 0;
-  const total = tilesToFetch.length;
+// ── Draw region on map ────────────────────────────────────────────────────────
+function startRegionDraw() {
+  if (_cacheDrawing) return;
+  _cacheDrawing = true;
+  closeCacheManager();
+  map.dragging.disable();
+  map.getContainer().style.cursor = 'crosshair';
+  document.getElementById('cache-draw-hint').style.display = 'block';
 
-  // Fetch 6 at a time
-  const CONCURRENCY = 6;
+  let startLatLng = null;
+
+  function onMouseDown(e) {
+    L.DomEvent.stop(e);
+    startLatLng = map.mouseEventToLatLng(e.originalEvent || e);
+    if (_cacheDrawRect) { map.removeLayer(_cacheDrawRect); _cacheDrawRect = null; }
+    _cacheDrawRect = L.rectangle([startLatLng, startLatLng], {
+      color: '#00cec9', weight: 2, fillOpacity: 0.12, dashArray: '5,4'
+    }).addTo(map);
+    map.on('mousemove', onMouseMove);
+    map.on('mouseup',   onMouseUp);
+  }
+
+  function onMouseMove(e) {
+    if (startLatLng && _cacheDrawRect) _cacheDrawRect.setBounds(L.latLngBounds(startLatLng, e.latlng));
+  }
+
+  function onMouseUp(e) {
+    map.off('mousemove', onMouseMove);
+    map.off('mouseup',   onMouseUp);
+    map.off('mousedown', onMouseDown);
+    map.dragging.enable();
+    map.getContainer().style.cursor = '';
+    document.getElementById('cache-draw-hint').style.display = 'none';
+    _cacheDrawing = false;
+    if (startLatLng) {
+      _cacheBounds = L.latLngBounds(startLatLng, e.latlng);
+      if (_cacheBounds.isValid() && _cacheBounds.getNorth() !== _cacheBounds.getSouth()) {
+        openCacheManager();
+        updateCacheEstimate();
+      } else {
+        if (_cacheDrawRect) { map.removeLayer(_cacheDrawRect); _cacheDrawRect = null; }
+        openCacheManager();
+      }
+    }
+    document.removeEventListener('keydown', onEsc);
+  }
+
+  function onEsc(e) {
+    if (e.key === 'Escape') cancelRegionDraw();
+  }
+
+  map.on('mousedown', onMouseDown);
+  document.addEventListener('keydown', onEsc);
+}
+
+function cancelRegionDraw() {
+  _cacheDrawing = false;
+  map.dragging.enable();
+  map.getContainer().style.cursor = '';
+  document.getElementById('cache-draw-hint').style.display = 'none';
+  map.off('mousedown'); map.off('mousemove'); map.off('mouseup');
+  openCacheManager();
+}
+
+function useCurrentViewForCache() {
+  if (_cacheDrawRect) { map.removeLayer(_cacheDrawRect); _cacheDrawRect = null; }
+  _cacheBounds = map.getBounds();
+  _cacheDrawRect = L.rectangle(_cacheBounds, {
+    color: '#00cec9', weight: 2, fillOpacity: 0.12, dashArray: '5,4'
+  }).addTo(map);
+  updateCacheEstimate();
+}
+
+// ── Download ──────────────────────────────────────────────────────────────────
+async function startCacheDownload() {
+  if (_cacheActive || !_cacheBounds) return;
+
+  const name   = document.getElementById('cache-region-name').value.trim() || 'Region ' + new Date().toLocaleDateString();
+  const layer  = document.getElementById('cache-layer-select').value;
+  const minZ   = parseInt(document.getElementById('cache-zoom-min').value);
+  const maxZ   = parseInt(document.getElementById('cache-zoom-max').value);
+  const tiles  = _buildTileUrls(_cacheBounds, minZ, maxZ, layer);
+
+  if (tiles.length === 0 || tiles.length > CACHE_MAX_TILES) return;
+
+  _cacheActive = true;
+  _cacheAbort  = false;
+
+  const dlBtn = document.getElementById('cache-download-btn');
+  const cxBtn = document.getElementById('cache-cancel-btn');
+  const prog  = document.getElementById('cache-progress-wrap');
+  const fill  = document.getElementById('cache-progress-fill');
+  const pct   = document.getElementById('cache-progress-pct');
+  const txt   = document.getElementById('cache-progress-text');
+
+  dlBtn.disabled       = true;
+  cxBtn.style.display  = '';
+  prog.style.display   = '';
+  fill.style.width     = '0%';
+  pct.textContent      = '0%';
+
+  let done = 0, skipped = 0;
+  const total = tiles.length;
+
   async function fetchOne(url) {
+    if (_cacheAbort) return;
     const cached = await getTileFromDB(url);
     if (!cached) {
       try {
         const resp = await fetch(url);
         if (resp.ok) await putTileToDB(url, await resp.blob());
-      } catch { /* skip on error */ }
+      } catch { /* skip errors */ }
+    } else {
+      skipped++;
     }
     done++;
     const p = Math.round(done / total * 100);
-    fill.style.width = p + '%';
-    pct.textContent = p + '%';
-    msg.textContent = `Caching tiles… ${done}/${total}`;
+    fill.style.width    = p + '%';
+    pct.textContent     = p + '%';
+    txt.textContent     = `${done.toLocaleString()} / ${total.toLocaleString()} tiles  (${skipped} already cached)`;
   }
 
-  const queue = [...tilesToFetch];
-  async function worker() { while (queue.length) await fetchOne(queue.shift()); }
-  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  const queue = [...tiles];
+  async function worker() { while (queue.length && !_cacheAbort) await fetchOne(queue.shift()); }
+  await Promise.all(Array.from({ length: CACHE_CONCURRENCY }, worker));
 
-  bar.style.display = 'none';
-  btn.disabled = false;
-  btn.textContent = `Cached ✓`;
-  setTimeout(() => { btn.textContent = 'Cache Tiles'; }, 3000);
+  _cacheActive = false;
+  cxBtn.style.display = 'none';
+
+  if (!_cacheAbort) {
+    // Save region metadata
+    const regions = _loadCacheRegions();
+    regions.push({
+      id:        Date.now().toString(36),
+      name,
+      layer,
+      minZoom:   minZ,
+      maxZoom:   maxZ,
+      tileCount: done,
+      date:      new Date().toLocaleDateString(),
+      bounds:    { n: _cacheBounds.getNorth(), s: _cacheBounds.getSouth(), e: _cacheBounds.getEast(), w: _cacheBounds.getWest() }
+    });
+    _saveCacheRegions(regions);
+
+    txt.textContent  = `Done! ${done.toLocaleString()} tiles downloaded.`;
+    fill.style.width = '100%';
+    pct.textContent  = '100%';
+    dlBtn.textContent = 'Download Again';
+    dlBtn.disabled   = false;
+    setTimeout(() => {
+      prog.style.display    = 'none';
+      dlBtn.textContent     = '⬇ Download Region';
+    }, 4000);
+  } else {
+    txt.textContent  = 'Cancelled.';
+    setTimeout(() => { prog.style.display = 'none'; }, 2000);
+    dlBtn.disabled   = false;
+  }
 }
+
+function cancelCacheDownload() {
+  _cacheAbort = true;
+}
+
+// ── Region metadata (localStorage) ───────────────────────────────────────────
+function _loadCacheRegions() {
+  try { return JSON.parse(localStorage.getItem(CACHE_REGIONS_KEY)) || []; } catch { return []; }
+}
+
+function _saveCacheRegions(arr) {
+  try { localStorage.setItem(CACHE_REGIONS_KEY, JSON.stringify(arr)); } catch {}
+}
+
+// ── Manage tab ────────────────────────────────────────────────────────────────
+async function refreshCacheStats() {
+  const regions = _loadCacheRegions();
+  document.getElementById('cm-stat-regions').textContent = regions.length;
+
+  // Count tiles in IndexedDB
+  try {
+    const db   = await openTileDB();
+    const count = await new Promise(res => {
+      const tx  = db.transaction(TILE_DB_STORE, 'readonly');
+      const req = tx.objectStore(TILE_DB_STORE).count();
+      req.onsuccess = () => res(req.result);
+      req.onerror   = () => res(0);
+    });
+    document.getElementById('cm-stat-tiles').textContent = count.toLocaleString();
+    document.getElementById('cm-stat-size').textContent  = _fmtBytes(count * 22000);
+  } catch {
+    document.getElementById('cm-stat-tiles').textContent = '—';
+    document.getElementById('cm-stat-size').textContent  = '—';
+  }
+
+  renderCacheRegions(regions);
+}
+
+function renderCacheRegions(regions) {
+  const list = document.getElementById('cache-regions-list');
+  if (!regions.length) {
+    list.innerHTML = '<div class="cache-empty">No saved regions yet.<br>Download a region to see it here.</div>';
+    return;
+  }
+  list.innerHTML = regions.map(r => `
+    <div class="cache-region-item">
+      <div class="cache-region-info">
+        <div class="cache-region-name">${_escHtml(r.name)}</div>
+        <div class="cache-region-meta">
+          ${r.layer} &nbsp;·&nbsp; zoom ${r.minZoom}–${r.maxZoom} &nbsp;·&nbsp; ${(r.tileCount||0).toLocaleString()} tiles<br>
+          Downloaded ${r.date}
+        </div>
+      </div>
+      <span class="cache-region-del" onclick="deleteCacheRegion('${r.id}')" title="Delete region">🗑</span>
+    </div>`).join('');
+}
+
+function _escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function deleteCacheRegion(id) {
+  const regions = _loadCacheRegions();
+  const idx     = regions.findIndex(r => r.id === id);
+  if (idx === -1) return;
+  const r = regions[idx];
+
+  if (!confirm(`Delete region "${r.name}"?\n\nThis will remove its cached tiles from storage.`)) return;
+
+  // Delete tiles from IndexedDB
+  try {
+    const bounds = L.latLngBounds([r.bounds.s, r.bounds.w], [r.bounds.n, r.bounds.e]);
+    const urls   = _buildTileUrls(bounds, r.minZoom, r.maxZoom, r.layer);
+    const db     = await openTileDB();
+    await Promise.all(urls.map(url => new Promise(res => {
+      const tx  = db.transaction(TILE_DB_STORE, 'readwrite');
+      const req = tx.objectStore(TILE_DB_STORE).delete(url);
+      req.onsuccess = res; req.onerror = res;
+    })));
+  } catch {}
+
+  regions.splice(idx, 1);
+  _saveCacheRegions(regions);
+  refreshCacheStats();
+}
+
+async function clearAllCacheConfirm() {
+  if (!confirm('Clear ALL cached map tiles?\n\nThis cannot be undone.')) return;
+  try {
+    const db = await openTileDB();
+    await new Promise((res, rej) => {
+      const tx  = db.transaction(TILE_DB_STORE, 'readwrite');
+      const req = tx.objectStore(TILE_DB_STORE).clear();
+      req.onsuccess = res; req.onerror = () => rej(req.error);
+    });
+  } catch {}
+  _saveCacheRegions([]);
+  if (_cacheDrawRect) { map.removeLayer(_cacheDrawRect); _cacheDrawRect = null; }
+  refreshCacheStats();
+}
+
+// Legacy wrapper kept so any old references still work
+function downloadTilesForView() { openCacheManager(); }
 
 // ====================== GCS CONTROL STATION ======================
 let _gcsActive = false;
