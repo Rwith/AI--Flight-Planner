@@ -796,6 +796,7 @@
         <span style="font-size:10px;color:var(--sec);white-space:nowrap">Add block:</span>
         <button class="fb-add-btn" onclick="addFuncBlock('set_alt')">▲ Set Altitude</button>
         <button class="fb-add-btn" onclick="addFuncBlock('set_speed')">⚡ Set Speed</button>
+        <button class="fb-add-btn" onclick="addFuncBlock('set_roi')">◎ Set ROI</button>
       </div>
       <div id="wp-list"></div>
       <!-- RALLY POINTS -->
@@ -1862,7 +1863,7 @@ function _wpInlineParamsHTML(wp, idx) {
   paSelParts.push(sel('Pre-Action', 'preAction', pa, [
     ['none','None'],
     ['delay','Delay'],['set_speed','Set Speed'],['cond_yaw','Yaw'],['cond_distance','Cond Dist'],
-    ['do_jump','Jump'],['set_roi','Set ROI'],
+    ['do_jump','Jump'],['set_roi','Set ROI'],['set_roi_none','Set ROI None'],
     ['set_servo','Servo'],['do_repeat_servo','Repeat Servo'],
     ['do_set_relay','Relay'],['do_repeat_relay','Repeat Relay'],
     ['cam_trigg_dist','Cam Dist'],['do_gripper','Gripper'],['do_parachute','Parachute'],
@@ -2178,6 +2179,7 @@ function renderWPList() {
           <div class="wp-details" data-details="${i}">${wp.alt}m AGL${legStr}</div>
           ${wp.preAction === 'do_mount_control' ? `<div class="wp-details" style="color:var(--sec)">Cam: Pitch ${wp.mountPitch||0}° Yaw ${wp.mountYaw||0}°</div>` : ''}
           ${wp.preAction === 'set_roi' ? `<div class="wp-details" style="color:var(--sec)">◎ ROI: ${(wp.roiLat??wp.lat).toFixed(5)}, ${(wp.roiLon??wp.lon).toFixed(5)}, ${wp.roiAlt??wp.alt}m</div>` : ''}
+          ${wp.preAction === 'set_roi_none' ? `<div class="wp-details" style="color:var(--sec)">◎ Clear ROI</div>` : ''}
         </div>
         ${_inlineHTML ? `<span class="wp-action-toggle" id="wp-act-btn-${i}" onclick="event.stopPropagation();toggleWPActions(${i})">⚙ Edit</span>` : ''}
         <span class="wp-del" onclick="event.stopPropagation();deleteWPByIdx(${i})">✕</span>
@@ -2321,6 +2323,7 @@ function _createRoiMarker(bIdx) {
     const p = e.target.getLatLng();
     blk.params.lat = +p.lat.toFixed(6);
     blk.params.lon = +p.lng.toFixed(6);
+    _applyFuncBlock(funcBlocks.indexOf(blk));
     _saveFuncBlocks();
     renderWPList();
   });
@@ -2386,6 +2389,28 @@ function _applyFuncBlock(bIdx) {
       waypoints[i].speed = parseFloat(blk.params.speed) || 15; // already m/s
     }
   }
+  if (blk.type === 'set_roi') {
+    // Clean up preActions from previously assigned WPs
+    const _prevS = blk._prevS;
+    const _prevE = blk._prevE;
+    if (_prevS != null && waypoints[_prevS] && waypoints[_prevS].preAction === 'set_roi') {
+      waypoints[_prevS].preAction = 'none';
+      _removeWpRoiMarker(waypoints[_prevS]);
+    }
+    if (_prevE != null && waypoints[_prevE] && waypoints[_prevE].preAction === 'set_roi_none') {
+      waypoints[_prevE].preAction = 'none';
+    }
+    // Apply Set ROI to the first WP in the block
+    waypoints[s].preAction = 'set_roi';
+    waypoints[s].roiLat = blk.params.lat ?? waypoints[s].lat;
+    waypoints[s].roiLon = blk.params.lon ?? waypoints[s].lon;
+    waypoints[s].roiAlt = blk.params.alt ?? waypoints[s].alt;
+    _createWpRoiMarker(waypoints[s]);
+    // Apply Set ROI None to the last WP to cancel the ROI (only when block spans >1 WP)
+    if (e !== s) { waypoints[e].preAction = 'set_roi_none'; }
+    blk._prevS = s;
+    blk._prevE = e;
+  }
   updateProfile();
   updateGimbalLines();
 }
@@ -2413,6 +2438,12 @@ function deleteFuncBlock(bIdx) {
   pushUndo();
   const blk = funcBlocks[bIdx];
   if (blk?._roiMarker) { map.removeLayer(blk._roiMarker); blk._roiMarker = null; }
+  if (blk?.type === 'set_roi') {
+    const s = Math.max(0, Math.min(blk.startWpIdx, waypoints.length - 1));
+    const e = Math.max(s, Math.min(blk.endWpIdx, waypoints.length - 1));
+    if (waypoints[s]?.preAction === 'set_roi') { waypoints[s].preAction = 'none'; _removeWpRoiMarker(waypoints[s]); }
+    if (e !== s && waypoints[e]?.preAction === 'set_roi_none') { waypoints[e].preAction = 'none'; }
+  }
   funcBlocks.splice(bIdx, 1);
   _saveFuncBlocks();
   renderWPList();
@@ -2679,6 +2710,7 @@ function exportWaypoints() {
       else if (pa === 'do_gripper')      { pcmd=187; pp1=wp.gripperNum??0; pp2=wp.gripperAction??0; }
       else if (pa === 'do_parachute')    { pcmd=208; pp1=wp.parachuteCmd??2; }
       else if (pa === 'do_mount_control'){ pcmd=205; pp1=wp.mountPitch||0; pp2=wp.mountRoll||0; pp3=wp.mountYaw||0; }
+      else if (pa === 'set_roi_none')    { pcmd=201; pp1=0; }
       if (pcmd) {
         const pfLat = plat ? plat.toFixed(7) : '0';
         const pfLon = plon ? plon.toFixed(7) : '0';
@@ -2747,6 +2779,8 @@ function importWaypoints(event) {
         if (waypoints.length > 0) {
           const prev = waypoints[waypoints.length - 1];
           prev.preAction = PA_CMD_MAP[cmd];
+          // DO_SET_ROI with ROI_NONE (param1=0) maps to set_roi_none
+          if (cmd === 201 && parseFloat(p[4]) === 0) prev.preAction = 'set_roi_none';
           prev.delayTime    = cmd===93  ? parseFloat(p[4])||5   : prev.delayTime;
           prev.condDist     = cmd===114 ? parseFloat(p[4])||10  : prev.condDist;
           prev.yawHeading   = cmd===115 ? parseFloat(p[4])||0   : prev.yawHeading;
