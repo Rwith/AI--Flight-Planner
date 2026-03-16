@@ -132,6 +132,11 @@
   }
   .wp-inline-field input:focus, .wp-inline-field select:focus { border-color: var(--blue); }
   .wp-inline-unit { color: var(--sec); font-size: 10px; }
+  .wp-pa-group {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+    border: 1px solid var(--border); border-radius: 5px;
+    padding: 2px 6px;
+  }
   .form-row { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
   .form-row label { font-size: 11px; color: var(--sec); }
   .form-row input, .form-row select, .form-row textarea {
@@ -1834,10 +1839,11 @@ function _wpInlineParamsHTML(wp, idx) {
        </select>
      </div>`;
 
-  const parts = [];
+  const actionParts = [];
+  const paParts    = [];
 
   // Action — always shown first
-  parts.push(sel('Action', 'action', a, [
+  actionParts.push(sel('Action', 'action', a, [
     ['waypoint','Waypoint'],['spline','Spline WP'],
     ['loiter','Loiter ∞'],['loiter_time','Loiter Time'],['loiter_turns','Loiter Turns'],['loiter_to_alt','Loiter→Alt'],
     ['takeoff','Takeoff'],['vtol_takeoff','VTOL Takeoff'],
@@ -1845,8 +1851,26 @@ function _wpInlineParamsHTML(wp, idx) {
     ['rtl','RTL'],['photo','Cam Trigger']
   ]));
 
-  // Pre-Action — always shown second
-  parts.push(sel('Pre-Action', 'preAction', pa, [
+  // Alt — always a quick-edit field
+  actionParts.push(inp('Alt', 'alt', 'number', wp.alt, 'min="0" max="2000" style="width:54px"') +
+    '<span class="wp-inline-unit">m</span>');
+
+  // Navigation action params
+  if (a === 'waypoint' || a === 'spline')
+    actionParts.push(inp('Hold', 'holdTime', 'number', wp.holdTime ?? 0, 'min="0" max="3600" style="width:48px"') +
+      '<span class="wp-inline-unit">s</span>');
+  if (LOITER_ACTIONS.has(a)) {
+    actionParts.push(inp('R', 'loiterR', 'number', wp.loiterR ?? 20, 'min="1" max="2000" style="width:52px"') +
+      '<span class="wp-inline-unit">m</span>');
+    if (a === 'loiter_time')
+      actionParts.push(inp('Dur', 'loiterTime', 'number', wp.loiterTime ?? 10, 'min="1" style="width:48px"') +
+        '<span class="wp-inline-unit">s</span>');
+    if (a === 'loiter_turns')
+      actionParts.push(inp('Turns', 'loiterTurns', 'number', wp.loiterTurns ?? 1, 'min="1" style="width:44px"'));
+  }
+
+  // Pre-Action — always shown in its own group
+  paParts.push(sel('Pre-Action', 'preAction', pa, [
     ['none','None'],
     ['delay','Delay'],['set_speed','Set Speed'],['cond_yaw','Yaw'],['cond_distance','Cond Dist'],
     ['do_jump','Jump'],['set_roi','Set ROI'],
@@ -1856,88 +1880,72 @@ function _wpInlineParamsHTML(wp, idx) {
     ['do_mount_control','Mount']
   ]));
 
-  // Alt — always a quick-edit field
-  parts.push(inp('Alt', 'alt', 'number', wp.alt, 'min="0" max="2000" style="width:54px"') +
-    '<span class="wp-inline-unit">m</span>');
-
-  // Navigation action params
-  if (a === 'waypoint' || a === 'spline')
-    parts.push(inp('Hold', 'holdTime', 'number', wp.holdTime ?? 0, 'min="0" max="3600" style="width:48px"') +
-      '<span class="wp-inline-unit">s</span>');
-  if (LOITER_ACTIONS.has(a)) {
-    parts.push(inp('R', 'loiterR', 'number', wp.loiterR ?? 20, 'min="1" max="2000" style="width:52px"') +
-      '<span class="wp-inline-unit">m</span>');
-    if (a === 'loiter_time')
-      parts.push(inp('Dur', 'loiterTime', 'number', wp.loiterTime ?? 10, 'min="1" style="width:48px"') +
-        '<span class="wp-inline-unit">s</span>');
-    if (a === 'loiter_turns')
-      parts.push(inp('Turns', 'loiterTurns', 'number', wp.loiterTurns ?? 1, 'min="1" style="width:44px"'));
-  }
-
   // Pre-action params
   if (pa === 'delay')
-    parts.push(inp('Delay', 'delayTime', 'number', wp.delayTime ?? 5, 'min="0" style="width:48px"') +
+    paParts.push(inp('Delay', 'delayTime', 'number', wp.delayTime ?? 5, 'min="0" style="width:48px"') +
       '<span class="wp-inline-unit">s</span>');
   if (pa === 'set_speed') {
-    parts.push(sel('Spd', 'speedType', wp.speedType ?? 1, [['1','GS'],['0','AS']]));
-    parts.push(inp('', 'speed_disp', 'number', +msToDisp(wp.speed ?? 5).toFixed(1),
+    paParts.push(sel('Spd', 'speedType', wp.speedType ?? 1, [['1','GS'],['0','AS']]));
+    paParts.push(inp('', 'speed_disp', 'number', +msToDisp(wp.speed ?? 5).toFixed(1),
       `min="1" max="80" step="0.5" style="width:54px"`) +
       `<span class="wp-inline-unit">${spdLabel()}</span>`);
   }
   if (pa === 'cond_yaw') {
-    parts.push(inp('Hdg', 'yawHeading', 'number', wp.yawHeading ?? 0, 'min="0" max="360" style="width:50px"') +
+    paParts.push(inp('Hdg', 'yawHeading', 'number', wp.yawHeading ?? 0, 'min="0" max="360" style="width:50px"') +
       '<span class="wp-inline-unit">°</span>');
-    parts.push(inp('Spd', 'yawSpeed', 'number', wp.yawSpeed ?? 0, 'min="0" style="width:44px"'));
-    parts.push(sel('', 'yawRel', wp.yawRel ?? 0, [['0','Abs'],['1','Rel']]));
+    paParts.push(inp('Spd', 'yawSpeed', 'number', wp.yawSpeed ?? 0, 'min="0" style="width:44px"'));
+    paParts.push(sel('', 'yawRel', wp.yawRel ?? 0, [['0','Abs'],['1','Rel']]));
   }
   if (pa === 'do_jump') {
-    parts.push(inp('WP#', 'jumpWP', 'number', wp.jumpWP ?? 1, 'min="1" style="width:44px"'));
-    parts.push(inp('Rpt', 'jumpRepeat', 'number', wp.jumpRepeat ?? 1, 'min="-1" style="width:44px"'));
+    paParts.push(inp('WP#', 'jumpWP', 'number', wp.jumpWP ?? 1, 'min="1" style="width:44px"'));
+    paParts.push(inp('Rpt', 'jumpRepeat', 'number', wp.jumpRepeat ?? 1, 'min="-1" style="width:44px"'));
   }
   if (pa === 'set_servo' || pa === 'do_repeat_servo') {
-    parts.push(inp('#', 'servoNum', 'number', wp.servoNum ?? 9, 'min="1" max="16" style="width:40px"'));
-    parts.push(inp('PWM', 'servoPWM', 'number', wp.servoPWM ?? 1500, 'min="500" max="2500" style="width:58px"'));
+    paParts.push(inp('#', 'servoNum', 'number', wp.servoNum ?? 9, 'min="1" max="16" style="width:40px"'));
+    paParts.push(inp('PWM', 'servoPWM', 'number', wp.servoPWM ?? 1500, 'min="500" max="2500" style="width:58px"'));
     if (pa === 'do_repeat_servo') {
-      parts.push(inp('×', 'servoCycles', 'number', wp.servoCycles ?? 1, 'min="1" style="width:38px"'));
-      parts.push(inp('Dwell', 'servoDwell', 'number', wp.servoDwell ?? 1, 'min="0" step="0.1" style="width:44px"') +
+      paParts.push(inp('×', 'servoCycles', 'number', wp.servoCycles ?? 1, 'min="1" style="width:38px"'));
+      paParts.push(inp('Dwell', 'servoDwell', 'number', wp.servoDwell ?? 1, 'min="0" step="0.1" style="width:44px"') +
         '<span class="wp-inline-unit">s</span>');
     }
   }
   if (pa === 'do_set_relay' || pa === 'do_repeat_relay') {
-    parts.push(inp('#', 'relayNum', 'number', wp.relayNum ?? 0, 'min="0" style="width:38px"'));
-    parts.push(sel('', 'relayState', wp.relayState ?? 1, [['1','On'],['0','Off']]));
+    paParts.push(inp('#', 'relayNum', 'number', wp.relayNum ?? 0, 'min="0" style="width:38px"'));
+    paParts.push(sel('', 'relayState', wp.relayState ?? 1, [['1','On'],['0','Off']]));
     if (pa === 'do_repeat_relay') {
-      parts.push(inp('×', 'relayCycles', 'number', wp.relayCycles ?? 1, 'min="1" style="width:38px"'));
-      parts.push(inp('Dwell', 'relayDwell', 'number', wp.relayDwell ?? 1, 'min="0" step="0.1" style="width:44px"') +
+      paParts.push(inp('×', 'relayCycles', 'number', wp.relayCycles ?? 1, 'min="1" style="width:38px"'));
+      paParts.push(inp('Dwell', 'relayDwell', 'number', wp.relayDwell ?? 1, 'min="0" step="0.1" style="width:44px"') +
         '<span class="wp-inline-unit">s</span>');
     }
   }
   if (pa === 'cam_trigg_dist')
-    parts.push(inp('Dist', 'camDist', 'number', wp.camDist ?? 30, 'min="0" style="width:52px"') +
+    paParts.push(inp('Dist', 'camDist', 'number', wp.camDist ?? 30, 'min="0" style="width:52px"') +
       '<span class="wp-inline-unit">m</span>');
   if (pa === 'cond_distance')
-    parts.push(inp('Dist', 'condDist', 'number', wp.condDist ?? 10, 'min="0" style="width:52px"') +
+    paParts.push(inp('Dist', 'condDist', 'number', wp.condDist ?? 10, 'min="0" style="width:52px"') +
       '<span class="wp-inline-unit">m</span>');
   if (pa === 'do_gripper') {
-    parts.push(inp('#', 'gripperNum', 'number', wp.gripperNum ?? 0, 'min="0" style="width:38px"'));
-    parts.push(sel('', 'gripperAction', wp.gripperAction ?? 0, [['0','Release'],['1','Grab']]));
+    paParts.push(inp('#', 'gripperNum', 'number', wp.gripperNum ?? 0, 'min="0" style="width:38px"'));
+    paParts.push(sel('', 'gripperAction', wp.gripperAction ?? 0, [['0','Release'],['1','Grab']]));
   }
   if (pa === 'do_parachute')
-    parts.push(sel('Chute', 'parachuteCmd', wp.parachuteCmd ?? 2,
+    paParts.push(sel('Chute', 'parachuteCmd', wp.parachuteCmd ?? 2,
       [['0','Disable'],['1','Enable'],['2','Release']]));
   if (pa === 'do_mount_control') {
-    parts.push(inp('Pitch', 'mountPitch', 'number', wp.mountPitch ?? 0, 'min="-90" max="90" style="width:46px"') +
+    paParts.push(inp('Pitch', 'mountPitch', 'number', wp.mountPitch ?? 0, 'min="-90" max="90" style="width:46px"') +
       '<span class="wp-inline-unit">°</span>');
-    parts.push(inp('Roll', 'mountRoll', 'number', wp.mountRoll ?? 0, 'min="-90" max="90" style="width:46px"') +
+    paParts.push(inp('Roll', 'mountRoll', 'number', wp.mountRoll ?? 0, 'min="-90" max="90" style="width:46px"') +
       '<span class="wp-inline-unit">°</span>');
-    parts.push(inp('Yaw', 'mountYaw', 'number', wp.mountYaw ?? 0, 'min="-180" max="180" style="width:50px"') +
+    paParts.push(inp('Yaw', 'mountYaw', 'number', wp.mountYaw ?? 0, 'min="-180" max="180" style="width:50px"') +
       '<span class="wp-inline-unit">°</span>');
   }
   if (pa === 'set_roi')
-    parts.push(inp('Alt', 'roiAlt', 'number', wp.roiAlt ?? wp.alt, 'style="width:52px"') +
+    paParts.push(inp('Alt', 'roiAlt', 'number', wp.roiAlt ?? wp.alt, 'style="width:52px"') +
       '<span class="wp-inline-unit">m</span>');
 
-  return `<div class="wp-inline-params" data-wp="${idx}">${parts.join('')}</div>`;
+  const paGroupHTML = `<div class="wp-pa-group">${paParts.join('')}</div>`;
+
+  return `<div class="wp-inline-params" data-wp="${idx}">${actionParts.join('')}${paGroupHTML}</div>`;
 }
 
 // Auto-dismiss timer for the WP inline edit panel
