@@ -2836,7 +2836,7 @@ function selectWP(idx) {
   if (idx >= 0 && idx < waypoints.length) {
     const el = document.querySelector(`#wp-list .wp-item[data-wpidx="${idx}"]`);
     if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       el.classList.add('pulse');
       setTimeout(() => el.classList.remove('pulse'), 2000);
     }
