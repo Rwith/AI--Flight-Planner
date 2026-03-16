@@ -6167,28 +6167,33 @@ function _loadMission(id) {
   const m = _getMissions().find(x => x.id === id);
   if (!m) return;
   if (waypoints.length > 0 && !confirm(`Load "${m.name}"?\nThis replaces the current mission.`)) { window.electronBridge.blurWindow(); return; }
-  pushUndo(); stopPlane(); terrainElevations = null;
-  waypoints.forEach(wp => { _removeWpRoiMarker(wp); _removeLoiterCircle(wp); map.removeLayer(wp.marker); });
-  waypoints = []; selectedIdx = -1;
-  funcBlocks = [];
-  if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
-  _splinePolylines.forEach(l => map.removeLayer(l)); _splinePolylines = [];
-  if (m.home) { homeLat = m.home.lat; homeLon = m.home.lon; homeMarker.setLatLng([homeLat, homeLon]); try { localStorage.setItem('homeLat', homeLat); localStorage.setItem('homeLon', homeLon); } catch {} }
-  m.waypoints.forEach(d => addWaypointSilent(d.lat, d.lon, d.alt, d.action, d));
-  waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, false)));
-  if (Array.isArray(m.funcBlocks) && m.funcBlocks.length > 0) {
-    funcBlocks = m.funcBlocks;
-    _fbIdCounter = funcBlocks.reduce((mx, b) => Math.max(mx, b.id||0), _fbIdCounter);
-    _rebuildWpRoiMarkers();
-  }
-  if (waypoints.length > 0) {
-    const lats = waypoints.map(w => w.lat), lons = waypoints.map(w => w.lon);
-    map.fitBounds([[Math.min(...lats), Math.min(...lons)], [Math.max(...lats), Math.max(...lons)]], { padding:[50,50] });
-  }
-  updateGimbalLines(); updatePolyline(); updateProfile(); renderWPList(); _saveWaypoints();
-  if (waypoints.length >= 2) startPlane(true);
-  _currentMissionId = id;
-  closeMissionsPanel();
+  const overlay = document.getElementById('page-refresh-overlay');
+  overlay.classList.add('visible');
+  setTimeout(() => {
+    pushUndo(); stopPlane(); terrainElevations = null;
+    waypoints.forEach(wp => { _removeWpRoiMarker(wp); _removeLoiterCircle(wp); map.removeLayer(wp.marker); });
+    waypoints = []; selectedIdx = -1;
+    funcBlocks = [];
+    if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
+    _splinePolylines.forEach(l => map.removeLayer(l)); _splinePolylines = [];
+    if (m.home) { homeLat = m.home.lat; homeLon = m.home.lon; homeMarker.setLatLng([homeLat, homeLon]); try { localStorage.setItem('homeLat', homeLat); localStorage.setItem('homeLon', homeLon); } catch {} }
+    m.waypoints.forEach(d => addWaypointSilent(d.lat, d.lon, d.alt, d.action, d));
+    waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, false)));
+    if (Array.isArray(m.funcBlocks) && m.funcBlocks.length > 0) {
+      funcBlocks = m.funcBlocks;
+      _fbIdCounter = funcBlocks.reduce((mx, b) => Math.max(mx, b.id||0), _fbIdCounter);
+      _rebuildWpRoiMarkers();
+    }
+    if (waypoints.length > 0) {
+      const lats = waypoints.map(w => w.lat), lons = waypoints.map(w => w.lon);
+      map.fitBounds([[Math.min(...lats), Math.min(...lons)], [Math.max(...lats), Math.max(...lons)]], { padding:[50,50] });
+    }
+    updateGimbalLines(); updatePolyline(); updateProfile(); renderWPList(); _saveWaypoints();
+    if (waypoints.length >= 2) startPlane(true);
+    _currentMissionId = id;
+    overlay.classList.remove('visible');
+    closeMissionsPanel();
+  }, 250);
 }
 
 function _deleteMission(id) {
