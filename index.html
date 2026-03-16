@@ -185,6 +185,8 @@
   #logbook-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
   #logbook-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 3999; }
   #logbook-overlay.open { display: block; }
+  #page-refresh-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 9998; opacity: 0; pointer-events: none; transition: opacity .25s ease; }
+  #page-refresh-overlay.visible { opacity: 1; pointer-events: auto; }
 /* SPINNER */
   .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 6px; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -1079,6 +1081,8 @@
 </div>
 
 
+<!-- PAGE REFRESH OVERLAY -->
+<div id="page-refresh-overlay"></div>
 <!-- MISSIONS PANEL -->
 <div id="missions-overlay" onclick="closeMissionsPanel()"></div>
 <div id="missions-panel">
@@ -2616,20 +2620,25 @@ function deleteWPByIdx(idx) {
 
 function clearMission() {
   if (!confirm('Clear all waypoints?')) return;
-  pushUndo();
-  stopPlane();
-  terrainElevations = null;
-  waypoints.forEach(wp => { _removeWpRoiMarker(wp); _removeLoiterCircle(wp); map.removeLayer(wp.marker); });
-  waypoints = []; selectedIdx = -1;
-  funcBlocks = []; // function blocks are also cleared with the mission
-  if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
-  _splinePolylines.forEach(l => map.removeLayer(l)); _splinePolylines = [];
-  updateGimbalLines();
-  updateProfile(); renderWPList();
-  _saveWaypoints();
-  _currentMissionId = null;
-  _refreshUpdateRow();
-  _renderMissionList();
+  const overlay = document.getElementById('page-refresh-overlay');
+  overlay.classList.add('visible');
+  setTimeout(() => {
+    pushUndo();
+    stopPlane();
+    terrainElevations = null;
+    waypoints.forEach(wp => { _removeWpRoiMarker(wp); _removeLoiterCircle(wp); map.removeLayer(wp.marker); });
+    waypoints = []; selectedIdx = -1;
+    funcBlocks = []; // function blocks are also cleared with the mission
+    if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
+    _splinePolylines.forEach(l => map.removeLayer(l)); _splinePolylines = [];
+    updateGimbalLines();
+    updateProfile(); renderWPList();
+    _saveWaypoints();
+    _currentMissionId = null;
+    _refreshUpdateRow();
+    _renderMissionList();
+    overlay.classList.remove('visible');
+  }, 250);
 }
 
 // ====================== EXPORT/IMPORT ======================
