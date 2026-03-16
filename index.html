@@ -2948,7 +2948,7 @@ function exportWaypoints() {
       else if (pa === 'do_gripper')      { pcmd=187; pp1=wp.gripperNum??0; pp2=wp.gripperAction??0; }
       else if (pa === 'do_parachute')    { pcmd=208; pp1=wp.parachuteCmd??2; }
       else if (pa === 'do_mount_control'){ pcmd=205; pp1=wp.mountPitch||0; pp2=wp.mountRoll||0; pp3=wp.mountYaw||0; }
-      else if (pa === 'set_roi_none')    { pcmd=197; }
+      else if (pa === 'set_roi_none')    { pcmd=201; }
       if (pcmd) {
         const pfLat = plat ? plat.toFixed(7) : '0';
         const pfLon = plon ? plon.toFixed(7) : '0';
@@ -2980,7 +2980,7 @@ function importWaypoints(event) {
     // DO/CONDITION commands attached as post-action to the preceding nav wp
     const PA_CMD_MAP = {
       93:'delay', 114:'cond_distance', 115:'cond_yaw',
-      178:'set_speed', 177:'do_jump', 201:'set_roi', 197:'set_roi_none',
+      178:'set_speed', 177:'do_jump', 201:'set_roi',
       183:'set_servo', 184:'do_repeat_servo',
       181:'do_set_relay', 182:'do_repeat_relay',
       206:'cam_trigg_dist', 187:'do_gripper', 208:'do_parachute', 205:'do_mount_control',

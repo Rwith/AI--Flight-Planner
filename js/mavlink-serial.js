@@ -620,6 +620,7 @@
       else if (a === 'set_speed')       { cmd=178; p1=wp.speedType??1; p2=wp.speed||5; p3=-1; lat=0; lon=0; alt=0; }
       else if (a === 'do_jump')         { cmd=177; p1=wp.jumpWP||1; p2=wp.jumpRepeat||1; lat=0; lon=0; alt=0; }
       else if (a === 'set_roi')         { cmd=201; p1=3; }
+      else if (a === 'set_roi_none')    { cmd=201; p1=0; lat=0; lon=0; alt=0; }
       else if (a === 'set_servo')       { cmd=183; p1=wp.servoNum||9; p2=wp.servoPWM||1500; lat=0; lon=0; alt=0; }
       else if (a === 'do_repeat_servo') { cmd=184; p1=wp.servoNum||9; p2=wp.servoPWM||1500; p3=wp.servoCycles||1; p4=wp.servoDwell||1; lat=0; lon=0; alt=0; }
       else if (a === 'do_set_relay')    { cmd=181; p1=wp.relayNum??0; p2=wp.relayState??1; lat=0; lon=0; alt=0; }
