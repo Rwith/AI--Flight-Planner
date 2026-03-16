@@ -139,6 +139,7 @@
     padding: 4px 6px;
   }
   .wp-action-col { display: flex; flex-direction: column; gap: 4px; }
+  .wp-action-row { display: flex; align-items: flex-start; flex-wrap: nowrap; gap: 10px; }
   .form-row { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
   .form-row label { font-size: 11px; color: var(--sec); }
   .form-row input, .form-row select, .form-row textarea {
@@ -1954,7 +1955,7 @@ function _wpInlineParamsHTML(wp, idx) {
   const actionNumRow = actionNumParts.length ? `<div class="wp-inline-row">${actionNumParts.join('')}</div>` : '';
   const actionCol = `<div class="wp-action-col"><div class="wp-inline-row">${actionSelParts.join('')}</div>${actionNumRow}</div>`;
 
-  return `<div class="wp-inline-params" data-wp="${idx}"><div class="wp-inline-row">${actionCol}${paGroup}</div></div>`;
+  return `<div class="wp-inline-params" data-wp="${idx}"><div class="wp-action-row">${actionCol}${paGroup}</div></div>`;
 }
 
 // Auto-dismiss timer for the WP inline edit panel
