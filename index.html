@@ -2627,6 +2627,9 @@ function clearMission() {
   updateGimbalLines();
   updateProfile(); renderWPList();
   _saveWaypoints();
+  _currentMissionId = null;
+  _refreshUpdateRow();
+  _renderMissionList();
 }
 
 // ====================== EXPORT/IMPORT ======================
