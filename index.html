@@ -1415,7 +1415,7 @@ function _loadFuncBlocks() {
     if (!Array.isArray(data)) return;
     funcBlocks = data;
     _fbIdCounter = funcBlocks.reduce((mx, b) => Math.max(mx, b.id || 0), _fbIdCounter);
-    _rebuildRoiMarkers();
+    _rebuildWpRoiMarkers();
   } catch {}
 }
 
@@ -2279,6 +2279,10 @@ function _createWpRoiMarker(wp) {
     const p = e.target.getLatLng();
     wp.roiLat = +p.lat.toFixed(6);
     wp.roiLon = +p.lng.toFixed(6);
+    // Sync back to the owning function block (if any)
+    const wpIdx = waypoints.indexOf(wp);
+    const blk = funcBlocks.find(b => b.type === 'set_roi' && b.startWpIdx === wpIdx);
+    if (blk) { blk.params.lat = wp.roiLat; blk.params.lon = wp.roiLon; _saveFuncBlocks(); }
     _saveWaypoints();
     renderWPList();
   });
@@ -2312,28 +2316,6 @@ function _makeRoiIcon() {
     iconSize: [30, 30], iconAnchor: [15, 15]
   });
 }
-function _createRoiMarker(bIdx) {
-  const blk = funcBlocks[bIdx];
-  if (blk.type !== 'set_roi') return;
-  if (blk._roiMarker) { map.removeLayer(blk._roiMarker); blk._roiMarker = null; }
-  if (blk.params.lat == null) { blk.params.lat = +homeLat.toFixed(6); blk.params.lon = +homeLon.toFixed(6); }
-  const m = L.marker([blk.params.lat, blk.params.lon], {
-    icon: _makeRoiIcon(), draggable: true, zIndexOffset: 700
-  }).addTo(map);
-  m.bindTooltip('ROI', { permanent: false, direction: 'top', offset: [0, -16] });
-  m.on('dragend', e => {
-    const p = e.target.getLatLng();
-    blk.params.lat = +p.lat.toFixed(6);
-    blk.params.lon = +p.lng.toFixed(6);
-    _applyFuncBlock(funcBlocks.indexOf(blk));
-    _saveFuncBlocks();
-    renderWPList();
-  });
-  blk._roiMarker = m;
-}
-function _rebuildRoiMarkers() {
-  funcBlocks.forEach((blk, bIdx) => { if (blk.type === 'set_roi') _createRoiMarker(bIdx); });
-}
 function _rebuildWpRoiMarkers() {
   waypoints.forEach(wp => {
     if (wp.preAction === 'set_roi') _createWpRoiMarker(wp);
@@ -2363,7 +2345,6 @@ function addFuncBlock(type) {
     blk.params.alt = wp0.alt;
   }
   funcBlocks.push(blk);
-  if (type === 'set_roi') _createRoiMarker(funcBlocks.length - 1);
   _applyFuncBlock(funcBlocks.length - 1);
   _saveFuncBlocks();
   renderWPList();
@@ -2439,7 +2420,6 @@ function updateFuncBlockStr(bIdx, key, value) {
 function deleteFuncBlock(bIdx) {
   pushUndo();
   const blk = funcBlocks[bIdx];
-  if (blk?._roiMarker) { map.removeLayer(blk._roiMarker); blk._roiMarker = null; }
   if (blk?.type === 'set_roi') {
     const s = Math.max(0, Math.min(blk.startWpIdx, waypoints.length - 1));
     const e = Math.max(s, Math.min(blk.endWpIdx, waypoints.length - 1));
@@ -2641,7 +2621,6 @@ function clearMission() {
   terrainElevations = null;
   waypoints.forEach(wp => { _removeWpRoiMarker(wp); _removeLoiterCircle(wp); map.removeLayer(wp.marker); });
   waypoints = []; selectedIdx = -1;
-  funcBlocks.forEach(blk => { if (blk._roiMarker) map.removeLayer(blk._roiMarker); });
   funcBlocks = []; // function blocks are also cleared with the mission
   if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
   _splinePolylines.forEach(l => map.removeLayer(l)); _splinePolylines = [];
@@ -6179,7 +6158,7 @@ function _loadMission(id) {
   pushUndo(); stopPlane(); terrainElevations = null;
   waypoints.forEach(wp => { _removeWpRoiMarker(wp); _removeLoiterCircle(wp); map.removeLayer(wp.marker); });
   waypoints = []; selectedIdx = -1;
-  funcBlocks.forEach(b => { if (b._roiMarker) map.removeLayer(b._roiMarker); }); funcBlocks = [];
+  funcBlocks = [];
   if (missionPolyline) { map.removeLayer(missionPolyline); missionPolyline = null; }
   _splinePolylines.forEach(l => map.removeLayer(l)); _splinePolylines = [];
   if (m.home) { homeLat = m.home.lat; homeLon = m.home.lon; homeMarker.setLatLng([homeLat, homeLon]); try { localStorage.setItem('homeLat', homeLat); localStorage.setItem('homeLon', homeLon); } catch {} }
@@ -6188,7 +6167,7 @@ function _loadMission(id) {
   if (Array.isArray(m.funcBlocks) && m.funcBlocks.length > 0) {
     funcBlocks = m.funcBlocks;
     _fbIdCounter = funcBlocks.reduce((mx, b) => Math.max(mx, b.id||0), _fbIdCounter);
-    _rebuildRoiMarkers();
+    _rebuildWpRoiMarkers();
   }
   if (waypoints.length > 0) {
     const lats = waypoints.map(w => w.lat), lons = waypoints.map(w => w.lon);
