@@ -806,17 +806,20 @@
   <!-- LIVE VIDEO FEED -->
   <div class="gcs-section-title">Live Video Feed</div>
   <div id="gcs-video-card" style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px">
+    <!-- Device picker row -->
     <div style="display:flex;gap:6px;align-items:center">
-      <input id="gcs-video-url" type="text" placeholder="http://10.0.0.1:8080/?action=stream"
+      <select id="gcs-video-device" onchange="gcsVideoDeviceChange()"
         style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:5px 8px;font-size:11px;outline:none;min-width:0">
-      <button id="gcs-video-toggle-btn" class="btn primary" onclick="gcsVideoToggle()" style="font-size:11px;padding:5px 10px;white-space:nowrap">▶ Start</button>
+        <option value="">— select HDMI input —</option>
+      </select>
+      <button id="gcs-video-refresh-btn" class="btn" onclick="gcsVideoEnumDevices()" style="font-size:11px;padding:5px 8px" title="Refresh device list">↺</button>
     </div>
+    <button id="gcs-video-toggle-btn" class="btn primary" onclick="gcsVideoToggle()" style="font-size:12px;padding:8px;width:100%">▶ Connect</button>
     <!-- Feed display area -->
     <div id="gcs-video-wrap" style="display:none;position:relative;background:#000;border-radius:6px;overflow:hidden;line-height:0">
-      <img id="gcs-video-img" alt="Live Feed"
-        style="width:100%;display:block;border-radius:6px"
-        onerror="gcsVideoError()">
-      <div id="gcs-video-err" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--red);font-size:11px;background:rgba(0,0,0,.7);border-radius:6px">Stream unavailable</div>
+      <video id="gcs-video-el" autoplay playsinline muted
+        style="width:100%;display:block;border-radius:6px"></video>
+      <div id="gcs-video-err" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--red);font-size:11px;background:rgba(0,0,0,.7);border-radius:6px;text-align:center;padding:8px"></div>
     </div>
     <!-- Snapshot controls -->
     <div id="gcs-video-controls" style="display:none;gap:6px">
@@ -5300,54 +5303,109 @@ function exportKML() {
 
 // ====================== GCS LIVE VIDEO FEED ======================
 let _gcsVideoActive = false;
+let _gcsVideoStream = null;
+
+async function gcsVideoEnumDevices() {
+  const sel = document.getElementById('gcs-video-device');
+  if (!sel) return;
+  try {
+    // Request permission first so device labels are populated
+    await navigator.mediaDevices.getUserMedia({ video: true }).then(s => s.getTracks().forEach(t => t.stop())).catch(() => {});
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">— select HDMI input —</option>';
+    videoDevices.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value       = d.deviceId;
+      opt.textContent = d.label || `Camera ${d.deviceId.slice(0, 8)}`;
+      if (d.deviceId === current) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    if (!videoDevices.length) {
+      sel.innerHTML = '<option value="">No video devices found</option>';
+    }
+  } catch (e) {
+    sel.innerHTML = '<option value="">Permission denied</option>';
+  }
+}
+
+function gcsVideoDeviceChange() {
+  if (_gcsVideoActive) { gcsVideoStop(); }
+}
 
 function gcsVideoToggle() {
   _gcsVideoActive ? gcsVideoStop() : gcsVideoStart();
 }
 
-function gcsVideoStart() {
-  const url = document.getElementById('gcs-video-url').value.trim();
-  if (!url) return;
-  _gcsVideoActive = true;
-  const img  = document.getElementById('gcs-video-img');
+async function gcsVideoStart() {
+  const sel = document.getElementById('gcs-video-device');
+  const deviceId = sel ? sel.value : '';
+  if (!deviceId) { gcsVideoShowErr('Select an HDMI input device first'); return; }
+
   const wrap = document.getElementById('gcs-video-wrap');
   const ctrl = document.getElementById('gcs-video-controls');
   const btn  = document.getElementById('gcs-video-toggle-btn');
+  const vid  = document.getElementById('gcs-video-el');
   const err  = document.getElementById('gcs-video-err');
-  img.src = url;
-  wrap.style.display = 'block';
-  ctrl.style.display = 'flex';
-  err.style.display  = 'none';
-  btn.textContent    = '■ Stop';
-  btn.classList.add('danger');
-  btn.classList.remove('primary');
+
+  btn.textContent  = 'Connecting…';
+  btn.disabled     = true;
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: { exact: deviceId } },
+      audio: false
+    });
+    _gcsVideoStream  = stream;
+    _gcsVideoActive  = true;
+    vid.srcObject    = stream;
+    wrap.style.display = 'block';
+    ctrl.style.display = 'flex';
+    err.style.display  = 'none';
+    btn.textContent    = '■ Disconnect';
+    btn.disabled       = false;
+    btn.classList.add('danger');
+    btn.classList.remove('primary');
+  } catch (e) {
+    btn.textContent = '▶ Connect';
+    btn.disabled    = false;
+    gcsVideoShowErr(e.name === 'NotAllowedError' ? 'Camera permission denied' : 'Could not open device');
+  }
 }
 
 function gcsVideoStop() {
   _gcsVideoActive = false;
-  const img  = document.getElementById('gcs-video-img');
+  if (_gcsVideoStream) {
+    _gcsVideoStream.getTracks().forEach(t => t.stop());
+    _gcsVideoStream = null;
+  }
+  const vid  = document.getElementById('gcs-video-el');
   const wrap = document.getElementById('gcs-video-wrap');
   const ctrl = document.getElementById('gcs-video-controls');
   const btn  = document.getElementById('gcs-video-toggle-btn');
-  img.src = '';
-  wrap.style.display = 'none';
-  ctrl.style.display = 'none';
-  btn.textContent    = '▶ Start';
-  btn.classList.add('primary');
-  btn.classList.remove('danger');
+  if (vid)  { vid.srcObject = null; }
+  if (wrap) { wrap.style.display = 'none'; }
+  if (ctrl) { ctrl.style.display = 'none'; }
+  if (btn)  { btn.textContent = '▶ Connect'; btn.classList.add('primary'); btn.classList.remove('danger'); }
   gcsVideoHideStatus();
 }
 
-function gcsVideoError() {
+function gcsVideoShowErr(msg) {
   const err = document.getElementById('gcs-video-err');
-  if (err) { err.style.display = 'flex'; err.style.alignItems = 'center'; }
+  if (!err) return;
+  err.textContent = msg;
+  err.style.display = 'flex';
+  err.style.alignItems = 'center';
+  const wrap = document.getElementById('gcs-video-wrap');
+  if (wrap) wrap.style.display = 'block';
 }
 
 function gcsVideoShowStatus(msg) {
   const el = document.getElementById('gcs-video-status');
   if (!el) return;
-  el.textContent    = msg;
-  el.style.display  = 'block';
+  el.textContent   = msg;
+  el.style.display = 'block';
 }
 
 function gcsVideoHideStatus() {
@@ -5356,19 +5414,18 @@ function gcsVideoHideStatus() {
 }
 
 function gcsVideoSnapshot() {
-  const img = document.getElementById('gcs-video-img');
-  if (!img || !img.src || !_gcsVideoActive) return;
+  const vid = document.getElementById('gcs-video-el');
+  if (!vid || !_gcsVideoActive) return;
   gcsVideoShowStatus('Saving snapshot…');
   try {
     const canvas = document.createElement('canvas');
-    canvas.width  = img.naturalWidth  || img.width  || 640;
-    canvas.height = img.naturalHeight || img.height || 480;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.width  = vid.videoWidth  || 1280;
+    canvas.height = vid.videoHeight || 720;
+    canvas.getContext('2d').drawImage(vid, 0, 0, canvas.width, canvas.height);
     canvas.toBlob(blob => {
       if (!blob) { gcsVideoShowStatus('Snapshot failed'); setTimeout(gcsVideoHideStatus, 2500); return; }
-      const a   = document.createElement('a');
-      const ts  = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const a  = document.createElement('a');
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       a.href     = URL.createObjectURL(blob);
       a.download = `snapshot-${ts}.png`;
       a.click();
@@ -5376,10 +5433,22 @@ function gcsVideoSnapshot() {
       gcsVideoHideStatus();
     }, 'image/png');
   } catch (e) {
-    gcsVideoShowStatus('Snapshot failed (CORS?)');
+    gcsVideoShowStatus('Snapshot failed');
     setTimeout(gcsVideoHideStatus, 2500);
   }
 }
+
+// Auto-enumerate devices when GCS panel opens
+const _gcsVideoOrigToggle = window.toggleGCS;
+window.addEventListener('DOMContentLoaded', () => {
+  const origToggle = toggleGCS;
+  window.toggleGCS = function() {
+    origToggle();
+    if (document.getElementById('gcs-panel').classList.contains('active')) {
+      gcsVideoEnumDevices();
+    }
+  };
+});
 
 // ====================== HUD ======================
 let _hudVisible = true; // HUD lives in GCS panel — always on when GCS is active
