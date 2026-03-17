@@ -533,12 +533,14 @@
         //   rpm[4]          (u16, bytes 24..31) [RPM]
         //   count[4]        (u16, bytes 32..39)
         //   temperature[4]  (u8,  bytes 40..43) [degC]
-        // Display ESC 1 (index 0) values
+        // Display ESC 1 (index 0) for temp/RPM; sum all 4 for current
         // Temperature is always shown — ESC is powered even when disarmed
         if (payload.length >= 41) tele.escTemp = payload[40];                   // uint8, °C
         // Current and RPM show bogus startup values when disarmed; only show when armed
         const isArmed = tele.baseMode != null && (tele.baseMode & 0x80);
-        tele.escCurr = (isArmed && payload.length >= 10) ? dv.getUint16(8,  true) / 100 : null; // cA → A
+        tele.escCurr = (isArmed && payload.length >= 16) ?
+          (dv.getUint16(8,  true) + dv.getUint16(10, true) +
+           dv.getUint16(12, true) + dv.getUint16(14, true)) / 100 : null; // sum 4 ESC cA → A
         tele.escRpm  = (isArmed && payload.length >= 26) ? dv.getUint16(24, true)        : null;
         renderTele();
         break;
