@@ -3308,7 +3308,7 @@ function makeRallyIcon(idx) {
   });
 }
 function addRallyPoint(lat, lon) {
-  const defaultAlt = parseInt(document.getElementById('default-alt').value) || 50;
+  const defaultAlt = _defaultAlt;
   const marker = L.marker([lat, lon], { icon: makeRallyIcon(rallyPoints.length), draggable: true, zIndexOffset: 600 }).addTo(map);
   const rp = { lat, lon, alt: defaultAlt, marker };
   rallyPoints.push(rp);
