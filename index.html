@@ -5212,6 +5212,7 @@ function downloadTilesForView() { openCacheManager(); }
 let _gcsActive = false;
 let _gcsArmed  = false;
 let _gcsMavType = 'copter'; // auto-detected from heartbeat
+let _overrideAutoOffTimer = null; // auto-turns off safety override 5s after disarm
 
 const COPTER_MODE_NAMES = {
   0:'STABILIZE', 1:'ACRO', 2:'ALT HOLD', 3:'AUTO', 4:'GUIDED', 5:'LOITER',
@@ -5410,7 +5411,23 @@ window.gcsUpdate = function(tele) {
 
   // ARM badge
   const armed = !!(tele.baseMode & 0x80);
+  const wasArmed = _gcsArmed;
   _gcsArmed = armed;
+
+  // Auto-turn-off safety override 5 s after disarm
+  if (wasArmed && !armed) {
+    clearTimeout(_overrideAutoOffTimer);
+    _overrideAutoOffTimer = setTimeout(() => {
+      const chk = document.getElementById('gcs-force-arm-chk');
+      const row = document.getElementById('gcs-force-arm-row');
+      if (chk) chk.checked = false;
+      if (row) row.classList.remove('active');
+      _overrideAutoOffTimer = null;
+    }, 5000);
+  } else if (armed) {
+    clearTimeout(_overrideAutoOffTimer);
+    _overrideAutoOffTimer = null;
+  }
   const badge = document.getElementById('gcs-arm-badge');
   if (badge) {
     badge.textContent = tele.baseMode != null ? (armed ? 'ARMED' : 'DISARMED') : '--';
