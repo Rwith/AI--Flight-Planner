@@ -1600,12 +1600,14 @@
     addLog(`[mode] SET_MODE + DO_SET_MODE custom_mode=${customMode} → sysid=${tSys} (×3)`);
   };
 
-  window.serialArmDisarm = (arm) => {
+  window.serialArmDisarm = (arm, force = false) => {
     if (!writer) { addLog('[arm] Not connected'); return; }
     const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
     const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
-    writer.write(buildCommandLong(tSys, tComp, 400, arm ? 1 : 0, 0, 0, 0, 0, 0, 0, 0)).catch(e => addLog('[arm] ' + e.message));
-    addLog(`[arm] COMMAND_LONG ARM_DISARM param1=${arm ? 1 : 0} → sysid=${tSys}`);
+    // param2=21196 forces arming and bypasses pre-arm checks (safety override)
+    const param2 = (arm && force) ? 21196 : 0;
+    writer.write(buildCommandLong(tSys, tComp, 400, arm ? 1 : 0, param2, 0, 0, 0, 0, 0, 0)).catch(e => addLog('[arm] ' + e.message));
+    addLog(`[arm] COMMAND_LONG ARM_DISARM param1=${arm ? 1 : 0} param2=${param2}${force ? ' (FORCE)' : ''} → sysid=${tSys}`);
   };
 
   // ─── RC_CHANNELS_OVERRIDE — joystick control ──────────────────────────────
