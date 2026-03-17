@@ -328,7 +328,9 @@
   window._getLiveAltPoints = () => liveAltLog;
 
   // ─── Live drone map marker ────────────────────────────────────────────────
-  let droneMarker   = null;  // Leaflet marker showing live FC position
+  let droneMarker          = null;  // Leaflet marker showing live FC position
+  let droneTrailPositions  = [];    // [lat,lon] history for trail polyline
+  let droneTrailLine       = null;  // Leaflet polyline showing flight trail
   let homeSet       = false; // true once home has been snapped to 8+ sat fix
   let streamsAsked  = false; // send REQUEST_DATA_STREAM only once per session
 
@@ -344,15 +346,31 @@
         icon: L.divIcon({ className: '', html: DRONE_ICON_HTML, iconSize: [22, 30], iconAnchor: [11, 15] }),
         zIndexOffset: 3000, interactive: false
       }).addTo(map);
+      // Stop the simulated plane animation when a real drone connects
+      window.stopPlane?.();
     } else {
       droneMarker.setLatLng([lat, lon]);
     }
+
+    // Maintain a trail polyline showing the drone's recent flight path
+    droneTrailPositions.push([lat, lon]);
+    if (droneTrailPositions.length > 500) droneTrailPositions.shift();
+    if (!droneTrailLine) {
+      droneTrailLine = L.polyline(droneTrailPositions, {
+        color: '#3fb950', weight: 2, opacity: 0.65, dashArray: '5 5'
+      }).addTo(map);
+    } else {
+      droneTrailLine.setLatLngs(droneTrailPositions);
+    }
+
     const el = document.getElementById('live-drone-icon');
     if (el && headingDeg != null) el.style.transform = `rotate(${headingDeg}deg)`;
   }
 
   function removeDroneMarker () {
-    if (droneMarker) { map?.removeLayer(droneMarker); droneMarker = null; }
+    if (droneMarker)    { map?.removeLayer(droneMarker);    droneMarker   = null; }
+    if (droneTrailLine) { map?.removeLayer(droneTrailLine); droneTrailLine = null; }
+    droneTrailPositions = [];
     homeSet      = false;
     streamsAsked = false;
   }
@@ -508,12 +526,13 @@
         break;
       }
       case 11030: { // ESC_TELEMETRY_1_TO_4 (ArduPilot)
-        // Wire: temperature[4](u8,0..3), voltage[4](u16,4..11), current[4](u16,12..19),
-        //        totalcurrent[4](u16,20..27), rpm[4](u16,28..35), count[4](u16,36..43)
+        // Wire: temperature[4](u16,0..7)[cdegK], voltage[4](u16,8..15)[cV],
+        //        current[4](u16,16..23)[cA], totalcurrent[4](u16,24..31)[mAh],
+        //        rpm[4](u16,32..39)[RPM], count[4](u16,40..47)
         // Display ESC 1 (index 0) values
-        if (payload.length >= 4)  tele.escTemp = payload[0]; // degC
-        if (payload.length >= 30) tele.escRpm  = dv.getUint16(28, true);
-        if (payload.length >= 14) tele.escCurr = dv.getUint16(12, true) / 100; // cA → A
+        if (payload.length >= 2)  tele.escTemp = +(dv.getUint16(0, true) / 100 - 273.15).toFixed(1); // cdegK → °C
+        if (payload.length >= 34) tele.escRpm  = dv.getUint16(32, true);
+        if (payload.length >= 18) tele.escCurr = dv.getUint16(16, true) / 100; // cA → A
         renderTele();
         break;
       }
