@@ -3344,7 +3344,13 @@ function renderRallyList() {
       <div style="width:20px;height:20px;border-radius:3px;background:#ff922b;color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">R${i+1}</div>
       <div style="flex:1;font-size:11px">
         <div style="font-weight:600">Rally ${i+1}</div>
-        <div style="color:var(--sec)">${rp.lat.toFixed(5)}, ${rp.lon.toFixed(5)} · ${rp.alt}m</div>
+        <div style="color:var(--sec)">${rp.lat.toFixed(5)}, ${rp.lon.toFixed(5)}</div>
+        <div style="display:flex;align-items:center;gap:4px;margin-top:3px">
+          <label style="color:var(--sec)">Alt (m):</label>
+          <input type="number" value="${rp.alt}" min="0" step="1"
+            style="width:64px;font-size:11px;padding:1px 4px;background:var(--input-bg,#1e2129);color:var(--fg);border:1px solid var(--border);border-radius:4px"
+            onchange="rallyPoints[${i}].alt=parseFloat(this.value)||0">
+        </div>
       </div>
       <span style="color:var(--red);cursor:pointer;font-size:13px;padding:2px 4px" onclick="deleteRallyPoint(${i})">✕</span>
     </div>`).join('');

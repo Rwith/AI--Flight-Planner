@@ -364,6 +364,10 @@
     switch (msgId) {
       case 0: { // HEARTBEAT — type, autopilot, base_mode, system_status
         // Wire (sorted 32→8): custom_mode(u32,0), type(u8,4), autopilot(u8,5), base_mode(u8,6), system_status(u8,7), mavlink_version(u8,8)
+        // Skip heartbeats from ground control stations (MAV_TYPE_GCS=6) — these include
+        // our own keepalive frames that loop back over WiFi bridge and would otherwise
+        // clobber tele.mavType and cause the GCS panel to flicker between copter/plane.
+        if (payload.length >= 5 && payload[4] === 6) break;
         if (payload.length >= 9) {
           tele.customMode = dv.getUint32(0, true);
           tele.mavType    = payload[4]; // 1=plane, 2=quad, 13=hex, 14=octo
@@ -547,8 +551,10 @@
             addLog('[upload] Mission accepted by FC');
             uploadState.resolve();
           } else {
-            setUploadStatus(`Upload rejected (code ${mType})`, 'err');
-            addLog(`[upload] MISSION_ACK type=${mType}`);
+            const ACK_NAMES = { 1:'ERROR', 2:'UNSUPPORTED_FRAME', 3:'UNSUPPORTED', 4:'NO_SPACE', 5:'INVALID', 11:'INVALID_SEQUENCE' };
+            const label = ACK_NAMES[mType] ?? `code ${mType}`;
+            setUploadStatus(`Upload rejected: ${label}`, 'err');
+            addLog(`[upload] MISSION_ACK type=${mType} (${label})`);
             uploadState.reject(new Error('MISSION_ACK ' + mType));
           }
           uploadState = null;
@@ -687,7 +693,7 @@
     }
 
     const current = (seq === 1) ? 1 : 0;
-    const frame_ = buildMissionItemInt(seq, lat, lon, alt, cmd, p1, p2, p3, p4, frame, current, 1, tSys, tComp);
+    const frame_ = buildMissionItemIntV2(seq, lat, lon, alt, cmd, p1, p2, p3, p4, frame, current, 1, tSys, tComp, 0 /*MAV_MISSION_TYPE_MISSION*/);
     writer.write(frame_).catch(e => addLog('[write] ' + e.message));
     setUploadStatus(`Uploading WP ${seq} / ${wps.length - 1}…`, 'info');
     addLog(`[upload] Sent MISSION_ITEM_INT seq=${seq} cmd=${cmd} lat=${lat} alt=${alt}`);
@@ -1243,10 +1249,12 @@
 
     uploadState = { wps: list, tSys, tComp, resolve: resolveUp, reject: rejectUp };
 
-    // Kick off the upload by sending MISSION_COUNT.
+    // Kick off the upload by sending MISSION_COUNT (MAVLink v2, mission_type=0).
+    // Using v2 with an explicit mission_type avoids MAV_MISSION_UNSUPPORTED (ACK 3)
+    // on ArduPilot firmware that enforces mission_type in MISSION_REQUEST_INT.
     try {
-      await writer.write(buildMissionCount(list.length, tSys, tComp));
-      addLog(`[upload] MISSION_COUNT=${list.length} sent to sysid=${tSys}`);
+      await writer.write(buildMissionCountV2(list.length, tSys, tComp, 0));
+      addLog(`[upload] MISSION_COUNT=${list.length} mission_type=MISSION sent to sysid=${tSys}`);
       setUploadStatus('Waiting for FC…', 'info');
     } catch (e) {
       uploadState = null;
