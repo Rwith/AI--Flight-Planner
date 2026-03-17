@@ -474,8 +474,10 @@
     display:none; flex:1; flex-direction:column; background:#000;
     border-left:1px solid var(--border); min-width:0; position:relative;
   }
-  #main.video-split #video-expand-panel { display:flex; }
+  #main.video-split #video-expand-panel { display:flex; flex:0 0 50%; max-width:50%; }
+  #main.video-split #map-area { flex:1; }
   #main.video-split #sidebar { display:none; }
+  body.gcs-active #main.video-split { margin-right:360px; }
   #video-expand-header {
     display:flex; align-items:center; justify-content:space-between;
     padding:8px 12px; background:var(--panel); border-bottom:1px solid var(--border);
@@ -5064,6 +5066,7 @@ function toggleGCS() {
   const msnBtns = document.getElementById('topbar-mission-btns');
 
   panel.classList.toggle('active', _gcsActive);
+  document.body.classList.toggle('gcs-active', _gcsActive);
   btn.classList.toggle('gcs-on', _gcsActive);
   btn.textContent = _gcsActive ? '⬢ GCS ✓' : '⬢ GCS';
   msnBtns.style.display = _gcsActive ? 'none' : 'flex';
@@ -5542,9 +5545,6 @@ function gcsVideoExpand() {
   const expandedVid = document.getElementById('gcs-video-el-expanded');
   if (expandedVid) expandedVid.srcObject = _gcsVideoStream;
   document.getElementById('main').classList.add('video-split');
-  // Close GCS panel so the map gets full left-half space
-  const panel = document.getElementById('gcs-panel');
-  if (panel && panel.classList.contains('active')) toggleGCS();
   // Invalidate map size so Leaflet redraws correctly
   if (typeof map !== 'undefined') setTimeout(() => map.invalidateSize(), 50);
 }
