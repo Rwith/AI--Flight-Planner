@@ -550,14 +550,37 @@
             setUploadStatus('Upload complete ✓', 'ok');
             addLog('[upload] Mission accepted by FC');
             uploadState.resolve();
+            uploadState = null;
           } else {
             const ACK_NAMES = { 1:'ERROR', 2:'UNSUPPORTED_FRAME', 3:'UNSUPPORTED', 4:'NO_SPACE', 5:'INVALID', 11:'INVALID_SEQUENCE' };
             const label = ACK_NAMES[mType] ?? `code ${mType}`;
-            setUploadStatus(`Upload rejected: ${label}`, 'err');
-            addLog(`[upload] MISSION_ACK type=${mType} (${label})`);
-            uploadState.reject(new Error('MISSION_ACK ' + mType));
+            // On first UNSUPPORTED (type=3), auto-retry with spline waypoints converted to
+            // regular waypoints — some vehicle types (Plane, Rover) reject NAV_SPLINE_WAYPOINT.
+            if (mType === 3 && !uploadState.fallback) {
+              const fallbackWps = uploadState.wps.map(wp =>
+                wp.action === 'spline' ? { ...wp, action: 'waypoint' } : wp
+              );
+              const hadSpline = uploadState.wps.some(wp => wp.action === 'spline');
+              if (hadSpline) {
+                addLog('[upload] UNSUPPORTED — spline waypoints not supported; retrying with regular waypoints…');
+                setUploadStatus('Retrying (spline → waypoint)…', 'info');
+                const { tSys, tComp, resolve, reject } = uploadState;
+                uploadState = { wps: fallbackWps, tSys, tComp, resolve, reject, fallback: true };
+                writer.write(buildMissionCountV2(fallbackWps.length, tSys, tComp, 0))
+                  .catch(e => addLog('[upload] retry write failed: ' + e.message));
+              } else {
+                setUploadStatus(`Upload rejected: ${label}`, 'err');
+                addLog(`[upload] MISSION_ACK type=${mType} (${label})`);
+                uploadState.reject(new Error('MISSION_ACK ' + mType));
+                uploadState = null;
+              }
+            } else {
+              setUploadStatus(`Upload rejected: ${label}`, 'err');
+              addLog(`[upload] MISSION_ACK type=${mType} (${label})`);
+              uploadState.reject(new Error('MISSION_ACK ' + mType));
+              uploadState = null;
+            }
           }
-          uploadState = null;
         }
         break;
       }
