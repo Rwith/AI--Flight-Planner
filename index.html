@@ -1037,7 +1037,10 @@
       <div class="card" style="padding:8px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <div class="card-title" style="margin:0">Rally Points</div>
-          <button class="btn" onclick="exportRallyPoints()" style="font-size:10px;padding:3px 8px">Export rally.txt</button>
+          <div style="display:flex;gap:4px">
+            <button class="btn primary" id="rally-upload-btn" onclick="serialUploadRallyPoints?.()" disabled title="Upload rally points to connected flight computer" style="font-size:10px;padding:3px 8px">⬆ Upload to FC</button>
+            <button class="btn" onclick="exportRallyPoints()" style="font-size:10px;padding:3px 8px">Export rally.txt</button>
+          </div>
         </div>
         <div style="font-size:10px;color:var(--sec);margin-bottom:6px">Right-click the map to add a rally point (ArduPilot RTL fallback target)</div>
         <div id="rally-list"></div>
@@ -5876,9 +5879,10 @@ initWindParticles();
 setTimeout(() => startPlane(true), 20000);
 
 // Bridge closures so external scripts can read `let`-scoped globals.
-window._serialGetWaypoints  = () => waypoints;
-window._serialGetHome       = () => ({ lat: homeLat, lon: homeLon });
-window._serialGetFuncBlocks = () => funcBlocks;
+window._serialGetWaypoints   = () => waypoints;
+window._serialGetHome        = () => ({ lat: homeLat, lon: homeLon });
+window._serialGetFuncBlocks  = () => funcBlocks;
+window._serialGetRallyPoints = () => rallyPoints;
 
 // Set the initial USB hint once the DOM is ready.
 window.addEventListener('load', () => { toggleConnMode(); initSpeedUnit(); });

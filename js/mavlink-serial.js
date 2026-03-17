@@ -60,6 +60,21 @@
     ]);
   }
 
+  // ─── MAVLink v2 frame builder (required for mission_type extension field) ─
+  function buildFrameV2 (msgId, payload) {
+    const len   = payload.length;
+    const seq   = (_txSeq++) & 0xFF;
+    const extra = CRC_EXTRA[msgId] ?? 0;
+    const mid0  = msgId & 0xFF, mid1 = (msgId >> 8) & 0xFF, mid2 = (msgId >> 16) & 0xFF;
+    const crcInput = [len, 0, 0, seq, GCS_SYS, GCS_COMP, mid0, mid1, mid2, ...payload, extra];
+    const crc  = crc16(crcInput);
+    return new Uint8Array([
+      0xFD, len, 0, 0, seq, GCS_SYS, GCS_COMP, mid0, mid1, mid2,
+      ...payload,
+      crc & 0xFF, (crc >> 8) & 0xFF
+    ]);
+  }
+
   // ─── Payload helpers ──────────────────────────────────────────────────────
   function f32 (v) {
     const b = new ArrayBuffer(4);
@@ -112,6 +127,11 @@
     return buildFrame(44, [...u16(count), tSys, tComp]);
   }
 
+  // MAVLink v2 variant with mission_type extension field (0=mission, 2=rally)
+  function buildMissionCountV2 (count, tSys, tComp, missionType) {
+    return buildFrameV2(44, [...u16(count), tSys, tComp, missionType]);
+  }
+
   // ─── MISSION_ITEM_INT (id=73) ─────────────────────────────────────────────
   // Wire (sorted by field size, large→small):
   //   param1–4(f32×4), x=lat*1e7(i32), y=lon*1e7(i32), z=alt(f32),
@@ -130,6 +150,20 @@
       tSys, tComp, frame, current, autoCont
     ];
     return buildFrame(73, payload);
+  }
+
+  // MAVLink v2 variant with mission_type extension field (needed for rally upload)
+  function buildMissionItemIntV2 (seq, lat, lon, alt, cmd, p1, p2, p3, p4, frame, current, autoCont, tSys, tComp, missionType) {
+    const payload = [
+      ...f32(p1), ...f32(p2), ...f32(p3), ...f32(p4),
+      ...i32(Math.round(lat * 1e7)),
+      ...i32(Math.round(lon * 1e7)),
+      ...f32(alt),
+      ...u16(seq),
+      ...u16(cmd),
+      tSys, tComp, frame, current, autoCont, missionType
+    ];
+    return buildFrameV2(73, payload);
   }
 
   // ─── REQUEST_DATA_STREAM (id=66) ─────────────────────────────────────────
@@ -268,6 +302,7 @@
   let writer          = null;
   let reader          = null;
   let uploadState     = null;  // { wps, tSys, tComp, resolve, reject }
+  let rallyUploadState = null; // { rps, tSys, tComp, resolve, reject }
   let logListState    = null;  // { entries[], numLogs, timer, resolve, reject }
   let logDownState    = null;  // { buf, totalSize, bytesReceived, timer, resolve, reject }
   let wsConn          = null;  // active WebSocket (WiFi backpack mode)
@@ -478,27 +513,46 @@
         renderTele();
         break;
       }
-      // ── Waypoint upload handshake ─────────────────────────────────────────
+      // ── Waypoint / rally upload handshake ────────────────────────────────
       case 40:   // MISSION_REQUEST
       case 51: { // MISSION_REQUEST_INT
-        if (!uploadState) break;
         const seq = dv.getUint16(0, true);
-        sendMissionItem(seq);
+        // payload[4] = mission_type extension field (0=mission, 2=rally); absent in v1 → 0
+        const reqMissionType = payload[4] ?? 0;
+        if (reqMissionType === 2 && rallyUploadState) {
+          sendRallyItem(seq);
+        } else if (uploadState) {
+          sendMissionItem(seq);
+        }
         break;
       }
       case 47: { // MISSION_ACK
-        if (!uploadState) break;
         const mType = payload[2] ?? 0; // MAV_MISSION_RESULT (0 if trailing zero was truncated)
-        if (mType === 0) {
-          setUploadStatus('Upload complete ✓', 'ok');
-          addLog('[upload] Mission accepted by FC');
-          uploadState.resolve();
-        } else {
-          setUploadStatus(`Upload rejected (code ${mType})`, 'err');
-          addLog(`[upload] MISSION_ACK type=${mType}`);
-          uploadState.reject(new Error('MISSION_ACK ' + mType));
+        // payload[3] = mission_type extension field; absent in v1 → 0
+        const ackMissionType = payload[3] ?? 0;
+        if (ackMissionType === 2 && rallyUploadState) {
+          if (mType === 0) {
+            setUploadStatus('Rally upload complete ✓', 'ok');
+            addLog('[rally] Rally points accepted by FC');
+            rallyUploadState.resolve();
+          } else {
+            setUploadStatus(`Rally upload rejected (code ${mType})`, 'err');
+            addLog(`[rally] MISSION_ACK type=${mType}`);
+            rallyUploadState.reject(new Error('MISSION_ACK ' + mType));
+          }
+          rallyUploadState = null;
+        } else if (uploadState) {
+          if (mType === 0) {
+            setUploadStatus('Upload complete ✓', 'ok');
+            addLog('[upload] Mission accepted by FC');
+            uploadState.resolve();
+          } else {
+            setUploadStatus(`Upload rejected (code ${mType})`, 'err');
+            addLog(`[upload] MISSION_ACK type=${mType}`);
+            uploadState.reject(new Error('MISSION_ACK ' + mType));
+          }
+          uploadState = null;
         }
-        uploadState = null;
         break;
       }
       case 118: { // LOG_ENTRY — wire: time_utc(u32,0), size(u32,4), id(u16,8), num_logs(u16,10), last_log_num(u16,12)
@@ -637,6 +691,66 @@
     writer.write(frame_).catch(e => addLog('[write] ' + e.message));
     setUploadStatus(`Uploading WP ${seq} / ${wps.length - 1}…`, 'info');
     addLog(`[upload] Sent MISSION_ITEM_INT seq=${seq} cmd=${cmd} lat=${lat} alt=${alt}`);
+  }
+
+  // ─── Send one rally MISSION_ITEM_INT (MAVLink v2, mission_type=2) ──────────
+  function sendRallyItem (seq) {
+    const { rps, tSys, tComp } = rallyUploadState;
+    if (seq >= rps.length) return;
+    const rp = rallyUploadState.rps[seq];
+    // MAV_CMD_NAV_RALLY_POINT = 5100, frame 0 = MAV_FRAME_GLOBAL (absolute alt)
+    const frame_ = buildMissionItemIntV2(seq, rp.lat, rp.lon, rp.alt, 5100,
+      0, 0, 0, 0, 0 /*MAV_FRAME_GLOBAL*/, 0, 1, tSys, tComp, 2 /*MAV_MISSION_TYPE_RALLY*/);
+    writer.write(frame_).catch(e => addLog('[rally] ' + e.message));
+    setUploadStatus(`Uploading rally point ${seq + 1} / ${rps.length}…`, 'info');
+    addLog(`[rally] Sent MISSION_ITEM_INT seq=${seq} cmd=5100 lat=${rp.lat.toFixed(5)} alt=${rp.alt} type=rally`);
+  }
+
+  // ─── Rally point upload ───────────────────────────────────────────────────
+  async function uploadRallyPoints () {
+    if (!writer) { addLog('[rally] Not connected'); return; }
+    const rps = window._serialGetRallyPoints?.() ?? [];
+    if (!rps.length) {
+      setUploadStatus('No rally points to upload', 'err');
+      addLog('[rally] No rally points defined');
+      return;
+    }
+
+    const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
+
+    let resolveUp, rejectUp;
+    const promise = new Promise((res, rej) => { resolveUp = res; rejectUp = rej; });
+
+    rallyUploadState = { rps, tSys, tComp, resolve: resolveUp, reject: rejectUp };
+
+    // Send MISSION_COUNT with mission_type=2 (MAV_MISSION_TYPE_RALLY) via MAVLink v2
+    try {
+      await writer.write(buildMissionCountV2(rps.length, tSys, tComp, 2));
+      addLog(`[rally] MISSION_COUNT=${rps.length} mission_type=RALLY sent to sysid=${tSys}`);
+      setUploadStatus('Uploading rally points…', 'info');
+    } catch (e) {
+      rallyUploadState = null;
+      addLog('[rally] Write failed: ' + e.message);
+      return;
+    }
+
+    // Timeout guard: 15 s
+    const tid = setTimeout(() => {
+      if (rallyUploadState) {
+        rallyUploadState = null;
+        setUploadStatus('Rally upload timed out', 'err');
+        rejectUp(new Error('timeout'));
+      }
+    }, 15000);
+
+    try {
+      await promise;
+    } catch (e) {
+      addLog('[rally] Failed: ' + e.message);
+    } finally {
+      clearTimeout(tid);
+    }
   }
 
   // ─── Telemetry rendering ──────────────────────────────────────────────────
@@ -1044,6 +1158,8 @@
     }
     const upBtn = document.getElementById('upload-btn');
     if (upBtn) upBtn.disabled = !on;
+    const rallyUpBtn = document.getElementById('rally-upload-btn');
+    if (rallyUpBtn) rallyUpBtn.disabled = !on;
     const fetchBtn = document.getElementById('bb-fetch-list-btn');
     if (fetchBtn) fetchBtn.disabled = !on;
     const gcsConnBtn = document.getElementById('gcs-connect-btn');
@@ -1404,6 +1520,7 @@
   window.serialConnect          = connect;
   window.serialDisconnect       = disconnect;
   window.serialUploadWaypoints  = uploadWaypoints;
+  window.serialUploadRallyPoints = uploadRallyPoints;
   // ─── Flight control commands ──────────────────────────────────────────────
   window.serialSetMode = (customMode) => {
     if (!writer) { addLog('[mode] Not connected'); return; }
