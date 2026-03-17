@@ -5423,10 +5423,10 @@ async function gcsVideoEnumDevices() {
       sel.appendChild(opt);
     });
     if (!videoDevices.length) {
-      sel.innerHTML = '<option value="">No video devices found</option>';
+      sel.innerHTML = '<option value="">No capture device found — plug in USB capture card</option>';
     }
   } catch (e) {
-    sel.innerHTML = '<option value="">Permission denied</option>';
+    sel.innerHTML = '<option value="">Permission denied — restart app</option>';
   }
 }
 

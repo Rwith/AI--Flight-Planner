@@ -211,6 +211,19 @@ ipcMain.on('blur-window',  () => { mainWin?.blur(); setTimeout(() => mainWin?.fo
 
 // ── Electron window ───────────────────────────────────────────────────────────
 function createWindow () {
+  // Grant camera (video capture) permission automatically so getUserMedia works
+  // for the live HDMI/AV feed in the GCS panel.
+  const { session } = require('electron');
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (permission === 'media') { callback(true); return; }
+    callback(false);
+  });
+  // Also grant media device enumeration so the dropdown is populated.
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+    if (permission === 'media') return true;
+    return false;
+  });
+
   mainWin = new BrowserWindow({
     width: 1280, height: 820, minWidth: 900, minHeight: 600,
     title: 'AeroNav AI',
