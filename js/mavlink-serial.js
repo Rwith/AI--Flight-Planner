@@ -526,20 +526,17 @@
         break;
       }
       case 11030: { // ESC_TELEMETRY_1_TO_4 (ArduPilot)
-        // Wire: temperature[4](u16,0..7)[cdegK], voltage[4](u16,8..15)[cV],
-        //        current[4](u16,16..23)[cA], totalcurrent[4](u16,24..31)[mAh],
-        //        rpm[4](u16,32..39)[RPM], count[4](u16,40..47)
+        // MAVLink v2 wire layout — fields reordered largest type first:
+        //   voltage[4]      (u16, bytes  0.. 7) [cV]
+        //   current[4]      (u16, bytes  8..15) [cA]
+        //   totalcurrent[4] (u16, bytes 16..23) [mAh]
+        //   rpm[4]          (u16, bytes 24..31) [RPM]
+        //   count[4]        (u16, bytes 32..39)
+        //   temperature[4]  (u8,  bytes 40..43) [degC]
         // Display ESC 1 (index 0) values
-        const isArmed = tele.baseMode != null && (tele.baseMode & 0x80);
-        if (payload.length >= 2) {
-          const rawCdegK = dv.getUint16(0, true);
-          const tempC = +(rawCdegK / 100 - 273.15).toFixed(1);
-          // Values below -50 °C are uninitialized ESC sentinel values (e.g. near absolute zero)
-          tele.escTemp = (tempC > -50) ? tempC : null;
-        }
-        // RPM and current are only meaningful when the vehicle is armed and motors can spin
-        tele.escRpm  = (isArmed && payload.length >= 34) ? dv.getUint16(32, true) : null;
-        tele.escCurr = (isArmed && payload.length >= 18) ? dv.getUint16(16, true) / 100 : null; // cA → A
+        if (payload.length >= 10) tele.escCurr = dv.getUint16(8,  true) / 100; // cA → A
+        if (payload.length >= 26) tele.escRpm  = dv.getUint16(24, true);
+        if (payload.length >= 41) tele.escTemp = payload[40];                   // uint8, °C
         renderTele();
         break;
       }
