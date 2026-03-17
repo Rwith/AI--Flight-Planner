@@ -1045,8 +1045,38 @@
         <div style="font-size:10px;color:var(--sec);margin-bottom:6px">Right-click the map to add a rally point (ArduPilot RTL fallback target)</div>
         <div id="rally-list"></div>
       </div>
+      <!-- MISSION WEATHER CARD -->
+      <div class="card" id="mission-weather-card" style="padding:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div class="card-title" style="margin:0">Mission Weather</div>
+          <span id="mw-status-badge" style="padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700;background:var(--card);color:var(--sec)">—</span>
+        </div>
+        <div id="mw-no-data" style="color:var(--sec);font-size:11px;margin-bottom:6px">No weather data — fetch to see flight conditions.</div>
+        <div id="mw-data" style="display:none">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:6px">
+            <div>
+              <div style="font-size:10px;color:var(--sec)">Wind</div>
+              <div style="font-size:14px;font-weight:700"><span id="mw-wind">--</span> <span id="mw-wind-dir" style="font-size:11px;color:var(--sec)"></span></div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--sec)">Gusts</div>
+              <div style="font-size:14px;font-weight:700" id="mw-gust">--</div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--sec)">Precip</div>
+              <div style="font-size:14px;font-weight:700" id="mw-precip">--%</div>
+            </div>
+          </div>
+          <div id="mw-windows" style="margin-bottom:2px"></div>
+        </div>
+        <div style="display:flex;gap:4px;margin-top:6px">
+          <button class="btn" onclick="fetchWeather()" style="flex:1;font-size:11px">⟳ Fetch Weather</button>
+          <button class="btn" onclick="switchTab('weather')" style="flex:1;font-size:11px">Full Report →</button>
+        </div>
+      </div>
       <div class="card" style="padding:8px">
         <div class="card-title">Upload Mission</div>
+        <div id="upload-weather-warn" style="display:none;font-size:11px;margin-bottom:6px;padding:5px 8px;border-radius:5px"></div>
         <button class="btn primary" id="upload-btn" onclick="serialUploadWaypoints()" disabled title="Upload waypoints to connected flight computer" style="width:100%">⬆ Upload to FC</button>
       </div>
     </div>
@@ -3277,7 +3307,8 @@ function renderWeather(data) {
   renderWindRose(data);
   const mc = map.getCenter(); renderSunCard(mc.lat, mc.lng);
   renderFlightWindows(data);
-  updateMissionStats(); // refresh wind-adjusted ETA
+  updateMissionStats();    // refresh wind-adjusted ETA
+  updateMissionWeather();  // refresh mission weather check in waypoints tab
 
   // Forecast strip - next 24 hours
   const strip = document.getElementById('forecast-strip');
@@ -3394,6 +3425,100 @@ function updateMissionStats() {
   // Tooltip on time stat to explain wind adjustment
   const timeCard = document.getElementById('ms-time').closest('.stat-card');
   if (timeCard) timeCard.title = weatherData ? 'Wind-adjusted ground speed estimate (✦)' : `Estimated at ${msToDisp(_cruiseAirspeed()).toFixed(1)} ${spdLabel()} airspeed`;
+}
+
+// ====================== MISSION WEATHER CHECK ======================
+function updateMissionWeather() {
+  const badge   = document.getElementById('mw-status-badge');
+  const noData  = document.getElementById('mw-no-data');
+  const dataEl  = document.getElementById('mw-data');
+  const warnEl  = document.getElementById('upload-weather-warn');
+
+  if (!weatherData) {
+    if (badge)  { badge.textContent = '—'; badge.style.background = 'var(--card)'; badge.style.color = 'var(--sec)'; }
+    if (noData) noData.style.display = 'block';
+    if (dataEl) dataEl.style.display = 'none';
+    if (warnEl) warnEl.style.display = 'none';
+    return;
+  }
+
+  const cw    = weatherData.current_weather;
+  const spd   = cw.windspeed;  // km/h
+  const hours = weatherData.hourly.time;
+
+  // Find nearest hourly index
+  const now = new Date();
+  let bestIdx = 0, bestDiff = Infinity;
+  hours.forEach((t, i) => { const d = Math.abs(new Date(t) - now); if (d < bestDiff) { bestDiff = d; bestIdx = i; } });
+
+  const gust   = weatherData.hourly.windgusts_10m?.[bestIdx]             || 0;
+  const precip = weatherData.hourly.precipitation_probability?.[bestIdx] || 0;
+
+  // Classify using same thresholds as renderFlightWindows
+  let status, statusBg, statusColor;
+  if (spd >= 46 || gust >= 58 || precip >= 60) {
+    status = 'NO-FLY'; statusBg = 'var(--red)';    statusColor = '#fff';
+  } else if (spd >= 28 || gust >= 38 || precip >= 30) {
+    status = 'CAUTION'; statusBg = 'var(--yellow)'; statusColor = '#000';
+  } else {
+    status = 'FLY';    statusBg = 'var(--green)';  statusColor = '#000';
+  }
+
+  if (badge)  { badge.textContent = status; badge.style.background = statusBg; badge.style.color = statusColor; }
+  if (noData) noData.style.display = 'none';
+  if (dataEl) dataEl.style.display = 'block';
+
+  const windEl    = document.getElementById('mw-wind');
+  const windDirEl = document.getElementById('mw-wind-dir');
+  const gustEl    = document.getElementById('mw-gust');
+  const precipEl  = document.getElementById('mw-precip');
+  if (windEl)    windEl.textContent    = kmhToDisp(spd).toFixed(1) + ' ' + spdLabel();
+  if (windDirEl) windDirEl.textContent = bearingToCompass(cw.winddirection);
+  if (gustEl)    gustEl.textContent    = kmhToDisp(gust).toFixed(1) + ' ' + spdLabel();
+  if (precipEl)  precipEl.textContent  = precip + '%';
+
+  // Compact 6-hour flight windows
+  const windowsEl = document.getElementById('mw-windows');
+  if (windowsEl) {
+    const speeds  = weatherData.hourly.windspeed_10m             || [];
+    const gusts2  = weatherData.hourly.windgusts_10m             || [];
+    const precips = weatherData.hourly.precipitation_probability || [];
+    let si = hours.findIndex(t => new Date(t) >= now);
+    if (si < 0) si = 0;
+    function _cls(s, g, r) {
+      if (s >= 46 || g >= 58 || r >= 60) return 'nofly';
+      if (s >= 28 || g >= 38 || r >= 30) return 'caution';
+      return 'fly';
+    }
+    const blocks = [];
+    let cur = null;
+    for (let i = si; i < Math.min(si + 7, hours.length); i++) {
+      const st = _cls(speeds[i] || 0, gusts2[i] || 0, precips[i] || 0);
+      if (!cur || cur.status !== st) { if (cur) blocks.push(cur); cur = { status: st, start: new Date(hours[i]), end: null }; }
+      cur.end = new Date(new Date(hours[i]).getTime() + 3600000);
+    }
+    if (cur) blocks.push(cur);
+    const fmtT   = d => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const labels = { fly: '✓ FLY', caution: '⚠ CAUTION', nofly: '✗ NO-FLY' };
+    windowsEl.innerHTML = blocks.map(b =>
+      `<div class="fwin-block fwin-${b.status}" style="padding:3px 7px;margin-bottom:3px">` +
+      `<span style="font-weight:700;font-size:10px">${labels[b.status]}</span>` +
+      `<span style="opacity:.8;font-size:10px">${fmtT(b.start)}–${fmtT(b.end)}</span></div>`
+    ).join('');
+  }
+
+  // Weather warning above Upload button
+  if (warnEl) {
+    if (status === 'NO-FLY') {
+      warnEl.style.cssText = 'display:block;font-size:11px;margin-bottom:6px;padding:5px 8px;border-radius:5px;background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.4);color:var(--red)';
+      warnEl.textContent = '✗ NO-FLY conditions — proceed at your own risk.';
+    } else if (status === 'CAUTION') {
+      warnEl.style.cssText = 'display:block;font-size:11px;margin-bottom:6px;padding:5px 8px;border-radius:5px;background:rgba(210,153,34,.12);border:1px solid rgba(210,153,34,.4);color:var(--yellow)';
+      warnEl.textContent = '⚠ CAUTION — review full weather before flying.';
+    } else {
+      warnEl.style.display = 'none';
+    }
+  }
 }
 
 // ====================== ALTITUDE PROFILE ======================
