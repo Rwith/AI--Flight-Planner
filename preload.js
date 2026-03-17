@@ -40,6 +40,6 @@ contextBridge.exposeInMainWorld('electronBridge', {
   tiles: {
     getPath:    ()                            => ipcRenderer.invoke('get-tiles-path'),
     openFolder: ()                            => ipcRenderer.invoke('open-tiles-folder'),
-    saveFile:   (layerKey, z, x, y, buf)     => ipcRenderer.invoke('save-tile-file', layerKey, z, x, y, buf),
+    saveFile:   (regionName, layerKey, z, x, y, buf) => ipcRenderer.invoke('save-tile-file', regionName, layerKey, z, x, y, buf),
   },
 });

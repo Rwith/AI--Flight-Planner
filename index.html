@@ -4639,12 +4639,12 @@ async function putTileToDB(url, blob) {
       const req = tx.objectStore(TILE_DB_STORE).put(blob, url);
       req.onsuccess = res; req.onerror = () => rej(req.error);
     });
-    // Also save to the app's file system, organized by layer
+    // Also save to the app's file system, organized by region and layer
     if (window.electronBridge?.tiles?.saveFile) {
       const info = _parseTileUrl(url);
       if (info) {
         blob.arrayBuffer().then(ab => {
-          window.electronBridge.tiles.saveFile(info.layerKey, info.z, info.x, info.y, ab);
+          window.electronBridge.tiles.saveFile(_cacheRegionName, info.layerKey, info.z, info.x, info.y, ab);
         });
       }
     }
@@ -4674,11 +4674,12 @@ function latToTileY(lat, z) {
 }
 
 // ====================== OFFLINE CACHE MANAGER ======================
-let _cacheBounds    = null;   // L.LatLngBounds of selected region
-let _cacheDrawRect  = null;   // L.Rectangle drawn on map
-let _cacheDrawing   = false;  // true while user is dragging
-let _cacheAbort     = false;  // set to true to cancel active download
-let _cacheActive    = false;  // download in progress
+let _cacheBounds      = null;   // L.LatLngBounds of selected region
+let _cacheDrawRect    = null;   // L.Rectangle drawn on map
+let _cacheDrawing     = false;  // true while user is dragging
+let _cacheAbort       = false;  // set to true to cancel active download
+let _cacheActive      = false;  // download in progress
+let _cacheRegionName  = '';     // name of the region currently being downloaded
 
 const CACHE_REGIONS_KEY = 'offlineCacheRegions';
 const CACHE_MAX_TILES   = 15000;
@@ -4862,8 +4863,9 @@ async function startCacheDownload() {
 
   if (tiles.length === 0 || tiles.length > CACHE_MAX_TILES) return;
 
-  _cacheActive = true;
-  _cacheAbort  = false;
+  _cacheActive      = true;
+  _cacheAbort       = false;
+  _cacheRegionName  = name;
 
   const dlBtn = document.getElementById('cache-download-btn');
   const cxBtn = document.getElementById('cache-cancel-btn');
@@ -4903,7 +4905,8 @@ async function startCacheDownload() {
   async function worker() { while (queue.length && !_cacheAbort) await fetchOne(queue.shift()); }
   await Promise.all(Array.from({ length: CACHE_CONCURRENCY }, worker));
 
-  _cacheActive = false;
+  _cacheActive     = false;
+  _cacheRegionName = '';
   cxBtn.style.display = 'none';
 
   if (!_cacheAbort) {

@@ -194,10 +194,12 @@ ipcMain.handle('open-tiles-folder', async () => {
   await shell.openPath(tilesBasePath);
 });
 
-ipcMain.handle('save-tile-file', async (_, layerKey, z, x, y, arrayBuffer) => {
+ipcMain.handle('save-tile-file', async (_, regionName, layerKey, z, x, y, arrayBuffer) => {
   if (!tilesBasePath) return;
   try {
-    const dir = path.join(tilesBasePath, layerKey, String(z), String(x));
+    // Sanitize region name for use as a folder name
+    const safeRegion = (regionName || 'default').replace(/[^a-zA-Z0-9_\-. ]/g, '_').trim() || 'default';
+    const dir = path.join(tilesBasePath, safeRegion, layerKey, String(z), String(x));
     fs.mkdirSync(dir, { recursive: true });
     const filePath = path.join(dir, `${y}.png`);
     if (!fs.existsSync(filePath)) {
