@@ -207,6 +207,43 @@ ipcMain.handle('set-window-mode',   (_, mode)  => {
   return true;
 });
 
+// ── Video recording save ───────────────────────────────────────────────────────
+let recordingsBasePath = null;
+
+ipcMain.handle('save-recording', async (_, dateStr, timeStr, arrayBuffer) => {
+  if (!recordingsBasePath) return { ok: false, error: 'No path' };
+  try {
+    const dir = path.join(recordingsBasePath, dateStr);
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `recording-${dateStr}_${timeStr}.webm`);
+    fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
+    return { ok: true, path: filePath };
+  } catch (e) {
+    console.error('[save-recording]', e.message);
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('save-snapshot', async (_, dateStr, timeStr, arrayBuffer) => {
+  if (!recordingsBasePath) return { ok: false, error: 'No path' };
+  try {
+    const dir = path.join(recordingsBasePath, dateStr);
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `snapshot-${dateStr}_${timeStr}.png`);
+    fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
+    return { ok: true, path: filePath };
+  } catch (e) {
+    console.error('[save-snapshot]', e.message);
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('open-recordings-folder', async () => {
+  if (!recordingsBasePath) return;
+  try { fs.mkdirSync(recordingsBasePath, { recursive: true }); } catch {}
+  await shell.openPath(recordingsBasePath);
+});
+
 // ── Tile cache file storage ────────────────────────────────────────────────────
 let tilesBasePath = null;
 
@@ -270,8 +307,9 @@ function createWindow () {
 }
 
 app.whenReady().then(() => {
-  settingsPath  = path.join(app.getPath('userData'), 'settings.json');
-  tilesBasePath = path.join(app.getPath('userData'), 'tiles');
+  settingsPath      = path.join(app.getPath('userData'), 'settings.json');
+  tilesBasePath     = path.join(app.getPath('userData'), 'tiles');
+  recordingsBasePath = path.join(app.getPath('userData'), 'recordings');
   Menu.setApplicationMenu(null);
   startWSServer();
   startDisplayWSServer();

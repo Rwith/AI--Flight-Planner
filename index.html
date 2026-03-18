@@ -880,11 +880,14 @@
       <video id="gcs-video-el" autoplay playsinline muted
         style="width:100%;display:block;border-radius:6px"></video>
       <div id="gcs-video-err" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--red);font-size:11px;background:rgba(0,0,0,.7);border-radius:6px;text-align:center;padding:8px"></div>
+      <!-- Recording indicator overlay -->
+      <div id="gcs-video-rec-indicator" style="display:none;position:absolute;top:7px;right:8px;background:rgba(0,0,0,.65);border-radius:4px;padding:3px 7px;font-size:10px;font-weight:700;color:#ff4444;letter-spacing:0.5px;line-height:1.4">● REC <span id="gcs-video-rec-timer">00:00</span></div>
     </div>
-    <!-- Snapshot controls -->
-    <div id="gcs-video-controls" style="display:none;gap:6px">
-      <button class="btn" onclick="gcsVideoSnapshot()" style="flex:1;font-size:11px">📷 Snapshot</button>
-      <button class="btn" id="gcs-video-expand-btn" onclick="gcsVideoExpand()" style="flex:1;font-size:11px" title="Split view with map">⤢ Expand</button>
+    <!-- Video controls -->
+    <div id="gcs-video-controls" style="display:none;gap:6px;flex-wrap:wrap">
+      <button class="btn" onclick="gcsVideoSnapshot()" style="flex:1;font-size:11px;min-width:70px">📷 Snapshot</button>
+      <button class="btn danger" id="gcs-video-rec-btn" onclick="gcsVideoRecToggle()" style="flex:1;font-size:11px;min-width:70px">⏺ REC</button>
+      <button class="btn" id="gcs-video-expand-btn" onclick="gcsVideoExpand()" style="flex:1;font-size:11px;min-width:70px" title="Split view with map">⤢ Expand</button>
     </div>
     <!-- Download status -->
     <div id="gcs-video-status" style="display:none;font-size:11px;font-weight:600;color:var(--blue);background:rgba(88,166,255,.1);border:1px solid rgba(88,166,255,.3);border-radius:5px;padding:5px 8px;text-align:center"></div>
@@ -5676,6 +5679,7 @@ async function gcsVideoStart() {
 
 function gcsVideoStop() {
   _gcsVideoActive = false;
+  if (_gcsVideoRecorder) gcsVideoRecStop();
   if (_gcsVideoStream) {
     _gcsVideoStream.getTracks().forEach(t => t.stop());
     _gcsVideoStream = null;
@@ -5724,20 +5728,102 @@ function gcsVideoSnapshot() {
     canvas.width  = vid.videoWidth  || 1280;
     canvas.height = vid.videoHeight || 720;
     canvas.getContext('2d').drawImage(vid, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob(blob => {
+    canvas.toBlob(async blob => {
       if (!blob) { gcsVideoShowStatus('Snapshot failed'); setTimeout(gcsVideoHideStatus, 2500); return; }
-      const a  = document.createElement('a');
-      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      a.href     = URL.createObjectURL(blob);
-      a.download = `snapshot-${ts}.png`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-      gcsVideoHideStatus();
+      const now     = new Date();
+      const dateStr = now.toISOString().slice(0, 10);
+      const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '-');
+      if (window.electronBridge?.video?.saveSnapshot) {
+        const buf    = await blob.arrayBuffer();
+        const result = await window.electronBridge.video.saveSnapshot(dateStr, timeStr, buf);
+        gcsVideoShowStatus(result?.ok ? `Snapshot saved to ${dateStr}/` : 'Snapshot failed');
+      } else {
+        const a = document.createElement('a');
+        a.href     = URL.createObjectURL(blob);
+        a.download = `snapshot-${dateStr}_${timeStr}.png`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        gcsVideoShowStatus('Snapshot saved');
+      }
+      setTimeout(gcsVideoHideStatus, 2500);
     }, 'image/png');
   } catch (e) {
     gcsVideoShowStatus('Snapshot failed');
     setTimeout(gcsVideoHideStatus, 2500);
   }
+}
+
+// ── Video recording ────────────────────────────────────────────────────────────
+let _gcsVideoRecorder        = null;
+let _gcsVideoRecChunks       = [];
+let _gcsVideoRecStartTime    = null;
+let _gcsVideoRecTimerInterval = null;
+
+function gcsVideoRecToggle() {
+  _gcsVideoRecorder ? gcsVideoRecStop() : gcsVideoRecStart();
+}
+
+function gcsVideoRecStart() {
+  if (!_gcsVideoStream || !_gcsVideoActive) return;
+  const mimeTypes = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+  const mimeType  = mimeTypes.find(t => MediaRecorder.isTypeSupported(t)) || 'video/webm';
+  _gcsVideoRecChunks    = [];
+  _gcsVideoRecStartTime = Date.now();
+  try {
+    _gcsVideoRecorder = new MediaRecorder(_gcsVideoStream, { mimeType });
+    _gcsVideoRecorder.ondataavailable = e => { if (e.data.size > 0) _gcsVideoRecChunks.push(e.data); };
+    _gcsVideoRecorder.onstop = gcsVideoRecSave;
+    _gcsVideoRecorder.start(1000);
+    const btn = document.getElementById('gcs-video-rec-btn');
+    if (btn) { btn.textContent = '⏹ Stop REC'; btn.classList.add('danger'); }
+    const ind = document.getElementById('gcs-video-rec-indicator');
+    if (ind) ind.style.display = 'block';
+    _gcsVideoRecTimerInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - _gcsVideoRecStartTime) / 1000);
+      const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+      const ss = String(elapsed % 60).padStart(2, '0');
+      const timerEl = document.getElementById('gcs-video-rec-timer');
+      if (timerEl) timerEl.textContent = `${mm}:${ss}`;
+    }, 1000);
+  } catch (e) {
+    gcsVideoShowStatus('Recording failed: ' + e.message);
+    setTimeout(gcsVideoHideStatus, 3000);
+  }
+}
+
+function gcsVideoRecStop() {
+  if (!_gcsVideoRecorder) return;
+  clearInterval(_gcsVideoRecTimerInterval);
+  _gcsVideoRecTimerInterval = null;
+  _gcsVideoRecorder.stop();
+  _gcsVideoRecorder = null;
+  const btn = document.getElementById('gcs-video-rec-btn');
+  if (btn) { btn.textContent = '⏺ REC'; btn.classList.remove('active'); }
+  const ind = document.getElementById('gcs-video-rec-indicator');
+  if (ind) ind.style.display = 'none';
+}
+
+async function gcsVideoRecSave() {
+  if (!_gcsVideoRecChunks.length) return;
+  gcsVideoShowStatus('Saving recording…');
+  const now     = new Date();
+  const dateStr = now.toISOString().slice(0, 10);
+  const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '-');
+  const blob    = new Blob(_gcsVideoRecChunks, { type: _gcsVideoRecChunks[0]?.type || 'video/webm' });
+  _gcsVideoRecChunks = [];
+  if (window.electronBridge?.video?.saveRecording) {
+    const buf    = await blob.arrayBuffer();
+    const result = await window.electronBridge.video.saveRecording(dateStr, timeStr, buf);
+    gcsVideoShowStatus(result?.ok ? `Recording saved to ${dateStr}/` : 'Recording save failed');
+  } else {
+    const a = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = `recording-${dateStr}_${timeStr}.webm`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    gcsVideoShowStatus('Recording saved');
+  }
+  setTimeout(gcsVideoHideStatus, 3000);
 }
 
 function gcsVideoExpand() {

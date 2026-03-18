@@ -44,4 +44,10 @@ contextBridge.exposeInMainWorld('electronBridge', {
     openFolder: ()                            => ipcRenderer.invoke('open-tiles-folder'),
     saveFile:   (regionName, layerKey, z, x, y, buf) => ipcRenderer.invoke('save-tile-file', regionName, layerKey, z, x, y, buf),
   },
+  // Video recording / snapshot save to dated folders
+  video: {
+    saveRecording: (dateStr, timeStr, buf) => ipcRenderer.invoke('save-recording', dateStr, timeStr, buf),
+    saveSnapshot:  (dateStr, timeStr, buf) => ipcRenderer.invoke('save-snapshot',  dateStr, timeStr, buf),
+    openFolder:    ()                      => ipcRenderer.invoke('open-recordings-folder'),
+  },
 });
