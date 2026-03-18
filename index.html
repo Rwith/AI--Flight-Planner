@@ -4515,6 +4515,13 @@ function animatePlane() {
   const icon = document.getElementById('plane-icon');
   if (icon) icon.style.transform = `rotate(${bearing}deg)`;
 
+  // Feed simulated position to ESP32 display (throttled to ~4 Hz to avoid flooding)
+  if (!animatePlane._lastDispatch || Date.now() - animatePlane._lastDispatch > 250) {
+    animatePlane._lastDispatch = Date.now();
+    window._liveDronePos = { lat, lon, hdg: bearing };
+    window._onLivePosUpdate?.();
+  }
+
   planeAnimFrame = requestAnimationFrame(animatePlane);
 }
 
@@ -7274,6 +7281,19 @@ function _updateCurrentMission() {
     setTimeout(() => { btn.textContent = orig; btn.style.borderColor = 'var(--orange,#db6d28)'; btn.style.color = 'var(--orange,#db6d28)'; }, 1800);
   }
 }
+
+// ── ESP32 display: send position + waypoints over IPC → display WS server ────
+// Called by mavlink-serial.js (real drone) and animatePlane() (simulation).
+window._onLivePosUpdate = function () {
+  const pos = window._liveDronePos;
+  if (!pos || pos.lat == null) return;
+  window.electronBridge?.sendDisplayUpdate?.({
+    plane:     { lat: pos.lat, lon: pos.lon, hdg: pos.hdg || 0 },
+    waypoints: (typeof waypoints !== 'undefined' ? waypoints : []).map(w => ({ lat: w.lat, lon: w.lon })),
+    home:      { lat: (typeof homeLat !== 'undefined' ? homeLat : 0),
+                 lon: (typeof homeLon !== 'undefined' ? homeLon : 0) }
+  });
+};
 
 // ── Mission thumbnail live plane-dot overlay ──────────────────────────────
 let _thumbUpdateTimer = null;

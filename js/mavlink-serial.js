@@ -341,6 +341,7 @@
 
   function updateDroneMarker (lat, lon, headingDeg) {
     window._liveDronePos = { lat, lon, hdg: headingDeg };
+    window._onLivePosUpdate?.();
     if (typeof map === 'undefined' || !map) return;
     if (!droneMarker) {
       droneMarker = L.marker([lat, lon], {

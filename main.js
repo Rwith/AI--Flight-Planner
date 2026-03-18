@@ -76,6 +76,30 @@ function startWSServer () {
   server.listen(WS_PORT, '127.0.0.1', () => console.log(`[ws] Bridge on ws://localhost:${WS_PORT}`));
 }
 
+// ── Display WebSocket server (ESP32 / external display clients) ───────────────
+// Binds on all interfaces so an ESP32 on the same WiFi network can connect.
+const DISPLAY_WS_PORT = 5763;
+const displayClients  = new Set();
+
+function startDisplayWSServer () {
+  const server = http.createServer();
+  const wss    = new WebSocketServer({ server });
+  wss.on('connection', (ws) => {
+    displayClients.add(ws);
+    ws.on('close', () => displayClients.delete(ws));
+    ws.on('error', (e) => { displayClients.delete(ws); console.error('[display-ws]', e.message); });
+  });
+  server.listen(DISPLAY_WS_PORT, '0.0.0.0', () =>
+    console.log(`[display-ws] ESP32 display server on :${DISPLAY_WS_PORT}`));
+}
+
+// Renderer pushes position + waypoints; forwarded as JSON to all display clients.
+ipcMain.on('display-update', (_, data) => {
+  if (displayClients.size === 0) return;
+  const msg = JSON.stringify(data);
+  for (const ws of displayClients) if (ws.readyState === ws.OPEN) ws.send(msg);
+});
+
 // ── IPC: WiFi bridge control ──────────────────────────────────────────────────
 ipcMain.on('bridge-start', (_, opts) => {
   if (opts.backpackIp) BACKPACK_IP = opts.backpackIp;
@@ -250,6 +274,7 @@ app.whenReady().then(() => {
   tilesBasePath = path.join(app.getPath('userData'), 'tiles');
   Menu.setApplicationMenu(null);
   startWSServer();
+  startDisplayWSServer();
   startUDP();
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

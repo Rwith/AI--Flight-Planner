@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('electronBridge', {
     save:          (data)   => ipcRenderer.invoke('save-settings', data),
     setWindowMode: (mode)   => ipcRenderer.invoke('set-window-mode', mode),
   },
+  // ESP32 display update — sends position + waypoints to the display WS server.
+  sendDisplayUpdate: (data) => ipcRenderer.send('display-update', data),
   // Re-focus the Chromium renderer after native dialogs steal focus (Electron quirk).
   focusWindow: () => ipcRenderer.send('focus-window'),
   blurWindow:  () => ipcRenderer.send('blur-window'),
