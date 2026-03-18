@@ -340,6 +340,7 @@
   </svg>`;
 
   function updateDroneMarker (lat, lon, headingDeg) {
+    window._liveDronePos = { lat, lon, hdg: headingDeg };
     if (typeof map === 'undefined' || !map) return;
     if (!droneMarker) {
       droneMarker = L.marker([lat, lon], {
@@ -373,6 +374,7 @@
     droneTrailPositions = [];
     homeSet      = false;
     streamsAsked = false;
+    window._liveDronePos = null;
   }
 
   // ─── Telemetry message decoder ────────────────────────────────────────────
