@@ -3,6 +3,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronBridge', {
+  // App version (from package.json — matches what's shown in installed apps)
+  getVersion: () => ipcRenderer.invoke('get-app-version'),
+
   // WiFi bridge control
   startBridge: (opts) => ipcRenderer.send('bridge-start', opts),
   stopBridge:  ()     => ipcRenderer.send('bridge-stop'),
@@ -15,9 +18,9 @@ contextBridge.exposeInMainWorld('electronBridge', {
     close:  ()           => ipcRenderer.invoke('serial-close'),
     write:  (bytes)      => ipcRenderer.send('serial-write', bytes),
 
-    onData:  (cb) => ipcRenderer.on('serial-data',   (_, b) => cb(new Uint8Array(b))),
-    onClose: (cb) => ipcRenderer.on('serial-closed',  ()    => cb()),
-    onError: (cb) => ipcRenderer.on('serial-error',   (_, m) => cb(m)),
+    onData:  (cb) => { ipcRenderer.removeAllListeners('serial-data');   ipcRenderer.on('serial-data',   (_, b) => cb(new Uint8Array(b))); },
+    onClose: (cb) => { ipcRenderer.removeAllListeners('serial-closed'); ipcRenderer.on('serial-closed',  ()    => cb()); },
+    onError: (cb) => { ipcRenderer.removeAllListeners('serial-error');  ipcRenderer.on('serial-error',   (_, m) => cb(m)); },
 
     // Call before each new connection to avoid stacking listeners.
     removeListeners: () => {

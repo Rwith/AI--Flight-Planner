@@ -303,7 +303,7 @@
   let reader          = null;
   let uploadState     = null;  // { wps, tSys, tComp, resolve, reject }
   let rallyUploadState = null; // { rps, tSys, tComp, resolve, reject }
-  let logListState    = null;  // { entries[], numLogs, timer, resolve, reject }
+  let logListState    = null;  // { entries[], numLogs, timer, resolve }
   let logDownState    = null;  // { buf, totalSize, bytesReceived, timer, resolve, reject }
   let wsConn          = null;  // active WebSocket (WiFi backpack mode)
   let flightStartTime = null;  // set on first position telemetry received
@@ -556,7 +556,7 @@
         const reqMissionType = payload[4] ?? 0;
         if (reqMissionType === 2 && rallyUploadState) {
           sendRallyItem(seq);
-        } else if (uploadState) {
+        } else if (uploadState && uploadState.id != null) {
           sendMissionItem(seq);
         }
         break;
@@ -748,7 +748,7 @@
 
     const current = (seq === 1) ? 1 : 0;
     const frame_ = buildMissionItemIntV2(seq, lat, lon, alt, cmd, p1, p2, p3, p4, frame, current, 1, tSys, tComp, 0 /*MAV_MISSION_TYPE_MISSION*/);
-    writer.write(frame_).catch(e => addLog('[write] ' + e.message));
+    writer?.write(frame_).catch(e => addLog('[write] ' + e.message));
     setUploadStatus(`Uploading WP ${seq} / ${wps.length - 1}…`, 'info');
     addLog(`[upload] Sent MISSION_ITEM_INT seq=${seq} cmd=${cmd} lat=${lat} alt=${alt}`);
   }
@@ -873,7 +873,7 @@
       tele.roll ?? '', tele.pitch ?? '', tele.yawDeg ?? '',
       tele.airspeed ?? '', tele.groundspeed ?? '', tele.climbRate ?? '',
       tele.throttle ?? '',
-      (tele.voltageMv / 1000)?.toFixed(2) ?? '', tele.battPct ?? '',
+      (tele.voltageMv != null ? (tele.voltageMv / 1000).toFixed(2) : '0.00'), tele.battPct ?? '',
       GPS_FIX_STR[tele.gpsFix] ?? '', tele.gpsSats ?? ''
     ].join(','));
   }
@@ -995,8 +995,8 @@
       });
 
       // Release the temp reader before closing / continuing.
-      try { await tempReader.cancel();  } catch {}
-      try { tempReader.releaseLock();   } catch {}
+      await tempReader?.cancel().catch(() => {});
+      try { tempReader?.releaseLock(); } catch {}
 
       if (detected) {
         foundBaud = baud;
@@ -1025,18 +1025,20 @@
     reader = wsPort.readable.getReader();
 
     // Physical unplug safety-net (fires before readLoop's catch)
-    wsPort.addEventListener('disconnect', () => {
+    const _disconnectListener = () => {
       if (port === wsPort) {
         port = null; writer = null; reader = null;
         setConnected(false);
         addLog('[usb] Device unplugged');
         removeDroneMarker();
       }
-    });
+      wsPort.removeEventListener('disconnect', _disconnectListener);
+    };
+    wsPort.addEventListener('disconnect', _disconnectListener);
 
     setConnected(true);
     addLog(`[usb] Web Serial connected at ${foundBaud} baud — waiting for heartbeat`);
-    readLoop(new MAVParser(onMessage));
+    readLoop(new MAVParser(onMessage)).catch(e => addLog('[rx] Uncaught: ' + e.message));
   }
 
   // ─── Electron IPC serial connection ──────────────────────────────────────
@@ -1257,6 +1259,7 @@
       removeDroneMarker();
       Object.keys(tele).forEach(k => delete tele[k]);
       liveAltLog = [];
+      telLog = [];
       renderTele();
       // Remove Live dataset from profile chart so stale data doesn't persist
       window._refreshLiveAltOverlay?.();
@@ -1266,6 +1269,35 @@
 
   // ─── Waypoint upload ──────────────────────────────────────────────────────
   async function uploadWaypoints () {
+    const btn = document.getElementById('upload-btn');
+    const resetBtn = () => {
+      if (!btn) return;
+      btn.disabled = false;
+      btn.className = 'btn primary';
+      btn.innerHTML = '⬆ Upload to FC';
+      btn.style.cssText = 'width:100%';
+    };
+    const setBtnUploading = () => {
+      if (!btn) return;
+      btn.disabled = true;
+      btn.className = 'btn primary';
+      btn.innerHTML = '<span class="spinner"></span>Uploading…';
+    };
+    const setBtnSuccess = () => {
+      if (!btn) return;
+      btn.disabled = true;
+      btn.className = 'btn success';
+      btn.innerHTML = '✓ Upload Complete';
+      setTimeout(resetBtn, 3000);
+    };
+    const setBtnError = () => {
+      if (!btn) return;
+      btn.disabled = true;
+      btn.className = 'btn danger';
+      btn.innerHTML = '✕ Upload Failed';
+      setTimeout(resetBtn, 4000);
+    };
+
     if (!writer) { addLog('[upload] Not connected'); return; }
 
     // waypoints and homeLat/Lon are `let` in the main script — not on window.
@@ -1301,7 +1333,7 @@
     let resolveUp, rejectUp;
     const promise = new Promise((res, rej) => { resolveUp = res; rejectUp = rej; });
 
-    uploadState = { wps: list, tSys, tComp, resolve: resolveUp, reject: rejectUp };
+    uploadState = { wps: list, tSys, tComp, resolve: resolveUp, reject: rejectUp, id: Date.now() };
 
     // Kick off the upload by sending MISSION_COUNT (MAVLink v2, mission_type=0).
     // Using v2 with an explicit mission_type avoids MAV_MISSION_UNSUPPORTED (ACK 3)
@@ -1310,15 +1342,18 @@
       await writer.write(buildMissionCountV2(list.length, tSys, tComp, 0));
       addLog(`[upload] MISSION_COUNT=${list.length} mission_type=MISSION sent to sysid=${tSys}`);
       setUploadStatus('Waiting for FC…', 'info');
+      setBtnUploading();
     } catch (e) {
       uploadState = null;
       addLog('[upload] Write failed: ' + e.message);
+      setBtnError();
       return;
     }
 
     // Timeout guard: 15 s.
+    const _uploadId = uploadState.id;
     const tid = setTimeout(() => {
-      if (uploadState) {
+      if (uploadState && uploadState.id === _uploadId) {
         uploadState = null;
         setUploadStatus('Upload timed out', 'err');
         rejectUp(new Error('timeout'));
@@ -1327,8 +1362,10 @@
 
     try {
       await promise;
+      setBtnSuccess();
     } catch (e) {
       addLog('[upload] Failed: ' + e.message);
+      setBtnError();
     } finally {
       clearTimeout(tid);
     }
@@ -1415,7 +1452,6 @@
       logListState = {
         entries: [],
         resolve,
-        reject: resolve.bind(null, []),
         timer: setTimeout(() => {
           if (logListState) {
             const { entries, resolve: res } = logListState;
@@ -1467,7 +1503,7 @@
       if (i < n) {
         setTimeout(sendOne, END_REPEAT_MS);
       } else {
-        setTimeout(() => { if (logDownState || cb === null) cb?.(); }, PRE_REQ_MS());
+        setTimeout(() => { if (logDownState) cb?.(); }, PRE_REQ_MS());
       }
     }
     sendOne();
@@ -1549,10 +1585,11 @@
         const { chunkOfs, totalSize: ts, tSys: s, tComp: c, logId: id } = logDownState;
         const count = Math.min(CHUNK_SIZE, ts - chunkOfs);
         addLog(`[log] → LOG_REQUEST_DATA id=${id} ofs=${chunkOfs} count=${count} tSys=${s} tComp=${c}`);
-        writer.write(buildLogRequestData(id, chunkOfs, count, s, c)).catch(e => {
+        writer.write(buildLogRequestData(id, chunkOfs, count, s, c)).then(() => {
+          scheduleChunkStallTimer();
+        }).catch(e => {
           addLog('[log] write: ' + e.message);
         });
-        scheduleChunkStallTimer();
       }
 
       logDownState.sendChunk = sendChunk;

@@ -21,6 +21,10 @@ let   fcSend  = null;
 let   bridge  = null;
 let   mainWin = null;
 
+// ── Module-level server references (Bug #10) ──────────────────────────────────
+let wsHttpServer      = null;
+let displayHttpServer = null;
+
 // ── Broadcast to all renderer WebSocket clients ───────────────────────────────
 function broadcast (buf) {
   for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(buf);
@@ -35,6 +39,8 @@ function startUDP () {
     console.error(e.code === 'EADDRINUSE'
       ? `[udp] Port ${UDP_RECV} in use — close Mission Planner / QGC first`
       : '[udp] ' + e.message);
+    // Bug #9: reset fcSend so callers don't use the dead socket's send function
+    fcSend = null;
     udp.close();
   });
   udp.bind(UDP_RECV, () => console.log(`[udp] Listening on :${UDP_RECV}`));
@@ -45,17 +51,24 @@ function startUDP () {
 // ── TCP bridge ────────────────────────────────────────────────────────────────
 function startTCP () {
   stopBridge();
-  let socket = null, retryTimer = null;
+  let socket = null, retryTimer = null, stopped = false;
   function connect () {
+    if (stopped) return;
+    // Bug #2: remove all listeners from any existing socket before creating a
+    // new connection so listeners don't accumulate across reconnect attempts.
+    if (socket) {
+      socket.removeAllListeners();
+      socket.destroy();
+    }
     socket = net.createConnection({ host: BACKPACK_IP, port: TCP_PORT });
     socket.on('connect', () => console.log('[tcp] Connected'));
     socket.on('data',    (buf) => broadcast(buf));
-    socket.on('close',   () => { fcSend = null; retryTimer = setTimeout(connect, 3000); });
+    socket.on('close',   () => { fcSend = null; if (!stopped) retryTimer = setTimeout(connect, 3000); });
     socket.on('error',   (e) => console.error('[tcp]', e.message));
     fcSend = (buf) => { if (socket?.writable) socket.write(buf); };
   }
   connect();
-  bridge = { close: () => { clearTimeout(retryTimer); socket?.destroy(); } };
+  bridge = { close: () => { stopped = true; clearTimeout(retryTimer); socket?.destroy(); } };
 }
 
 function stopBridge () {
@@ -65,15 +78,16 @@ function stopBridge () {
 
 // ── Internal WebSocket server (renderer ↔ WiFi bridge) ───────────────────────
 function startWSServer () {
-  const server = http.createServer();
-  const wss    = new WebSocketServer({ server });
+  // Bug #10: store the http server reference so it can be closed on exit
+  wsHttpServer = http.createServer();
+  const wss    = new WebSocketServer({ server: wsHttpServer });
   wss.on('connection', (ws) => {
     clients.add(ws);
     ws.on('message', (data) => { if (fcSend) fcSend(Buffer.isBuffer(data) ? data : Buffer.from(data)); });
     ws.on('close',   () => clients.delete(ws));
     ws.on('error',   (e) => { clients.delete(ws); console.error('[ws]', e.message); });
   });
-  server.listen(WS_PORT, '127.0.0.1', () => console.log(`[ws] Bridge on ws://localhost:${WS_PORT}`));
+  wsHttpServer.listen(WS_PORT, '127.0.0.1', () => console.log(`[ws] Bridge on ws://localhost:${WS_PORT}`));
 }
 
 // ── Display WebSocket server (ESP32 / external display clients) ───────────────
@@ -82,14 +96,15 @@ const DISPLAY_WS_PORT = 5763;
 const displayClients  = new Set();
 
 function startDisplayWSServer () {
-  const server = http.createServer();
-  const wss    = new WebSocketServer({ server });
+  // Bug #10: store the http server reference so it can be closed on exit
+  displayHttpServer = http.createServer();
+  const wss         = new WebSocketServer({ server: displayHttpServer });
   wss.on('connection', (ws) => {
     displayClients.add(ws);
     ws.on('close', () => displayClients.delete(ws));
     ws.on('error', (e) => { displayClients.delete(ws); console.error('[display-ws]', e.message); });
   });
-  server.listen(DISPLAY_WS_PORT, '0.0.0.0', () =>
+  displayHttpServer.listen(DISPLAY_WS_PORT, '0.0.0.0', () =>
     console.log(`[display-ws] ESP32 display server on :${DISPLAY_WS_PORT}`));
 }
 
@@ -102,7 +117,15 @@ ipcMain.on('display-update', (_, data) => {
 
 // ── IPC: WiFi bridge control ──────────────────────────────────────────────────
 ipcMain.on('bridge-start', (_, opts) => {
-  if (opts.backpackIp) BACKPACK_IP = opts.backpackIp;
+  // Bug #13: validate IPv4 format before accepting the IP from the renderer
+  if (opts.backpackIp) {
+    const ipv4Re = /^(\d{1,3}\.){3}\d{1,3}$/;
+    if (!ipv4Re.test(opts.backpackIp)) {
+      console.error('[bridge-start] Invalid IP address:', opts.backpackIp);
+      return;
+    }
+    BACKPACK_IP = opts.backpackIp;
+  }
   if (opts.udpRecv)    UDP_RECV    = opts.udpRecv;
   if (opts.udpSend)    UDP_SEND    = opts.udpSend;
   if (opts.tcpPort)    TCP_PORT    = opts.tcpPort;
@@ -131,14 +154,21 @@ ipcMain.handle('serial-open', async (_, portPath, baudRate) => {
     serialPort = null;
   }
   return new Promise((resolve, reject) => {
-    const sp = new SerialPort({ path: portPath, baudRate }, (err) => {
-      if (err) { reject(err.message); return; }
-      serialPort = sp;
-      sp.on('data',  (buf) => mainWin?.webContents.send('serial-data',  [...buf]));
-      sp.on('close', ()    => { serialPort = null; mainWin?.webContents.send('serial-closed'); });
-      sp.on('error', (e)   => mainWin?.webContents.send('serial-error', e.message));
-      resolve(true);
-    });
+    // Bug #3: wrap the SerialPort constructor in a try-catch so synchronous
+    // throws (e.g. invalid arguments) are caught and the promise is rejected.
+    let sp;
+    try {
+      sp = new SerialPort({ path: portPath, baudRate }, (err) => {
+        if (err) { reject(err.message); return; }
+        serialPort = sp;
+        sp.on('data',  (buf) => mainWin?.webContents.send('serial-data',  [...buf]));
+        sp.on('close', ()    => { serialPort = null; mainWin?.webContents.send('serial-closed'); });
+        sp.on('error', (e)   => mainWin?.webContents.send('serial-error', e.message));
+        resolve(true);
+      });
+    } catch (e) {
+      reject(e.message);
+    }
   });
 });
 
@@ -157,7 +187,11 @@ let settingsPath = null;
 
 function loadSettings () {
   try { return JSON.parse(fs.readFileSync(settingsPath, 'utf8')); }
-  catch { return { windowMode: 'fullscreen' }; }
+  catch (e) {
+    // Bug #25: warn so developers know that settings were reset to defaults
+    console.warn('[settings] Failed to parse settings file, resetting to defaults:', e.message);
+    return { windowMode: 'fullscreen' };
+  }
 }
 
 function persistSettings (data) {
@@ -200,6 +234,7 @@ function applyWindowMode (win, mode) {
   }
 }
 
+ipcMain.handle('get-app-version',   ()         => app.getVersion());
 ipcMain.handle('get-settings',      ()         => loadSettings());
 ipcMain.handle('save-settings',     (_, data)  => { persistSettings(data); return true; });
 ipcMain.handle('set-window-mode',   (_, mode)  => {
@@ -210,13 +245,15 @@ ipcMain.handle('set-window-mode',   (_, mode)  => {
 // ── Video recording save ───────────────────────────────────────────────────────
 let recordingsBasePath = null;
 
+// Bug #24: converted from sync fs calls to async fs.promises to avoid blocking
+// the main process event loop inside async IPC handlers.
 ipcMain.handle('save-recording', async (_, dateStr, timeStr, arrayBuffer) => {
   if (!recordingsBasePath) return { ok: false, error: 'No path' };
   try {
     const dir = path.join(recordingsBasePath, dateStr);
-    fs.mkdirSync(dir, { recursive: true });
+    await fs.promises.mkdir(dir, { recursive: true });
     const filePath = path.join(dir, `recording-${dateStr}_${timeStr}.webm`);
-    fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
+    await fs.promises.writeFile(filePath, Buffer.from(arrayBuffer));
     return { ok: true, path: filePath };
   } catch (e) {
     console.error('[save-recording]', e.message);
@@ -228,9 +265,9 @@ ipcMain.handle('save-snapshot', async (_, dateStr, timeStr, arrayBuffer) => {
   if (!recordingsBasePath) return { ok: false, error: 'No path' };
   try {
     const dir = path.join(recordingsBasePath, dateStr);
-    fs.mkdirSync(dir, { recursive: true });
+    await fs.promises.mkdir(dir, { recursive: true });
     const filePath = path.join(dir, `snapshot-${dateStr}_${timeStr}.png`);
-    fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
+    await fs.promises.writeFile(filePath, Buffer.from(arrayBuffer));
     return { ok: true, path: filePath };
   } catch (e) {
     console.error('[save-snapshot]', e.message);
@@ -257,17 +294,37 @@ ipcMain.handle('open-tiles-folder', async () => {
 
 ipcMain.handle('save-tile-file', async (_, regionName, layerKey, z, x, y, arrayBuffer) => {
   if (!tilesBasePath) return;
+
+  // Bug #12: validate z/x/y as integers and layerKey against a safe allowlist
+  // to prevent path traversal attacks via crafted tile coordinates or keys.
+  const layerKeyRe = /^[a-zA-Z0-9_-]+$/;
+  if (!layerKeyRe.test(layerKey)) {
+    console.error('[tile-save] Invalid layerKey:', layerKey);
+    return { ok: false, error: 'Invalid layerKey' };
+  }
+  const zi = parseInt(z, 10), xi = parseInt(x, 10), yi = parseInt(y, 10);
+  if (!Number.isInteger(zi) || !Number.isInteger(xi) || !Number.isInteger(yi) ||
+      String(zi) !== String(z) || String(xi) !== String(x) || String(yi) !== String(y)) {
+    console.error('[tile-save] Non-integer tile coordinates:', z, x, y);
+    return { ok: false, error: 'Invalid tile coordinates' };
+  }
+
   try {
     // Sanitize region name for use as a folder name
     const safeRegion = (regionName || 'default').replace(/[^a-zA-Z0-9_\-. ]/g, '_').trim() || 'default';
-    const dir = path.join(tilesBasePath, safeRegion, layerKey, String(z), String(x));
-    fs.mkdirSync(dir, { recursive: true });
-    const filePath = path.join(dir, `${y}.png`);
-    if (!fs.existsSync(filePath)) {
-      fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
+    const dir = path.join(tilesBasePath, safeRegion, layerKey, String(zi), String(xi));
+    // Bug #24: use async fs.promises calls to avoid blocking the event loop
+    await fs.promises.mkdir(dir, { recursive: true });
+    const filePath = path.join(dir, `${yi}.png`);
+    try {
+      await fs.promises.access(filePath);
+      // File already exists — skip writing
+    } catch {
+      await fs.promises.writeFile(filePath, Buffer.from(arrayBuffer));
     }
   } catch (e) { console.error('[tile-save]', e.message); }
 });
+
 // Re-focus the renderer's Chromium context after native dialogs (confirm/alert) steal it.
 ipcMain.on('focus-window', () => mainWin?.webContents.focus());
 ipcMain.on('blur-window',  () => { mainWin?.blur(); setTimeout(() => mainWin?.focus(), 50); });
@@ -289,7 +346,7 @@ function createWindow () {
 
   mainWin = new BrowserWindow({
     width: 1280, height: 820, minWidth: 900, minHeight: 600,
-    title: 'AeroNav AI',
+    title: 'AeroNav',
     show: false, // shown after mode is applied
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -303,6 +360,9 @@ function createWindow () {
     applyWindowMode(mainWin, settings.windowMode || 'fullscreen');
     mainWin.show();
   });
+  // Bug #11: clear mainWin reference after the window is destroyed so stale
+  // references to the closed BrowserWindow don't linger.
+  mainWin.on('closed', () => { mainWin = null; });
   // mainWin.webContents.openDevTools();
 }
 
@@ -320,5 +380,9 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   stopBridge();
+  // Bug #10: close both WebSocket HTTP servers so their handles don't keep the
+  // process alive and ports are released cleanly.
+  try { wsHttpServer?.close(); }      catch {}
+  try { displayHttpServer?.close(); } catch {}
   if (process.platform !== 'darwin') app.quit();
 });

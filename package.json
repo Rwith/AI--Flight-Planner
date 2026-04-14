@@ -1,7 +1,7 @@
 {
-  "name": "aeronav-ai",
-  "version": "1.0.0",
-  "description": "AeroNav AI — Waypoint Mission & Flight Planner",
+  "name": "aeronav",
+  "version": "2026.4.13",
+  "description": "AeroNav — Waypoint Mission & Flight Planner",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -24,7 +24,7 @@
   },
   "build": {
     "appId": "com.aeronav.ai",
-    "productName": "AeroNav AI",
+    "productName": "AeroNav",
     "npmRebuild": true,
     "files": [
       "main.js",
@@ -45,7 +45,7 @@
       "installerHeaderIcon": "assets/icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "AeroNav AI",
+      "shortcutName": "AeroNav",
       "include": "build/installer.nsh",
       "installerSidebar": "build/sidebar.bmp",
       "uninstallerSidebar": "build/sidebar-uninstall.bmp"

@@ -9,15 +9,21 @@ import * as THREE from 'three';
 const LOITER_TYPES = new Set(['loiter','loiter_time','loiter_turns','loiter_to_alt']);
 
 window._addTubePath = function (mlMap, wps) {
-  if (!wps || wps.length < 2) return;
+  if (!wps || wps.length < 2 || wps[0].lon == null || wps[0].lat == null) return;
 
   // Mercator origin at first waypoint, altitude=0.  All other points expressed
   // as metres offset from this origin so float precision is preserved.
-  const origin = maplibregl.MercatorCoordinate.fromLngLat([wps[0].lon, wps[0].lat], 0);
-  const sc = origin.meterInMercatorCoordinateUnits(); // 1 m → Mercator units
+  let origin, sc;
+  try {
+    origin = maplibregl.MercatorCoordinate.fromLngLat([wps[0].lon, wps[0].lat], 0);
+    sc = origin.meterInMercatorCoordinateUnits(); // 1 m → Mercator units
+  } catch(e) { console.error('[flight-tube] coordinate error', e); return; }
 
   function toLocal(w) {
-    const m = maplibregl.MercatorCoordinate.fromLngLat([w.lon, w.lat], w.alt);
+    let m;
+    try {
+      m = maplibregl.MercatorCoordinate.fromLngLat([w.lon, w.lat], w.alt);
+    } catch(e) { console.error('[flight-tube] coordinate error', e); return; }
     return new THREE.Vector3(
       (m.x - origin.x) / sc,
        m.z / sc,
@@ -59,7 +65,7 @@ window._addTubePath = function (mlMap, wps) {
       });
       for (const w of wps) {
         if (!LOITER_TYPES.has(w.action)) continue;
-        const r = Math.max(w.loiterR || 20, 5);
+        const r = Math.max(w.loiterR != null ? w.loiterR : 20, 5);
         const c = toLocal(w);
         const ringPoints = [];
         for (let k = 0; k < RING_PTS; k++) {
@@ -86,6 +92,13 @@ window._addTubePath = function (mlMap, wps) {
     },
 
     onRemove () {
+      this.scene.children.forEach(child => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+          else child.material.dispose();
+        }
+      });
       this.renderer.dispose();
       this.scene.clear();
     },

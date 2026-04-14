@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AeroNav AI</title>
+<title>AeroNav</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
@@ -36,7 +36,7 @@
   #api-key:focus { border-color: var(--blue); }
   #fly-status {
     padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700;
-    background: var(--green); color: #000; white-space: nowrap;
+    background: var(--card); color: var(--sec); white-space: nowrap;
   }
   #weather-summary { color: var(--sec); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
   .topbtn {
@@ -661,8 +661,8 @@
 
 <!-- TOP BAR -->
 <div id="topbar">
-  <div class="title" onclick="openSettings()" title="Settings">✈ AeroNav AI <span id="app-version" style="font-size:10px;opacity:.55;font-weight:400;vertical-align:middle"></span></div>
-  <span id="fly-status">LOADING</span>
+  <div class="title" onclick="openSettings()" title="Settings">✈ AeroNav <span id="app-version" style="font-size:10px;opacity:.55;font-weight:400;vertical-align:middle"></span></div>
+  <span id="fly-status">—</span>
   <span id="weather-summary">Fetching weather…</span>
   <div id="topbar-mission-btns" style="display:flex;align-items:center;gap:4px;flex-wrap:nowrap">
     <div class="spacer"></div>
@@ -1702,7 +1702,8 @@ function _saveWaypoints() {
 function _saveFuncBlocks() {
   try { localStorage.setItem('savedFuncBlocks', JSON.stringify(funcBlocks.map(b => ({
     id: b.id, type: b.type, startWpIdx: b.startWpIdx, endWpIdx: b.endWpIdx,
-    params: {...b.params}
+    params: {...b.params},
+    savedOrigAlts: b.savedOrigAlts ?? null
   })))); } catch {}
 }
 function _loadSavedWaypoints() {
@@ -2078,8 +2079,10 @@ function updateGimbalLines() {
       if (iconDiv) iconDiv.style.transform = `rotate(${(newAbsYaw + 180) % 360}deg)`;
 
       if (selectedIdx >= 0 && waypoints[selectedIdx] === wp) {
-        document.getElementById('ed-mount-yaw').value   = wp.mountYaw;
-        document.getElementById('ed-mount-pitch').value = wp.mountPitch;
+        const yawEl = document.getElementById('ed-mount-yaw');
+        if (yawEl) yawEl.value = wp.mountYaw;
+        const pitchEl = document.getElementById('ed-mount-pitch');
+        if (pitchEl) pitchEl.value = wp.mountPitch;
       }
     });
 
@@ -2650,6 +2653,13 @@ function addFuncBlock(type) {
     blk.params.lon = +wp0.lon.toFixed(6);
     blk.params.alt = wp0.alt;
   }
+  // Capture original alts BEFORE the block modifies them, so resize can restore correctly
+  if (type === 'set_alt') {
+    blk.savedOrigAlts = {};
+    for (let i = blk.startWpIdx; i <= blk.endWpIdx; i++) {
+      blk.savedOrigAlts[i] = waypoints[i].alt;
+    }
+  }
   funcBlocks.push(blk);
   _applyFuncBlock(funcBlocks.length - 1);
   _saveFuncBlocks();
@@ -2658,6 +2668,7 @@ function addFuncBlock(type) {
 
 function _applyFuncBlock(bIdx) {
   const blk = funcBlocks[bIdx];
+  if (!blk || !waypoints.length) return;
   const s = Math.max(0, Math.min(blk.startWpIdx, waypoints.length - 1));
   const e = Math.max(s, Math.min(blk.endWpIdx, waypoints.length - 1));
   for (let i = s; i <= e; i++) {
@@ -2767,14 +2778,19 @@ function fbDrop(e, bIdx) {
 function fbResizeStart(e, bIdx) {
   e.preventDefault();
   _fbResizing = bIdx;
-  // Store original alts for all WPs from startWpIdx onward so they can be restored if block shrinks
+  // Build _origAlts from persisted savedOrigAlts (survives app restarts).
+  // For WPs not yet covered by the block, fall back to their current alt
+  // (which is still their original since the block hasn't touched them yet).
   const blk = funcBlocks[bIdx];
   if (blk) {
     blk._origAlts = {};
     for (let i = blk.startWpIdx; i < waypoints.length; i++) {
-      blk._origAlts[i] = waypoints[i].alt;
+      blk._origAlts[i] = blk.savedOrigAlts?.[i] !== undefined
+        ? blk.savedOrigAlts[i]
+        : waypoints[i].alt;
     }
   }
+  document.removeEventListener('mousemove', _fbResizeMove);
   document.addEventListener('mousemove', _fbResizeMove);
   document.addEventListener('mouseup', _fbResizeEnd, { once: true });
 }
@@ -2790,10 +2806,20 @@ function _fbResizeMove(e) {
   if (wpIdx >= blk.startWpIdx) {
     const prevEnd = blk.endWpIdx;
     blk.endWpIdx = wpIdx;
-    // Restore original alts for WPs that are no longer in the block
-    if (blk.type === 'set_alt' && prevEnd > wpIdx && blk._origAlts) {
-      for (let i = wpIdx + 1; i <= prevEnd; i++) {
-        if (blk._origAlts[i] !== undefined) waypoints[i].alt = blk._origAlts[i];
+    if (blk.type === 'set_alt') {
+      // Block expanded: capture original alts of newly included WPs before the block overwrites them
+      if (wpIdx > prevEnd) {
+        if (!blk.savedOrigAlts) blk.savedOrigAlts = {};
+        for (let i = prevEnd + 1; i <= wpIdx; i++) {
+          if (blk.savedOrigAlts[i] === undefined) blk.savedOrigAlts[i] = waypoints[i].alt;
+          if (blk._origAlts && blk._origAlts[i] === undefined) blk._origAlts[i] = waypoints[i].alt;
+        }
+      }
+      // Block shrank: restore original alts for WPs that are no longer covered
+      if (prevEnd > wpIdx && blk._origAlts) {
+        for (let i = wpIdx + 1; i <= prevEnd; i++) {
+          if (blk._origAlts[i] !== undefined) waypoints[i].alt = blk._origAlts[i];
+        }
       }
     }
     _applyFuncBlock(_fbResizing);
@@ -2935,13 +2961,17 @@ function deleteWPByIdx(idx) {
   if (selectedIdx === idx) { selectedIdx = -1; }
   else if (selectedIdx > idx) selectedIdx--;
   // Shift block indices down for indices after the deleted WP
-  funcBlocks.forEach(blk => {
-    if (blk.startWpIdx > idx) blk.startWpIdx--;
-    if (blk.endWpIdx   > idx) blk.endWpIdx--;
-    // Clamp to valid range
-    blk.startWpIdx = Math.max(0, Math.min(blk.startWpIdx, waypoints.length - 1));
-    blk.endWpIdx   = Math.max(blk.startWpIdx, Math.min(blk.endWpIdx, waypoints.length - 1));
-  });
+  if (waypoints.length === 0) {
+    funcBlocks = [];
+  } else {
+    funcBlocks.forEach(blk => {
+      if (blk.startWpIdx > idx) blk.startWpIdx--;
+      if (blk.endWpIdx   > idx) blk.endWpIdx--;
+      // Clamp to valid range
+      blk.startWpIdx = Math.max(0, Math.min(blk.startWpIdx, waypoints.length - 1));
+      blk.endWpIdx   = Math.max(blk.startWpIdx, Math.min(blk.endWpIdx, waypoints.length - 1));
+    });
+  }
   // Re-index icons
   waypoints.forEach((wp, i) => wp.marker.setIcon(makeWPIcon(i, wp.action, i === selectedIdx)));
   updatePolyline(); updateProfile(); renderWPList();
@@ -3203,7 +3233,7 @@ function initWindParticles() {
 
 function animateWind() {
   const canvas = document.getElementById('wind-canvas');
-  if (!canvas) { windAnimFrame = requestAnimationFrame(animateWind); return; }
+  if (!canvas) { windAnimFrame = null; return; }
   const container = map.getContainer();
   const W = container.offsetWidth, H = container.offsetHeight;
   if (canvas.width !== W) canvas.width = W;
@@ -3271,6 +3301,10 @@ async function fetchWeather() {
   document.getElementById('weather-loading').style.display = 'block';
   document.getElementById('weather-content').style.display = 'none';
   document.getElementById('forecast-strip').innerHTML = '<span style="color:var(--sec);font-size:12px">Loading…</span>';
+  const flyBadge = document.getElementById('fly-status');
+  const weatherSummary = document.getElementById('weather-summary');
+  if (flyBadge) { flyBadge.textContent = '…'; flyBadge.style.background = 'var(--card)'; flyBadge.style.color = 'var(--sec)'; }
+  if (weatherSummary) weatherSummary.textContent = 'Fetching weather…';
   try {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation_probability,cloudcover,windspeed_10m,windgusts_10m,winddirection_10m,visibility&current_weather=true&forecast_days=2&windspeed_unit=kmh&timezone=auto`;
     const res = await fetch(url);
@@ -3279,6 +3313,8 @@ async function fetchWeather() {
     renderWeather(data);
   } catch(err) {
     document.getElementById('weather-loading').textContent = 'Failed to fetch weather: ' + err.message;
+    if (flyBadge) { flyBadge.textContent = '?'; flyBadge.style.background = 'var(--card)'; flyBadge.style.color = 'var(--sec)'; }
+    if (weatherSummary) weatherSummary.textContent = 'Weather unavailable';
   }
 }
 
@@ -3434,10 +3470,11 @@ function updateMissionStats() {
   for (let i = 1; i < waypoints.length; i++) {
     const d = haversine(waypoints[i-1].lat, waypoints[i-1].lon, waypoints[i].lat, waypoints[i].lon);
     totalDist += d;
-    totalTime += d / _legSpeed(i);
+    const spd = Math.max(1, _legSpeed(i));
+    totalTime += d / spd;
   }
-  const maxAlt   = Math.max(...waypoints.map(w => w.alt));
-  const maxRange = Math.max(...waypoints.map(w => haversine(homeLat, homeLon, w.lat, w.lon)));
+  const maxAlt   = waypoints.length > 0 ? Math.max(...waypoints.map(w => w.alt)) : 0;
+  const maxRange = waypoints.length > 0 ? Math.max(...waypoints.map(w => haversine(homeLat, homeLon, w.lat, w.lon))) : 0;
   const distStr  = totalDist >= 1000 ? (totalDist / 1000).toFixed(2) + ' km' : Math.round(totalDist) + ' m';
   const timeStr  = totalTime >= 60   ? (totalTime / 60).toFixed(1) + ' min'  : Math.round(totalTime) + ' s';
   const rangeStr = maxRange >= 1000  ? (maxRange / 1000).toFixed(2) + ' km'  : Math.round(maxRange) + ' m';
@@ -6144,12 +6181,10 @@ setInterval(updateSkyOverlay, 60000); // refresh sky colour every minute
 // and restore the user's last-chosen map style.
 ;(function() { switchMapTile(_currentTileType); })();
 fetchWeather();
-(function() {
-  const d = new Date(document.lastModified);
-  const ver = 'v' + d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0');
+window.electronBridge?.getVersion?.().then(v => {
   const el = document.getElementById('app-version');
-  if (el) el.textContent = ver;
-})();
+  if (el && v) el.textContent = 'v' + v;
+});
 _loadSavedWaypoints();
 renderWPList();
 updateProfile();
@@ -7194,8 +7229,8 @@ function _missionStats() {
   const n = waypoints.length; if (n === 0) return {};
   let dist = 0;
   for (let i = 1; i < n; i++) dist += haversine(waypoints[i-1].lat, waypoints[i-1].lon, waypoints[i].lat, waypoints[i].lon);
-  const maxAlt = Math.max(...waypoints.map(w => w.alt));
-  const maxRange = Math.max(...waypoints.map(w => haversine(homeLat, homeLon, w.lat, w.lon)));
+  const maxAlt = waypoints.length > 0 ? Math.max(...waypoints.map(w => w.alt)) : 0;
+  const maxRange = waypoints.length > 0 ? Math.max(...waypoints.map(w => haversine(homeLat, homeLon, w.lat, w.lon))) : 0;
   const distStr = dist >= 1000 ? (dist/1000).toFixed(2)+' km' : Math.round(dist)+' m';
   const rangeStr = maxRange >= 1000 ? (maxRange/1000).toFixed(2)+' km' : Math.round(maxRange)+' m';
   const typeCounts = {};
@@ -7455,7 +7490,7 @@ function _renderMissionList() {
     const ds = d.toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' }) + ' · ' + d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' });
     const s = m.stats || {};
     const esc = m.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const thumbHtml = m.thumb ? `<img src="${m.thumb}" style="width:120px;height:78px;display:block;object-fit:contain"><canvas class="mission-thumb-overlay" data-mid="${m.id}" width="120" height="78"></canvas>` : `<div style="width:120px;height:78px;display:flex;align-items:center;justify-content:center;color:var(--sec);font-size:10px">No preview</div>`;
+    const thumbHtml = m.thumb ? `<div style="position:relative;width:120px;height:78px;flex-shrink:0"><img src="${m.thumb}" style="width:120px;height:78px;display:block;object-fit:contain"><canvas class="mission-thumb-overlay" data-mid="${m.id}" width="120" height="78"></canvas></div>` : `<div style="width:120px;height:78px;display:flex;align-items:center;justify-content:center;color:var(--sec);font-size:10px">No preview</div>`;
     const activeStyle = isCurrent ? 'border-color:var(--orange,#db6d28);' : '';
     const activeBadge = isCurrent ? `<span style="font-size:9px;font-weight:700;color:var(--orange,#db6d28);background:rgba(219,109,40,.13);border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:middle;text-transform:uppercase;letter-spacing:.04em">Active</span>` : '';
     const actionBtns = isCurrent

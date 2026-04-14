@@ -66,6 +66,9 @@ function startUDP () {
     console.log(`[udp ] Listening for MAVLink on :${UDP_RECV}`)
   );
 
+  process.on('SIGINT',  () => { try { udp.close(); } catch(_){} process.exit(0); });
+  process.on('SIGTERM', () => { try { udp.close(); } catch(_){} process.exit(0); });
+
   fcSend = (buf) => udp.send(buf, UDP_SEND, BACKPACK_IP, (e) => {
     if (e) console.error('[udp↑]', e.message);
   });
@@ -93,7 +96,7 @@ function startTCP () {
 
     socket.on('close', () => {
       console.log('[tcp ] Connection closed — retrying in 3 s …');
-      socket = null;
+      socket.destroy(); socket = null;
       fcSend = null;
       setTimeout(connect, 3000);
     });
@@ -119,7 +122,7 @@ wss.on('connection', (ws, req) => {
   console.log(`[ws  ] Browser connected (${req.socket.remoteAddress})`);
 
   ws.on('message', (data) => {
-    if (fcSend) fcSend(Buffer.isBuffer(data) ? data : Buffer.from(data));
+    try { fcSend?.(Buffer.isBuffer(data) ? data : Buffer.from(data)); } catch(e) { console.error('[ws↑]', e.message); }
   });
 
   ws.on('close', () => { clients.delete(ws); console.log('[ws  ] Browser disconnected'); });
