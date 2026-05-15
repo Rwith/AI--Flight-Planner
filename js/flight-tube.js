@@ -101,6 +101,9 @@ window._addTubePath = function (mlMap, wps) {
       });
       this.renderer.dispose();
       this.scene.clear();
+      this.renderer = null;
+      this.scene    = null;
+      this.camera   = null;
     },
 
     render (gl, matrix) {

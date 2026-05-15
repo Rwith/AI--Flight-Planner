@@ -3,100 +3,179 @@
 const { app, BrowserWindow, ipcMain, Menu, screen, shell } = require('electron');
 const path   = require('path');
 const fs     = require('fs');
+const os     = require('os');
 const dgram  = require('dgram');
 const net    = require('net');
 const http   = require('http');
-const { WebSocketServer } = require('ws');
+const { WebSocketServer, WebSocket } = require('ws');
 
-// ── Bridge config (can be overridden via IPC from renderer) ───────────────────
-let BACKPACK_IP = '10.0.0.1';
-let UDP_RECV    = 14550;
-let UDP_SEND    = 14555;
-let TCP_PORT    = 5760;
-const WS_PORT   = 5761;
+// ── Bridge config — N-slot array ─────────────────────────────────────────────
+const SLOT_DEFAULTS = { backpackIp: '10.0.0.1', udpRecv: 14550, udpSend: 14555, tcpPort: 5760, wsDronePort: 5760 };
+const slotConfigs   = [{ ...SLOT_DEFAULTS }, { ...SLOT_DEFAULTS }];
+
+function getSlotCfg (slot) {
+  if (!slotConfigs[slot]) slotConfigs[slot] = { ...SLOT_DEFAULTS };
+  return slotConfigs[slot];
+}
 
 // ── Shared state ──────────────────────────────────────────────────────────────
-const clients = new Set();
-let   fcSend  = null;
-let   bridge  = null;
-let   mainWin = null;
+const clientSets = [];   // per-slot Set of renderer WS clients
+const fcSends    = [];   // per-slot write-to-drone fn
+const bridges    = [];   // per-slot bridge handle
+let   mainWin    = null;
 
-// ── Module-level server references (Bug #10) ──────────────────────────────────
-let wsHttpServer      = null;
-let displayHttpServer = null;
+function ensureSlot (s) {
+  if (!clientSets[s]) clientSets[s] = new Set();
+}
+ensureSlot(0); ensureSlot(1);
 
-// ── Broadcast to all renderer WebSocket clients ───────────────────────────────
-function broadcast (buf) {
-  for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(buf);
+// ── Module-level server references ────────────────────────────────────────────
+const wsHttpServers = [];
+let   displayHttpServer = null;
+
+// ── Broadcast to renderer WS clients for a given slot ────────────────────────
+function broadcastSlot (slot, buf) {
+  const set = clientSets[slot];
+  if (!set) return;
+  for (const ws of set) if (ws.readyState === ws.OPEN) ws.send(buf);
+}
+
+// ── Auto-detect which local adapter to use for a given drone IP + slot ───────
+// Collects ALL adapters on the same /24, then picks by slot index.
+// This means slot 0 gets the first matching adapter and slot 1 gets the second,
+// so two drones on the same subnet (e.g. both 10.0.0.1) use different adapters
+// as long as Windows assigned them different local IPs.
+function findBindAddr (droneIp, slot) {
+  slot = slot ?? 0;
+  const prefix = droneIp.split('.').slice(0, 3).join('.');
+  const matches = [];
+  const ifaces  = os.networkInterfaces();
+  for (const name of Object.keys(ifaces).sort()) {   // sort for determinism
+    for (const iface of ifaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal
+          && iface.address.startsWith(prefix + '.')) {
+        matches.push({ address: iface.address, name });
+      }
+    }
+  }
+  if (matches.length === 0) return '0.0.0.0';
+  const pick = matches[Math.min(slot, matches.length - 1)];
+  console.log(`[slot${slot}] ${droneIp} → adapter "${pick.name}" local ${pick.address}` +
+    (matches.length > 1 ? ` (${matches.length} adapters on ${prefix}.x)` : ''));
+  mainWin?.webContents.send('bridge-adapter', slot, pick.name, pick.address);
+  return pick.address;
 }
 
 // ── UDP bridge ────────────────────────────────────────────────────────────────
-function startUDP () {
-  stopBridge();
+function startUDP (slot) {
+  slot = slot ?? 0;
+  stopBridge(slot);
+  const { backpackIp: ip, udpRecv: recvPort, udpSend: sendPort } = getSlotCfg(slot);
   const udp = dgram.createSocket('udp4');
-  udp.on('message', (msg, rinfo) => { if (rinfo.address === BACKPACK_IP) broadcast(msg); });
+  let _udpFirstPacket = true;
+  udp.on('message', (msg, rinfo) => {
+    if (rinfo.address === ip) {
+      if (_udpFirstPacket) { _udpFirstPacket = false; console.log(`[udp${slot}] First packet from ${rinfo.address}`); }
+      broadcastSlot(slot, msg);
+    } else {
+      console.warn(`[udp${slot}] Ignored packet from ${rinfo.address} (expected ${ip}) — wrong drone IP configured?`);
+    }
+  });
   udp.on('error', (e) => {
     console.error(e.code === 'EADDRINUSE'
-      ? `[udp] Port ${UDP_RECV} in use — close Mission Planner / QGC first`
-      : '[udp] ' + e.message);
-    // Bug #9: reset fcSend so callers don't use the dead socket's send function
-    fcSend = null;
+      ? `[udp${slot}] Port ${recvPort} in use — close Mission Planner / QGC first`
+      : `[udp${slot}] ` + e.message);
+    fcSends[slot] = null;
     udp.close();
   });
-  udp.bind(UDP_RECV, () => console.log(`[udp] Listening on :${UDP_RECV}`));
-  fcSend = (buf) => udp.send(buf, UDP_SEND, BACKPACK_IP, (e) => { if (e) console.error('[udp↑]', e.message); });
-  bridge = udp;
+  const bindAddr = findBindAddr(ip, slot);
+  udp.bind(recvPort, bindAddr, () => console.log(`[udp${slot}] Listening on ${bindAddr}:${recvPort}`));
+  fcSends[slot] = (buf) => udp.send(buf, sendPort, ip, (e) => { if (e) console.error(`[udp${slot}↑]`, e.message); });
+  bridges[slot] = udp;
 }
 
 // ── TCP bridge ────────────────────────────────────────────────────────────────
-function startTCP () {
-  stopBridge();
+function startTCP (slot) {
+  slot = slot ?? 0;
+  stopBridge(slot);
+  const { backpackIp: ip, tcpPort } = getSlotCfg(slot);
+  const bindAddr = findBindAddr(ip, slot);
   let socket = null, retryTimer = null, stopped = false;
   function connect () {
     if (stopped) return;
-    // Bug #2: remove all listeners from any existing socket before creating a
-    // new connection so listeners don't accumulate across reconnect attempts.
-    if (socket) {
-      socket.removeAllListeners();
-      socket.destroy();
-    }
-    socket = net.createConnection({ host: BACKPACK_IP, port: TCP_PORT });
-    socket.on('connect', () => console.log('[tcp] Connected'));
-    socket.on('data',    (buf) => broadcast(buf));
-    socket.on('close',   () => { fcSend = null; if (!stopped) retryTimer = setTimeout(connect, 3000); });
-    socket.on('error',   (e) => console.error('[tcp]', e.message));
-    fcSend = (buf) => { if (socket?.writable) socket.write(buf); };
+    if (socket) { socket.removeAllListeners(); socket.destroy(); }
+    const connOpts = { host: ip, port: tcpPort };
+    if (bindAddr !== '0.0.0.0') connOpts.localAddress = bindAddr;
+    socket = net.createConnection(connOpts);
+    socket.on('connect', () => console.log(`[tcp${slot}] Connected via ${bindAddr}`));
+    socket.on('data',    (buf) => broadcastSlot(slot, buf));
+    socket.on('close',   () => { fcSends[slot] = null; if (!stopped) retryTimer = setTimeout(connect, 3000); });
+    socket.on('error',   (e) => console.error(`[tcp${slot}]`, e.message));
+    fcSends[slot] = (buf) => { if (socket?.writable) socket.write(buf); };
   }
   connect();
-  bridge = { close: () => { stopped = true; clearTimeout(retryTimer); socket?.destroy(); } };
+  bridges[slot] = { close: () => { stopped = true; clearTimeout(retryTimer); socket?.destroy(); } };
 }
 
-function stopBridge () {
-  try { bridge?.close(); } catch {}
-  bridge = null; fcSend = null;
+// ── WS-client bridge — outbound WebSocket to drone, relay to renderer ─────────
+// Drone must expose a WebSocket server (e.g. MAVProxy --out ws:0.0.0.0:5760).
+// Uses localAddress to force traffic through the correct adapter — solves the
+// same-subnet two-drone problem without needing TCP or UDP port tricks.
+function startWSClientBridge (slot) {
+  slot = slot ?? 0;
+  stopBridge(slot);
+  const { backpackIp: ip, wsDronePort: droneWsPort } = getSlotCfg(slot);
+  const bindAddr = findBindAddr(ip, slot);
+  const url      = `ws://${ip}:${droneWsPort}`;
+
+  let ws = null, retryTimer = null, stopped = false;
+
+  function connect () {
+    if (stopped) return;
+    const opts = { handshakeTimeout: 5000 };
+    if (bindAddr !== '0.0.0.0') opts.localAddress = bindAddr;
+    ws = new WebSocket(url, opts);
+    ws.binaryType = 'nodebuffer';
+    ws.on('open', () => {
+      console.log(`[ws-client${slot}] Connected to ${url} via ${bindAddr}`);
+      fcSends[slot] = (buf) => { if (ws.readyState === ws.OPEN) ws.send(buf); };
+    });
+    ws.on('message', (data) => broadcastSlot(slot, Buffer.isBuffer(data) ? data : Buffer.from(data)));
+    ws.on('close',   () => { fcSends[slot] = null; if (!stopped) { console.log(`[ws-client${slot}] Disconnected — retrying in 3 s`); retryTimer = setTimeout(connect, 3000); } });
+    ws.on('error',   (e) => console.error(`[ws-client${slot}]`, e.message));
+  }
+
+  connect();
+  bridges[slot] = { close: () => { stopped = true; clearTimeout(retryTimer); try { ws?.terminate(); } catch {} } };
 }
 
-// ── Internal WebSocket server (renderer ↔ WiFi bridge) ───────────────────────
-function startWSServer () {
-  // Bug #10: store the http server reference so it can be closed on exit
-  wsHttpServer = http.createServer();
-  const wss    = new WebSocketServer({ server: wsHttpServer });
+function stopBridge (slot) {
+  if (slot === undefined) { for (let i = 0; i < bridges.length; i++) stopBridge(i); return; }
+  try { bridges[slot]?.close(); } catch {}
+  bridges[slot] = null; fcSends[slot] = null;
+}
+
+// ── Internal WebSocket server (renderer ↔ WiFi bridge) — per slot ─────────────
+function startWSServer (slot) {
+  slot = slot ?? 0;
+  const port    = 5770 + slot;
+  const httpSrv = http.createServer();
+  const wss     = new WebSocketServer({ server: httpSrv });
   wss.on('connection', (ws) => {
-    clients.add(ws);
-    ws.on('message', (data) => { if (fcSend) fcSend(Buffer.isBuffer(data) ? data : Buffer.from(data)); });
-    ws.on('close',   () => clients.delete(ws));
-    ws.on('error',   (e) => { clients.delete(ws); console.error('[ws]', e.message); });
+    clientSets[slot].add(ws);
+    ws.on('message', (data) => { if (fcSends[slot]) fcSends[slot](Buffer.isBuffer(data) ? data : Buffer.from(data)); });
+    ws.on('close',   () => clientSets[slot].delete(ws));
+    ws.on('error',   (e) => { clientSets[slot].delete(ws); console.error(`[ws${slot}]`, e.message); });
   });
-  wsHttpServer.listen(WS_PORT, '127.0.0.1', () => console.log(`[ws] Bridge on ws://localhost:${WS_PORT}`));
+  httpSrv.listen(port, '127.0.0.1', () => console.log(`[ws${slot}] Bridge on ws://localhost:${port}`));
+  wsHttpServers[slot] = httpSrv;
 }
 
 // ── Display WebSocket server (ESP32 / external display clients) ───────────────
-// Binds on all interfaces so an ESP32 on the same WiFi network can connect.
 const DISPLAY_WS_PORT = 5763;
 const displayClients  = new Set();
 
 function startDisplayWSServer () {
-  // Bug #10: store the http server reference so it can be closed on exit
   displayHttpServer = http.createServer();
   const wss         = new WebSocketServer({ server: displayHttpServer });
   wss.on('connection', (ws) => {
@@ -108,7 +187,6 @@ function startDisplayWSServer () {
     console.log(`[display-ws] ESP32 display server on :${DISPLAY_WS_PORT}`));
 }
 
-// Renderer pushes position + waypoints; forwarded as JSON to all display clients.
 ipcMain.on('display-update', (_, data) => {
   if (displayClients.size === 0) return;
   const msg = JSON.stringify(data);
@@ -117,24 +195,37 @@ ipcMain.on('display-update', (_, data) => {
 
 // ── IPC: WiFi bridge control ──────────────────────────────────────────────────
 ipcMain.on('bridge-start', (_, opts) => {
-  // Bug #13: validate IPv4 format before accepting the IP from the renderer
+  const slot = opts.slot ?? 0;
   if (opts.backpackIp) {
     const ipv4Re = /^(\d{1,3}\.){3}\d{1,3}$/;
     if (!ipv4Re.test(opts.backpackIp)) {
       console.error('[bridge-start] Invalid IP address:', opts.backpackIp);
       return;
     }
-    BACKPACK_IP = opts.backpackIp;
   }
-  if (opts.udpRecv)    UDP_RECV    = opts.udpRecv;
-  if (opts.udpSend)    UDP_SEND    = opts.udpSend;
-  if (opts.tcpPort)    TCP_PORT    = opts.tcpPort;
-  opts.mode === 'tcp' ? startTCP() : startUDP();
+  const cfg = getSlotCfg(slot);
+  if (opts.backpackIp) cfg.backpackIp  = opts.backpackIp;
+  if (opts.udpRecv)    cfg.udpRecv     = opts.udpRecv;
+  if (opts.udpSend)    cfg.udpSend     = opts.udpSend;
+  if (opts.tcpPort)    cfg.tcpPort     = opts.tcpPort;
+  if (opts.wsPort)     cfg.wsDronePort = opts.wsPort;
+  ensureSlot(slot);
+  if (!wsHttpServers[slot]) startWSServer(slot);
+  if (opts.mode === 'tcp') startTCP(slot);
+  else if (opts.mode === 'ws') startWSClientBridge(slot);
+  else startUDP(slot);
 });
-ipcMain.on('bridge-stop', () => stopBridge());
 
-// ── IPC: Native serial port (USB) ─────────────────────────────────────────────
-let serialPort = null;
+ipcMain.on('bridge-stop', (_, slot) => stopBridge(slot ?? 0));
+
+ipcMain.handle('slot-init', (_, slot) => {
+  ensureSlot(slot);
+  if (!wsHttpServers[slot]) startWSServer(slot);
+  return 5770 + slot;
+});
+
+// ── IPC: Native serial ports (USB) — two slots ───────────────────────────────
+const serialPorts = [];
 
 ipcMain.handle('serial-list', async () => {
   try {
@@ -147,23 +238,22 @@ ipcMain.handle('serial-list', async () => {
   }
 });
 
-ipcMain.handle('serial-open', async (_, portPath, baudRate) => {
+ipcMain.handle('serial-open', async (_, portPath, baudRate, slot) => {
+  const s = slot ?? 0;
   const { SerialPort } = require('serialport');
-  if (serialPort?.isOpen) {
-    await new Promise(r => serialPort.close(() => r()));
-    serialPort = null;
+  if (serialPorts[s]?.isOpen) {
+    await new Promise(r => serialPorts[s].close(() => r()));
+    serialPorts[s] = null;
   }
   return new Promise((resolve, reject) => {
-    // Bug #3: wrap the SerialPort constructor in a try-catch so synchronous
-    // throws (e.g. invalid arguments) are caught and the promise is rejected.
     let sp;
     try {
       sp = new SerialPort({ path: portPath, baudRate }, (err) => {
         if (err) { reject(err.message); return; }
-        serialPort = sp;
-        sp.on('data',  (buf) => mainWin?.webContents.send('serial-data',  [...buf]));
-        sp.on('close', ()    => { serialPort = null; mainWin?.webContents.send('serial-closed'); });
-        sp.on('error', (e)   => mainWin?.webContents.send('serial-error', e.message));
+        serialPorts[s] = sp;
+        sp.on('data',  (buf) => mainWin?.webContents.send('serial-data',  [...buf], s));
+        sp.on('close', ()    => { serialPorts[s] = null; mainWin?.webContents.send('serial-closed', s); });
+        sp.on('error', (e)   => mainWin?.webContents.send('serial-error', e.message, s));
         resolve(true);
       });
     } catch (e) {
@@ -172,14 +262,16 @@ ipcMain.handle('serial-open', async (_, portPath, baudRate) => {
   });
 });
 
-ipcMain.handle('serial-close', async () => {
-  if (!serialPort?.isOpen) { serialPort = null; return; }
-  await new Promise(r => serialPort.close(() => r()));
-  serialPort = null;
+ipcMain.handle('serial-close', async (_, slot) => {
+  const s = slot ?? 0;
+  if (!serialPorts[s]?.isOpen) { serialPorts[s] = null; return; }
+  await new Promise(r => serialPorts[s].close(() => r()));
+  serialPorts[s] = null;
 });
 
-ipcMain.on('serial-write', (_, bytes) => {
-  if (serialPort?.isOpen) serialPort.write(Buffer.from(bytes));
+ipcMain.on('serial-write', (_, bytes, slot) => {
+  const s = slot ?? 0;
+  if (serialPorts[s]?.isOpen) serialPorts[s].write(Buffer.from(bytes));
 });
 
 // ── Settings persistence ───────────────────────────────────────────────────────
@@ -188,7 +280,6 @@ let settingsPath = null;
 function loadSettings () {
   try { return JSON.parse(fs.readFileSync(settingsPath, 'utf8')); }
   catch (e) {
-    // Bug #25: warn so developers know that settings were reset to defaults
     console.warn('[settings] Failed to parse settings file, resetting to defaults:', e.message);
     return { windowMode: 'fullscreen' };
   }
@@ -245,8 +336,6 @@ ipcMain.handle('set-window-mode',   (_, mode)  => {
 // ── Video recording save ───────────────────────────────────────────────────────
 let recordingsBasePath = null;
 
-// Bug #24: converted from sync fs calls to async fs.promises to avoid blocking
-// the main process event loop inside async IPC handlers.
 ipcMain.handle('save-recording', async (_, dateStr, timeStr, arrayBuffer) => {
   if (!recordingsBasePath) return { ok: false, error: 'No path' };
   try {
@@ -294,9 +383,6 @@ ipcMain.handle('open-tiles-folder', async () => {
 
 ipcMain.handle('save-tile-file', async (_, regionName, layerKey, z, x, y, arrayBuffer) => {
   if (!tilesBasePath) return;
-
-  // Bug #12: validate z/x/y as integers and layerKey against a safe allowlist
-  // to prevent path traversal attacks via crafted tile coordinates or keys.
   const layerKeyRe = /^[a-zA-Z0-9_-]+$/;
   if (!layerKeyRe.test(layerKey)) {
     console.error('[tile-save] Invalid layerKey:', layerKey);
@@ -308,46 +394,62 @@ ipcMain.handle('save-tile-file', async (_, regionName, layerKey, z, x, y, arrayB
     console.error('[tile-save] Non-integer tile coordinates:', z, x, y);
     return { ok: false, error: 'Invalid tile coordinates' };
   }
-
   try {
-    // Sanitize region name for use as a folder name
     const safeRegion = (regionName || 'default').replace(/[^a-zA-Z0-9_\-. ]/g, '_').trim() || 'default';
     const dir = path.join(tilesBasePath, safeRegion, layerKey, String(zi), String(xi));
-    // Bug #24: use async fs.promises calls to avoid blocking the event loop
     await fs.promises.mkdir(dir, { recursive: true });
     const filePath = path.join(dir, `${yi}.png`);
     try {
       await fs.promises.access(filePath);
-      // File already exists — skip writing
     } catch {
       await fs.promises.writeFile(filePath, Buffer.from(arrayBuffer));
     }
   } catch (e) { console.error('[tile-save]', e.message); }
 });
 
-// Re-focus the renderer's Chromium context after native dialogs (confirm/alert) steal it.
 ipcMain.on('focus-window', () => mainWin?.webContents.focus());
 ipcMain.on('blur-window',  () => { mainWin?.blur(); setTimeout(() => mainWin?.focus(), 50); });
 
+// ── External display window (HDMI / secondary monitor) ────────────────────────
+let displayWin = null;
+ipcMain.handle('open-display-window', () => {
+  if (displayWin && !displayWin.isDestroyed()) { displayWin.focus(); return; }
+  displayWin = new BrowserWindow({
+    width: 900, height: 650, minWidth: 500, minHeight: 400,
+    title: 'AeroNav Map',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    }
+  });
+  displayWin.loadFile('index.html', { query: { popup: '1' } });
+  displayWin.on('closed', () => { displayWin = null; });
+});
+
+// Relay drone data from main window to display window
+ipcMain.on('display-relay', (_, data) => {
+  if (displayWin && !displayWin.isDestroyed()) {
+    displayWin.webContents.send('display-data', data);
+  }
+});
+
 // ── Electron window ───────────────────────────────────────────────────────────
 function createWindow () {
-  // Grant camera (video capture) permission automatically so getUserMedia works
-  // for the live HDMI/AV feed in the GCS panel.
   const { session } = require('electron');
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    if (permission === 'media') { callback(true); return; }
+    if (permission === 'media' || permission === 'geolocation') { callback(true); return; }
     callback(false);
   });
-  // Also grant media device enumeration so the dropdown is populated.
   session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
-    if (permission === 'media') return true;
+    if (permission === 'media' || permission === 'geolocation') return true;
     return false;
   });
 
   mainWin = new BrowserWindow({
     width: 1280, height: 820, minWidth: 900, minHeight: 600,
     title: 'AeroNav',
-    show: false, // shown after mode is applied
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -360,29 +462,25 @@ function createWindow () {
     applyWindowMode(mainWin, settings.windowMode || 'fullscreen');
     mainWin.show();
   });
-  // Bug #11: clear mainWin reference after the window is destroyed so stale
-  // references to the closed BrowserWindow don't linger.
   mainWin.on('closed', () => { mainWin = null; });
-  // mainWin.webContents.openDevTools();
 }
 
 app.whenReady().then(() => {
-  settingsPath      = path.join(app.getPath('userData'), 'settings.json');
-  tilesBasePath     = path.join(app.getPath('userData'), 'tiles');
+  settingsPath       = path.join(app.getPath('userData'), 'settings.json');
+  tilesBasePath      = path.join(app.getPath('userData'), 'tiles');
   recordingsBasePath = path.join(app.getPath('userData'), 'recordings');
   Menu.setApplicationMenu(null);
-  startWSServer();
+  startWSServer(0);
+  startWSServer(1);
   startDisplayWSServer();
-  startUDP();
+  startUDP(0);
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
 app.on('window-all-closed', () => {
   stopBridge();
-  // Bug #10: close both WebSocket HTTP servers so their handles don't keep the
-  // process alive and ports are released cleanly.
-  try { wsHttpServer?.close(); }      catch {}
+  wsHttpServers.forEach(srv => { try { srv?.close(); } catch {} });
   try { displayHttpServer?.close(); } catch {}
   if (process.platform !== 'darwin') app.quit();
 });

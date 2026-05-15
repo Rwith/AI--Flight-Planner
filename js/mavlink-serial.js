@@ -239,6 +239,8 @@
     }
 
     _drain () {
+      // Hard cap: max MAVLink v2 frame is 282 bytes; evict leading garbage to prevent unbounded growth.
+      if (this._buf.length > 512) this._buf.splice(0, this._buf.length - 512);
       // Drop bytes until we see a valid start marker.
       while (this._buf.length && this._buf[0] !== 0xFE && this._buf[0] !== 0xFD) {
         this._buf.shift();
@@ -251,6 +253,7 @@
     _tryV1 () {
       if (this._buf.length < 8) return;
       const payLen   = this._buf[1];
+      if (payLen > 255) { this._buf.shift(); this._drain(); return; }
       const frameLen = 8 + payLen;
       if (this._buf.length < frameLen) return;
 
@@ -273,6 +276,7 @@
     _tryV2 () {
       if (this._buf.length < 12) return;
       const payLen   = this._buf[1];
+      if (payLen > 255) { this._buf.shift(); this._drain(); return; }
       const frameLen = 12 + payLen;
       if (this._buf.length < frameLen) return;
 
@@ -296,6 +300,10 @@
       this._onMsg(msgId, payload);
     }
   }
+
+  // ─── IPC dispatch state (shared across slots) ────────────────────────────
+  let _ipcDispatchSetup = false;
+  let _ipcParser0       = null; // MAVParser for slot 0 IPC serial
 
   // ─── Connection state ─────────────────────────────────────────────────────
   let port            = null;
@@ -321,7 +329,8 @@
   const WIFI_BACKOFF_MS       = [2000, 3000, 5000, 8000, 10000, 15000, 20000, 30000];
 
   // Heartbeat watchdog — detects stale / zombie connections
-  let _hbWatchdog = null;
+  let _hbWatchdog    = null;
+  let _usbHbWatchdog = null; // USB-only watchdog (no auto-reconnect, just warns)
 
   // Live altitude track: array of {dist, alt} where dist = distance from home (m)
   let liveAltLog = [];
@@ -336,7 +345,7 @@
 
   const DRONE_ICON_HTML = `<svg xmlns="http://www.w3.org/2000/svg" id="live-drone-icon" width="22" height="30"
     viewBox="0 0 18 26" style="display:block;filter:drop-shadow(0 1px 6px rgba(0,0,0,.9));transform-origin:9px 13px">
-    <polygon points="9,0 18,26 9,19 0,26" fill="#3fb950" stroke="rgba(0,0,0,0.5)" stroke-width="1.2" stroke-linejoin="round"/>
+    <polygon points="9,0 18,26 9,19 0,26" fill="#e63946" stroke="rgba(0,0,0,0.5)" stroke-width="1.2" stroke-linejoin="round"/>
   </svg>`;
 
   function updateDroneMarker (lat, lon, headingDeg) {
@@ -346,20 +355,25 @@
     if (!droneMarker) {
       droneMarker = L.marker([lat, lon], {
         icon: L.divIcon({ className: '', html: DRONE_ICON_HTML, iconSize: [22, 30], iconAnchor: [11, 15] }),
-        zIndexOffset: 3000, interactive: false
+        zIndexOffset: 3000, interactive: true
       }).addTo(map);
+      droneMarker.on('click',     () => window.gcsSelectSlot?.(0));
+      droneMarker.on('mouseover', e  => { droneMarker._tipOpen = true;  window._showMapTip?.(e.originalEvent, tele); });
+      droneMarker.on('mousemove', e  => { window._posMapTip?.(e.originalEvent); });
+      droneMarker.on('mouseout',  () => { droneMarker._tipOpen = false; window._hideMapTip?.(); });
       // Stop the simulated plane animation when a real drone connects
       window.stopPlane?.();
     } else {
       droneMarker.setLatLng([lat, lon]);
     }
+    if (droneMarker._tipOpen) window._updateMapTip?.(tele);
 
     // Maintain a trail polyline showing the drone's recent flight path
     droneTrailPositions.push([lat, lon]);
     if (droneTrailPositions.length > 500) droneTrailPositions.shift();
     if (!droneTrailLine) {
       droneTrailLine = L.polyline(droneTrailPositions, {
-        color: '#3fb950', weight: 2, opacity: 0.65, dashArray: '5 5'
+        color: '#e63946', weight: 2, opacity: 0.65, dashArray: '5 5'
       }).addTo(map);
     } else {
       droneTrailLine.setLatLngs(droneTrailPositions);
@@ -412,6 +426,14 @@
             try { staleWs.close(); } catch {}
             setConnected(false);
             _scheduleWifiReconnect();
+          }, 6000);
+        }
+        // USB watchdog — driver hangs or firmware crashes leave the port silently dead.
+        if (!wsConn && writer) {
+          clearTimeout(_usbHbWatchdog);
+          _usbHbWatchdog = setTimeout(() => {
+            if (!writer || wsConn) return;
+            addLog('[usb] No heartbeat for 6 s — FC may be unresponsive. Check connection.');
           }, 6000);
         }
         renderTele();
@@ -596,9 +618,15 @@
                 addLog('[upload] UNSUPPORTED — spline waypoints not supported; retrying with regular waypoints…');
                 setUploadStatus('Retrying (spline → waypoint)…', 'info');
                 const { tSys, tComp, resolve, reject } = uploadState;
-                uploadState = { wps: fallbackWps, tSys, tComp, resolve, reject, fallback: true };
-                writer.write(buildMissionCountV2(fallbackWps.length, tSys, tComp, 0))
-                  .catch(e => addLog('[upload] retry write failed: ' + e.message));
+                uploadState = { wps: fallbackWps, tSys, tComp, resolve, reject, fallback: true, id: uploadState.id };
+                if (!writer) {
+                  addLog('[upload] retry failed: connection lost');
+                  uploadState.reject(new Error('connection lost'));
+                  uploadState = null;
+                } else {
+                  writer.write(buildMissionCountV2(fallbackWps.length, tSys, tComp, 0))
+                    .catch(e => addLog('[upload] retry write failed: ' + e.message));
+                }
               } else {
                 setUploadStatus(`Upload rejected: ${label}`, 'err');
                 addLog(`[upload] MISSION_ACK type=${mType} (${label})`);
@@ -743,7 +771,7 @@
       else if (a === 'do_gripper')      { cmd=187; p1=wp.gripperNum??0; p2=wp.gripperAction??0; lat=0; lon=0; alt=0; }
       else if (a === 'do_parachute')    { cmd=208; p1=wp.parachuteCmd??2; lat=0; lon=0; alt=0; }
       else if (a === 'do_mount_control'){ cmd=205; p1=wp.mountPitch||0; p2=wp.mountRoll||0; p3=wp.mountYaw||0; lat=0; lon=0; alt=0; }
-      else                              { cmd=16; }
+      else                              { cmd=16; addLog(`[upload] Unknown waypoint action '${a}' — defaulting to NAV_WAYPOINT (cmd=16)`); }
     }
 
     const current = (seq === 1) ? 1 : 0;
@@ -857,9 +885,10 @@
       set('tele-batt',    tele.battPct   != null && tele.battPct >= 0 ? tele.battPct + '%' : null);
     }
 
-    // HUD instruments and GCS overlay always update regardless of mode
-    window.hudUpdate?.(tele);
-    window.gcsUpdate?.(tele);
+    // HUD instruments update only when slot 0 is the active plane
+    if ((window._activeGCSSlot ?? 0) === 0) window.hudUpdate?.(tele);
+    // Per-slot GCS card update
+    window.gcsUpdateSlot?.(0, tele);
   }
 
   // ─── Telemetry CSV logger ─────────────────────────────────────────────────
@@ -912,7 +941,7 @@
     } finally {
       try { reader.releaseLock(); } catch {}
       // If the port closed unexpectedly, update UI.
-      if (port) { port = null; writer = null; reader = null; setConnected(false); addLog('[usb] Port closed unexpectedly'); }
+      if (port) { port = null; writer = null; reader = null; clearTimeout(_usbHbWatchdog); setConnected(false); addLog('[usb] Port closed unexpectedly'); window.gcsCommLost?.(0); }
     }
   }
 
@@ -1028,6 +1057,7 @@
     const _disconnectListener = () => {
       if (port === wsPort) {
         port = null; writer = null; reader = null;
+        clearTimeout(_usbHbWatchdog);
         setConnected(false);
         addLog('[usb] Device unplugged');
         removeDroneMarker();
@@ -1069,21 +1099,21 @@
 
     // IPC writer — same interface as Web Serial WritableStreamDefaultWriter
     writer = {
-      write:       (data) => { s.write(Array.from(data)); return Promise.resolve(); },
+      write: (data) => {
+        try { s.write(Array.from(data), 0); return Promise.resolve(); }
+        catch (e) { return Promise.reject(e); }
+      },
       releaseLock: () => {},
     };
     // IPC reader — only cancel() is used (by disconnect)
     reader = {
-      cancel:      async () => { try { await s.close(); } catch {} },
+      cancel:      async () => { try { await s.close(0); } catch {} },
       releaseLock: () => {},
     };
 
-    const parser = new MAVParser(onMessage);
-    s.onData(buf  => parser.push(buf));
-    s.onError(msg => addLog('[usb] Error: ' + msg));
-    s.onClose(()  => {
-      if (writer) { writer = null; reader = null; setConnected(false); addLog('[usb] Port closed'); }
-    });
+    // Set up global IPC dispatch (once for all slots)
+    window._setupMavIPCDispatch?.();
+    _ipcParser0 = new MAVParser(onMessage);
 
     setConnected(true);
     addLog(`[usb] Connected to ${selectedPath} at ${baud} baud — waiting for heartbeat`);
@@ -1161,6 +1191,7 @@
         } else {
           addLog('Wireless disconnected unexpectedly — reconnecting…');
           _scheduleWifiReconnect();
+          window.gcsCommLost?.(0);
         }
       };
     } catch (e) {
@@ -1225,7 +1256,7 @@
     const fetchBtn = document.getElementById('bb-fetch-list-btn');
     if (fetchBtn) fetchBtn.disabled = !on;
     const gcsConnBtn = document.getElementById('gcs-connect-btn');
-    if (gcsConnBtn) { gcsConnBtn.textContent = on ? 'Disconnect FC' : 'Connect to FC'; gcsConnBtn.className = on ? 'btn danger' : 'btn primary'; gcsConnBtn.style.cssText = 'width:100%;font-size:13px;padding:10px'; }
+    if (gcsConnBtn) { gcsConnBtn.textContent = on ? 'Disconnect' : 'Connect'; gcsConnBtn.className = on ? 'btn danger' : 'btn primary'; gcsConnBtn.style.cssText = 'width:100%;font-size:12px;padding:7px'; }
 
     // ── Heartbeat keepalive ───────────────────────────────────────────────
     // ArduPilot stops streaming LOG_DATA if no GCS heartbeat arrives within 3 s.
@@ -1235,6 +1266,7 @@
     clearInterval(_heartbeatTimer);
     _heartbeatTimer = null;
     if (on) {
+      window.gcsClearCommLost?.(0);
       writer?.write(buildHeartbeat()).catch(() => {});
       _heartbeatTimer = setInterval(() => {
         // Rebuild each time so every frame gets a fresh sequence number
@@ -1652,6 +1684,16 @@
     addLog(`[arm] COMMAND_LONG ARM_DISARM param1=${arm ? 1 : 0} param2=${param2}${force ? ' (FORCE)' : ''} → sysid=${tSys}`);
   };
 
+  // MAV_CMD_DO_SET_SERVO (183): param1=servo channel (1..16), param2=PWM µs
+  window.serialSetServo = (servo, pwm) => {
+    if (!writer) { addLog('[servo] Not connected'); return; }
+    const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
+    writer.write(buildCommandLong(tSys, tComp, 183, servo, pwm, 0, 0, 0, 0, 0, 0))
+          .catch(e => addLog('[servo] ' + e.message));
+    addLog(`[servo] DO_SET_SERVO servo=${servo} pwm=${pwm} → sysid=${tSys}`);
+  };
+
   // ─── RC_CHANNELS_OVERRIDE — joystick control ──────────────────────────────
   // chs: array of 8 channel values (1000–2000 µs). Use 65535 to release a channel.
   // Call at ~20 Hz while joystick override is active; call with all 65535 to release.
@@ -1668,11 +1710,448 @@
   window.serialClearLog         = clearLog;
   window.serialToggleLogPause   = toggleLogPause;
   window.serialFinishFlight     = finishFlight;
-  // Allow external callers to inspect the current live log
   window.serialGetTelLog        = () => telLog.slice();
-  // DataFlash log download via USB/serial
   window.serialRequestLogList   = requestLogList;
   window.serialDownloadLog      = downloadLog;
   window.serialCancelLogDownload = cancelLogDownload;
 
+  // ─── Global IPC dispatch (set up once; routes data to per-slot parsers) ──
+  window._setupMavIPCDispatch = function () {
+    if (_ipcDispatchSetup) return;
+    _ipcDispatchSetup = true;
+    const s = window.electronBridge?.serial;
+    if (!s) return;
+    s.removeListeners();
+    s.onData((buf, slot) => {
+      const n = slot ?? 0;
+      if (n === 0) { _ipcParser0?.push(buf); return; }
+      window[`_mavSlot${n}IPCParser`]?.push(buf);
+    });
+    s.onClose((slot) => {
+      const n = slot ?? 0;
+      if (n === 0) { if (writer) { writer = null; reader = null; setConnected(false); addLog('[usb] Port closed'); } return; }
+      window[`_mavSlot${n}IPCClose`]?.();
+    });
+    s.onError((msg, slot) => {
+      const n = slot ?? 0;
+      if (n === 0) { addLog('[usb] Error: ' + msg); return; }
+      window[`_mavSlot${n}IPCError`]?.(msg);
+    });
+  };
+
+  // ─── Expose shared builders for slot 1 IIFE ──────────────────────────────
+  window._MAVParser                 = MAVParser;
+  window._buildHeartbeat            = buildHeartbeat;
+  window._buildSetMode              = buildSetMode;
+  window._buildCommandLong          = buildCommandLong;
+  window._buildRequestDataStream    = buildRequestDataStream;
+
 })();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// createMavSlot(n, color) — factory for slot n (n >= 1).
+// Called by index.html on DOMContentLoaded for slot 1, and by gcsAddPlane() for
+// each new plane. Installs global command dispatchers on the first call.
+// ═══════════════════════════════════════════════════════════════════════════════
+function createMavSlot (n, color) {
+  color = color || '#888';
+
+  const tele = {};
+  let writer = null, wsConn = null, port = null, reader = null;
+  let droneMarker = null, droneTrailLine = null, droneTrailPositions = [];
+  let _hbWatchdog = null, _hbTimer = null;
+  let _wIntentional = false, _wReconnectTimer = null, _wAttempts = 0;
+  let _wUrl = null;
+  let streamsAsked = false;
+
+  // IPC hooks — keyed by slot number so _setupMavIPCDispatch can route to them
+  window[`_mavSlot${n}IPCParser`] = null;
+  window[`_mavSlot${n}IPCClose`]  = () => { writer = null; reader = null; setConnected(false); addLog('[usb] Port closed'); window.gcsCommLost?.(n); };
+  window[`_mavSlot${n}IPCError`]  = (msg) => addLog('[usb] Error: ' + msg);
+
+  const DRONE_ICON_HTML = `<svg xmlns="http://www.w3.org/2000/svg" id="live-drone-icon-${n}" width="22" height="30"
+    viewBox="0 0 18 26" style="display:block;filter:drop-shadow(0 1px 6px rgba(0,0,0,.9));transform-origin:9px 13px">
+    <polygon points="9,0 18,26 9,19 0,26" fill="${color}" stroke="rgba(0,0,0,0.5)" stroke-width="1.2" stroke-linejoin="round"/>
+  </svg>`;
+
+  function updateDroneMarker (lat, lon, hdg) {
+    if (typeof map === 'undefined' || !map) return;
+    if (!droneMarker) {
+      droneMarker = L.marker([lat, lon], {
+        icon: L.divIcon({ className: '', html: DRONE_ICON_HTML, iconSize: [22, 30], iconAnchor: [11, 15] }),
+        zIndexOffset: 3000, interactive: true
+      }).addTo(map);
+      droneMarker.on('click',     () => window.gcsSelectSlot?.(n));
+      droneMarker.on('mouseover', e  => { droneMarker._tipOpen = true;  window._showMapTip?.(e.originalEvent, tele); });
+      droneMarker.on('mousemove', e  => { window._posMapTip?.(e.originalEvent); });
+      droneMarker.on('mouseout',  () => { droneMarker._tipOpen = false; window._hideMapTip?.(); });
+    } else {
+      droneMarker.setLatLng([lat, lon]);
+    }
+    if (droneMarker._tipOpen) window._updateMapTip?.(tele);
+    droneTrailPositions.push([lat, lon]);
+    if (droneTrailPositions.length > 500) droneTrailPositions.shift();
+    if (!droneTrailLine) {
+      droneTrailLine = L.polyline(droneTrailPositions, {
+        color, weight: 2, opacity: 0.65, dashArray: '5 5'
+      }).addTo(map);
+    } else {
+      droneTrailLine.setLatLngs(droneTrailPositions);
+    }
+    const el = document.getElementById(`live-drone-icon-${n}`);
+    if (el && hdg != null) el.style.transform = `rotate(${hdg}deg)`;
+  }
+
+  function removeDroneMarker () {
+    if (droneMarker)    { map?.removeLayer(droneMarker);    droneMarker    = null; }
+    if (droneTrailLine) { map?.removeLayer(droneTrailLine); droneTrailLine = null; }
+    droneTrailPositions = [];
+  }
+
+  function onMessage (msgId, payload) {
+    const dv = new DataView(new Uint8Array(payload).buffer);
+    switch (msgId) {
+      case 0: { // HEARTBEAT
+        if (payload.length >= 5 && payload[4] === 6) break;
+        if (payload.length >= 9) {
+          tele.customMode = dv.getUint32(0, true);
+          tele.mavType    = payload[4];
+          tele.baseMode   = payload[6];
+        }
+        if (!streamsAsked) {
+          streamsAsked = true;
+          const tSys = parseInt(document.getElementById(`slot${n}-sysid`)?.value ?? '1', 10);
+          requestStreams(tSys, 1);
+        }
+        if (wsConn) {
+          clearTimeout(_hbWatchdog);
+          _hbWatchdog = setTimeout(() => {
+            if (!wsConn) return;
+            const staleWs = wsConn; wsConn = null; writer = null;
+            try { staleWs.close(); } catch {}
+            setConnected(false);
+            _scheduleReconnect();
+          }, 6000);
+        }
+        renderTele(); break;
+      }
+      case 1: { // SYS_STATUS
+        if (payload.length >= 16) tele.voltageMv = dv.getUint16(14, true);
+        if (payload.length >= 18) tele.currentCa = dv.getInt16(16, true);
+        if (payload.length >= 31) tele.battPct   = dv.getInt8(30);
+        else if (tele.battPct == null) tele.battPct = 0;
+        renderTele(); break;
+      }
+      case 24: { // GPS_RAW_INT
+        if (payload.length >= 30) {
+          tele.gpsFix  = payload[28];
+          tele.gpsSats = payload[29];
+          tele.hdop    = dv.getUint16(20, true) / 100;
+        }
+        renderTele(); break;
+      }
+      case 30: { // ATTITUDE
+        if (payload.length >= 28) {
+          const R2D   = 180 / Math.PI;
+          tele.roll   = (dv.getFloat32(4,  true) * R2D).toFixed(1);
+          tele.pitch  = (dv.getFloat32(8,  true) * R2D).toFixed(1);
+          tele.yawDeg = (dv.getFloat32(12, true) * R2D).toFixed(1);
+        }
+        renderTele(); break;
+      }
+      case 33: { // GLOBAL_POSITION_INT
+        if (payload.length >= 28) {
+          tele.lat    = dv.getInt32(4,  true) / 1e7;
+          tele.lon    = dv.getInt32(8,  true) / 1e7;
+          tele.altMSL = dv.getInt32(12, true) / 1000;
+          tele.altRel = dv.getInt32(16, true) / 1000;
+          tele.hdg    = dv.getUint16(26, true) / 100;
+          tele.vx     = dv.getInt16(20, true) / 100;
+          tele.vy     = dv.getInt16(22, true) / 100;
+          updateDroneMarker(tele.lat, tele.lon, tele.hdg);
+        }
+        renderTele(); break;
+      }
+      case 74: { // VFR_HUD
+        if (payload.length >= 16) {
+          tele.airspeed    = dv.getFloat32(0,  true).toFixed(1);
+          tele.groundspeed = dv.getFloat32(4,  true).toFixed(1);
+          tele.altHUD      = dv.getFloat32(8,  true).toFixed(1);
+          tele.climbRate   = dv.getFloat32(12, true).toFixed(2);
+        }
+        if (payload.length >= 18) tele.heading  = dv.getInt16(16, true);
+        tele.throttle = payload.length >= 20 ? dv.getUint16(18, true) : 0;
+        renderTele(); break;
+      }
+      case 147: { // BATTERY_STATUS
+        if (payload.length >= 4) {
+          const consumed = dv.getInt32(0, true);
+          if (consumed >= 0) tele.battConsumedMah = consumed;
+        }
+        renderTele(); break;
+      }
+      case 253: { // STATUSTEXT
+        if (payload.length < 2) break;
+        let text = '';
+        for (let i = 1; i < Math.min(payload.length, 51); i++) {
+          if (payload[i] === 0) break;
+          text += String.fromCharCode(payload[i]);
+        }
+        text = text.trim();
+        if (text) addLog('[fc] ' + text);
+        break;
+      }
+    }
+  }
+
+  function requestStreams (tSys, tComp) {
+    for (const id of [0, 2, 11]) {
+      const frame = window._buildRequestDataStream?.(id, 2, tSys ?? 1, tComp ?? 1);
+      if (frame) writer?.write(frame).catch(() => {});
+    }
+  }
+
+  function renderTele () {
+    window.gcsUpdateSlot?.(n, tele);
+    if ((window._activeGCSSlot ?? 0) === n) window.hudUpdate?.(tele);
+  }
+
+  function addLog (line) {
+    const box = document.getElementById('serial-log');
+    if (!box) return;
+    const d = document.createElement('div');
+    d.textContent = new Date().toLocaleTimeString('en', { hour12: false }) + `  [P${n + 1}] ` + line;
+    box.appendChild(d);
+    while (box.children.length > 200) box.removeChild(box.firstChild);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function setConnected (on) {
+    const btn = document.getElementById(`slot${n}-connect-btn`);
+    if (btn) {
+      btn.textContent   = on ? 'Disconnect' : 'Connect';
+      btn.dataset.on    = on ? '1' : '0';
+      btn.className     = on ? 'btn danger' : 'btn primary';
+      btn.style.cssText = 'width:100%;font-size:12px;padding:7px';
+    }
+    clearInterval(_hbTimer);
+    _hbTimer = null;
+    if (on) {
+      window.gcsClearCommLost?.(n);
+      const hb = window._buildHeartbeat?.();
+      if (hb) writer?.write(hb).catch(() => {});
+      _hbTimer = setInterval(() => {
+        const h = window._buildHeartbeat?.();
+        if (h) writer?.write(h).catch(() => {});
+      }, 1000);
+    } else {
+      removeDroneMarker();
+      Object.keys(tele).forEach(k => delete tele[k]);
+      streamsAsked = false;
+    }
+  }
+
+  const WIFI_BACKOFF = [2000, 3000, 5000, 8000, 10000, 15000, 20000, 30000];
+
+  function _openSocket (url) {
+    try {
+      const ws = new WebSocket(url);
+      ws.binaryType = 'arraybuffer';
+      const parser = new window._MAVParser(onMessage);
+      ws.onopen = () => {
+        if (wsConn && wsConn !== ws) { try { ws.close(); } catch {} return; }
+        wsConn = ws;
+        writer = { write: (d) => { ws.send(d); return Promise.resolve(); } };
+        _wAttempts = 0;
+        clearTimeout(_wReconnectTimer);
+        setConnected(true);
+        addLog('Wireless connected · ' + url);
+      };
+      ws.onmessage = (e) => parser.push(new Uint8Array(e.data));
+      ws.onerror = () => {
+        if (wsConn === ws || wsConn === null) addLog('[wifi] Connection failed — check URL');
+      };
+      ws.onclose = () => {
+        if (wsConn !== ws) return;
+        clearTimeout(_hbWatchdog);
+        wsConn = null; writer = null;
+        setConnected(false);
+        if (_wIntentional) addLog('Wireless disconnected');
+        else { addLog('Disconnected unexpectedly — reconnecting…'); _scheduleReconnect(); window.gcsCommLost?.(n); }
+      };
+    } catch (e) {
+      addLog('[wifi] ' + e.message);
+      _scheduleReconnect();
+    }
+  }
+
+  function _scheduleReconnect () {
+    if (_wIntentional || !_wUrl) return;
+    if (_wAttempts >= WIFI_BACKOFF.length) { addLog('[wifi] Giving up — click Connect to retry'); return; }
+    const delay = WIFI_BACKOFF[_wAttempts++] ?? 30000;
+    addLog(`[wifi] Reconnect ${_wAttempts}/${WIFI_BACKOFF.length} in ${delay / 1000}s…`);
+    _wReconnectTimer = setTimeout(() => { if (!_wIntentional && !wsConn) _openSocket(_wUrl); }, delay);
+  }
+
+  async function connect () {
+    const mode = document.getElementById(`slot${n}-ctab-direct`)?.classList.contains('active') ? 'direct'
+               : document.getElementById(`slot${n}-ctab-wifi`)?.classList.contains('active')   ? 'wifi'
+               : 'usb';
+
+    if (wsConn || writer) { await disconnect(); return; }
+
+    if (mode === 'direct' || mode === 'wifi') {
+      const wsPort = window.electronBridge?.wsPort?.(n) ?? (5770 + n);
+      const urlEl  = document.getElementById(`slot${n}-wifi-url`);
+      if (!urlEl?.value) urlEl.value = mode === 'wifi' ? `ws://localhost:${wsPort}` : 'ws://10.0.0.1:5760';
+      const url = urlEl?.value?.trim() || `ws://localhost:${wsPort}`;
+
+      if (mode === 'wifi' && window.electronBridge) {
+        const bpEl       = document.getElementById(`slot${n}-bp-ip`);
+        const bpIp       = bpEl?.value?.trim() || '10.0.0.1';
+        const bridgeMode = bpEl?.dataset?.bridgeMode || 'udp';
+        window.electronBridge.startBridge(n, { mode: bridgeMode, backpackIp: bpIp });
+      }
+      _wUrl = url; _wIntentional = false; _wAttempts = 0;
+      clearTimeout(_wReconnectTimer);
+      _openSocket(url);
+      return;
+    }
+
+    if (window.electronBridge?.serial) {
+      await connectIPC();
+    } else {
+      addLog('[usb] Multi-slot USB requires the Electron desktop app');
+    }
+  }
+
+  async function connectIPC () {
+    const s = window.electronBridge?.serial;
+    if (!s) return;
+    window._setupMavIPCDispatch?.();
+    addLog('[usb] Scanning for serial ports…');
+    const { ports = [], error } = await s.list().catch(e => ({ ports: [], error: e.message }));
+    const selectedPath = await window.showSerialPortPicker(ports, error);
+    if (!selectedPath) return;
+    const baudVal = document.getElementById(`slot${n}-baud`)?.value ?? '115200';
+    const baud = parseInt(baudVal, 10) || 115200;
+    addLog(`[usb] Connecting to ${selectedPath} at ${baud} baud…`);
+    try { await s.open(selectedPath, baud, n); } catch (e) { addLog('[usb] ' + e); return; }
+    writer = {
+      write:       (data) => { s.write(Array.from(data), n); return Promise.resolve(); },
+      releaseLock: () => {},
+    };
+    reader = {
+      cancel:      async () => { try { await s.close(n); } catch {} },
+      releaseLock: () => {},
+    };
+    window[`_mavSlot${n}IPCParser`] = new window._MAVParser(onMessage);
+    setConnected(true);
+    addLog(`[usb] Connected to ${selectedPath} at ${baud} baud — waiting for heartbeat`);
+  }
+
+  async function disconnect () {
+    _wIntentional = true;
+    clearTimeout(_wReconnectTimer);
+    clearTimeout(_hbWatchdog);
+    if (wsConn) {
+      const ws = wsConn; wsConn = null;
+      try { ws.close(); } catch {}
+      writer = null;
+    } else {
+      try { await reader?.cancel(); }  catch {}
+      try { writer?.releaseLock(); }   catch {}
+      port = null; writer = null; reader = null;
+      window[`_mavSlot${n}IPCParser`] = null;
+    }
+    setConnected(false);
+    addLog('Disconnected');
+  }
+
+  function setMode (customMode) {
+    if (!writer) { addLog('[mode] Not connected'); return; }
+    const tSys  = parseInt(document.getElementById(`slot${n}-sysid`)?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById(`slot${n}-compid`)?.value ?? '1', 10);
+    const sendOnce = () => {
+      if (!writer) return;
+      const sm = window._buildSetMode?.(customMode, tSys);
+      const cl = window._buildCommandLong?.(tSys, tComp, 176, 1, customMode, 0, 0, 0, 0, 0, 0);
+      if (sm) writer.write(sm).catch(() => {});
+      if (cl) writer.write(cl).catch(() => {});
+    };
+    sendOnce(); setTimeout(sendOnce, 200); setTimeout(sendOnce, 500);
+    addLog(`[mode] SET_MODE custom_mode=${customMode} (×3)`);
+  }
+
+  function armDisarm (arm, force = false) {
+    if (!writer) { addLog('[arm] Not connected'); return; }
+    const tSys  = parseInt(document.getElementById(`slot${n}-sysid`)?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById(`slot${n}-compid`)?.value ?? '1', 10);
+    const param2 = (arm && force) ? 21196 : 0;
+    const frame = window._buildCommandLong?.(tSys, tComp, 400, arm ? 1 : 0, param2, 0, 0, 0, 0, 0, 0);
+    if (frame) writer.write(frame).catch(() => {});
+    addLog(`[arm] ARM_DISARM param1=${arm ? 1 : 0}${force ? ' (FORCE)' : ''}`);
+  }
+
+  function setServo (servo, pwm) {
+    if (!writer) { addLog('[servo] Not connected'); return; }
+    const tSys  = parseInt(document.getElementById(`slot${n}-sysid`)?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById(`slot${n}-compid`)?.value ?? '1', 10);
+    const frame = window._buildCommandLong?.(tSys, tComp, 183, servo, pwm, 0, 0, 0, 0, 0, 0);
+    if (frame) writer.write(frame).catch(() => {});
+    addLog(`[servo] DO_SET_SERVO servo=${servo} pwm=${pwm}`);
+  }
+
+  // Register in the global slot registry
+  if (!window._mavSlotRegistry) window._mavSlotRegistry = {};
+  window._mavSlotRegistry[n] = { connect, disconnect, setMode, armDisarm, setServo };
+
+  // Install registry-based command dispatchers once on the first createMavSlot call
+  if (!window._mavSlotDispatchInstalled) {
+    window._mavSlotDispatchInstalled = true;
+    const _s0SetMode   = window.serialSetMode;
+    const _s0ArmDisarm = window.serialArmDisarm;
+    const _s0SendRC    = window.serialSendRC;
+    const _s0SetServo  = window.serialSetServo;
+
+    window.serialSetMode = (customMode, slot) => {
+      const s = slot ?? (window._activeGCSSlot ?? 0);
+      const reg = window._mavSlotRegistry?.[s];
+      if (reg) { reg.setMode(customMode); return; }
+      _s0SetMode?.(customMode);
+    };
+    window.serialArmDisarm = (arm, force, slot) => {
+      const s = slot ?? (window._activeGCSSlot ?? 0);
+      const reg = window._mavSlotRegistry?.[s];
+      if (reg) { reg.armDisarm(arm, force); return; }
+      _s0ArmDisarm?.(arm, force);
+    };
+    window.serialSetServo = (servo, pwm, slot) => {
+      const s = slot ?? (window._activeGCSSlot ?? 0);
+      const reg = window._mavSlotRegistry?.[s];
+      if (reg?.setServo) { reg.setServo(servo, pwm); return; }
+      _s0SetServo?.(servo, pwm);
+    };
+    window.serialSendRC = (chs, slot) => {
+      const s = slot ?? (window._activeGCSSlot ?? 0);
+      if (s === 0) _s0SendRC?.(chs);
+      // RC override for slots 1+ not implemented
+    };
+    window.serialConnectSlot = (slot) => {
+      if (slot === 0) { window.serialConnect?.(); return; }
+      window._mavSlotRegistry?.[slot]?.connect();
+    };
+    window.serialDisconnectSlot = (slot) => {
+      if (slot === 0) { window.serialDisconnect?.(); return; }
+      window._mavSlotRegistry?.[slot]?.disconnect();
+    };
+    window.gcsSelectSlot = (slot) => {
+      if (window._activeGCSSlot !== undefined) {
+        window._activeGCSSlot = slot;
+        window._gcsSelectSlotUI?.(slot);
+      }
+    };
+  }
+}
+
+window.mavCreateSlot = createMavSlot;
