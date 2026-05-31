@@ -1,0 +1,2987 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>AeroNav GCS</title>
+<link rel="stylesheet" href="leaflet.min.css">
+<script src="qrcode.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;background:#0d1117;color:#e6edf3;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;user-select:none}
+body{display:flex;flex-direction:column}
+
+/* ── Topbar ── */
+#topbar{height:clamp(38px,11vw,50px);display:flex;align-items:center;gap:clamp(5px,1.8vw,10px);
+  background:#161b22;border-bottom:1px solid #30363d;padding:0 clamp(8px,3.5vw,16px);flex-shrink:0;z-index:1000;position:relative}
+#status-dot{width:clamp(7px,2.2vw,10px);height:clamp(7px,2.2vw,10px);border-radius:50%;background:#f85149;flex-shrink:0;transition:background .3s}
+#status-dot.ok{background:#3fb950;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(63,185,80,.4)}50%{box-shadow:0 0 0 5px rgba(63,185,80,0)}}
+#app-name{font-size:clamp(11px,3.5vw,15px);font-weight:700;color:#58a6ff;flex:1}
+#mode-badge{font-size:clamp(9px,2.8vw,12px);font-weight:700;background:#21262d;color:#e6edf3;
+  padding:3px clamp(5px,2vw,9px);border-radius:5px;border:1px solid #30363d;letter-spacing:.5px}
+#arm-badge{font-size:clamp(9px,2.8vw,12px);font-weight:700;padding:3px clamp(5px,2vw,9px);border-radius:5px}
+#arm-badge.armed{background:rgba(248,81,73,.18);color:#f85149;border:1px solid rgba(248,81,73,.4)}
+#arm-badge.disarmed{background:rgba(63,185,80,.12);color:#3fb950;border:1px solid rgba(63,185,80,.3)}
+#settings-btn{margin-left:2px;background:none;border:none;color:#8b949e;font-size:clamp(14px,4.5vw,20px);
+  cursor:pointer;padding:clamp(4px,1.5vw,7px);border-radius:6px;line-height:1}
+#settings-btn:active{background:#21262d}
+#follow-btn{background:none;border:1px solid #30363d;color:#8b949e;font-size:clamp(8.5px,2.5vw,11px);
+  font-weight:600;padding:clamp(3px,1vw,5px) clamp(5px,2vw,9px);border-radius:5px;cursor:pointer;white-space:nowrap}
+#follow-btn.on{border-color:#58a6ff;color:#58a6ff}
+
+/* ── Main ── */
+#main{flex:1;display:flex;overflow:hidden;min-height:0}
+#map{flex:1;z-index:1}
+
+/* ── Leaflet overrides ── */
+.leaflet-container{background:#0a0e15}
+.leaflet-control-attribution{font-size:8px !important;background:rgba(0,0,0,.5) !important;color:#666 !important}
+.leaflet-control-attribution a{color:#888 !important}
+.leaflet-control-zoom{border:1px solid #30363d !important}
+.leaflet-control-zoom a{background:#161b22 !important;color:#e6edf3 !important;border-color:#30363d !important}
+.leaflet-control-zoom a:hover{background:#21262d !important}
+
+/* Plane marker */
+.plane-marker{width:40px;height:40px;filter:drop-shadow(0 0 6px rgba(88,166,255,.8))}
+
+/* Home marker */
+.home-marker{width:22px;height:22px;border-radius:5px;background:#3fb950;
+  border:2px solid #fff;display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:900;color:#000;box-shadow:0 2px 6px rgba(0,0,0,.5)}
+
+/* Guided target marker */
+.guided-target{width:28px;height:28px;border-radius:50%;border:2px solid #f0a500;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 10px rgba(240,165,0,.6);animation:gtpulse 1s infinite}
+
+/* Toast notification */
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);
+  background:#f0a500;color:#000;font-size:12px;font-weight:700;
+  padding:9px 18px;border-radius:8px;z-index:9999;pointer-events:none;
+  opacity:0;transition:opacity .25s;white-space:nowrap;
+  box-shadow:0 4px 16px rgba(0,0,0,.5)}
+@keyframes gtpulse{0%,100%{box-shadow:0 0 6px rgba(240,165,0,.6)}50%{box-shadow:0 0 16px rgba(240,165,0,.9)}}
+
+/* Comms lost overlay */
+#comms-overlay{position:fixed;inset:0;z-index:8000;display:none;
+  align-items:center;justify-content:center;flex-direction:column;gap:10px;
+  background:rgba(0,0,0,.85);backdrop-filter:blur(4px)}
+#comms-overlay.lost{display:flex}
+#comms-overlay.regained{display:flex}
+#comms-title{font-size:21px;font-weight:900;letter-spacing:2px;text-align:center}
+#comms-overlay.lost   #comms-title{color:#f85149}
+#comms-overlay.regained #comms-title{color:#3fb950}
+@keyframes commsflash{0%,100%{opacity:1}50%{opacity:.3}}
+#comms-overlay.lost #comms-title{animation:commsflash 1.2s infinite}
+/* Last known location card – takes visual priority */
+#comms-location-card{display:none;background:rgba(248,81,73,.1);
+  border:1.5px solid rgba(248,81,73,.55);border-radius:12px;
+  padding:18px 28px;text-align:center;width:88%;max-width:340px}
+#comms-location-label{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;
+  color:#f85149;font-weight:800;margin-bottom:10px}
+#comms-location-coords{font-size:20px;font-weight:700;color:#e6edf3;
+  line-height:1.7;font-family:monospace}
+#comms-location-sub{font-size:13px;color:#8b949e;margin-top:8px;line-height:1.6}
+#comms-location-sub b{color:#c9d1d9}
+#comms-location-card.no-fix{background:rgba(110,118,129,.08);
+  border-color:rgba(110,118,129,.35)}
+#comms-location-card.no-fix #comms-location-label{color:#6e7681}
+#comms-maps-btn{display:none;margin-top:14px;padding:10px 22px;
+  border:1.5px solid rgba(88,166,255,.55);border-radius:8px;
+  background:rgba(88,166,255,.1);color:#58a6ff;font-size:13px;font-weight:700;
+  letter-spacing:.5px;cursor:pointer;width:100%}
+#comms-maps-btn:active{opacity:.7}
+/* Scan-from-another-device QR — small tile that blends into the dark card */
+#comms-qr-wrap{display:none;margin-top:14px;text-align:center}
+#comms-qr-svg{display:inline-block;background:#e6edf3;border-radius:6px;
+  padding:5px;line-height:0;
+  border:1px solid rgba(248,81,73,.35)}
+#comms-qr-wrap svg{display:block;width:96px;height:96px}
+#comms-qr-cap{font-size:9px;color:#6e7681;margin-top:6px;letter-spacing:.6px;
+  text-transform:uppercase;font-weight:700}
+#comms-qr-cap b{color:#8b949e;font-weight:700}
+#comms-dismiss-btn{margin-top:20px;padding:10px 32px;
+  border:1.5px solid #30363d;border-radius:8px;
+  background:#21262d;color:#8b949e;font-size:13px;font-weight:700;
+  letter-spacing:.5px;cursor:pointer;min-width:160px}
+#comms-dismiss-btn:active{background:#30363d;color:#c9d1d9}
+.hud-cell.warn .hud-val{color:#f0a500}
+/* Pulsing map marker for last known position */
+@keyframes lostping{0%{transform:scale(1);opacity:.9}70%{transform:scale(2.8);opacity:0}100%{transform:scale(2.8);opacity:0}}
+.lost-marker-dot{width:16px;height:16px;border-radius:50%;background:#f85149;
+  position:relative;box-shadow:0 0 0 2px #fff}
+.lost-marker-dot::after{content:'';position:absolute;inset:-5px;border-radius:50%;
+  border:2px solid #f85149;animation:lostping 1.6s ease-out infinite}
+
+/* Waypoint marker */
+.wp-marker{width:22px;height:22px;border-radius:50%;background:#f0a500;
+  border:2px solid #fff;display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:700;color:#000;box-shadow:0 2px 6px rgba(0,0,0,.5)}
+
+/* ── Right panel ── */
+#panel{width:clamp(175px,56vw,285px);background:#161b22;border-left:1px solid #30363d;
+  display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;flex-shrink:0}
+
+/* ── HUD ── */
+#hud{padding:clamp(6px,2vw,10px) clamp(6px,2vw,10px) 0;flex-shrink:0}
+.hud-grid{display:grid;grid-template-columns:1fr 1fr;gap:clamp(3px,1.2vw,6px);margin-bottom:clamp(3px,1.2vw,6px)}
+.hud-cell{background:#0d1117;border:1px solid #30363d;border-radius:7px;
+  padding:clamp(5px,1.5vw,7px) clamp(5px,1.8vw,8px);display:flex;flex-direction:column;align-items:flex-start}
+.hud-lbl{font-size:clamp(7.5px,2.2vw,9.5px);text-transform:uppercase;letter-spacing:.6px;color:#8b949e;font-weight:600}
+.hud-val{font-size:clamp(13px,4.2vw,18px);font-weight:700;color:#e6edf3;line-height:1.1;margin:2px 0 1px}
+.hud-unit{font-size:clamp(7.5px,2.2vw,9.5px);color:#6e7681}
+.hud-cell.gps-ok .hud-val{color:#3fb950}
+.hud-cell.gps-bad .hud-val{color:#f85149}
+#bat-wrap{background:#0d1117;border:1px solid #30363d;border-radius:7px;
+  padding:clamp(5px,1.5vw,7px) clamp(5px,1.8vw,8px);margin:0 clamp(6px,2vw,10px) clamp(5px,1.8vw,8px)}
+#bat-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+#bat-lbl{font-size:clamp(7.5px,2.2vw,9.5px);text-transform:uppercase;letter-spacing:.6px;color:#8b949e;font-weight:600}
+#bat-val{font-size:clamp(9.5px,2.8vw,12px);font-weight:700;color:#e6edf3}
+#bat-track{height:6px;background:#21262d;border-radius:3px;overflow:hidden}
+#bat-fill{height:100%;border-radius:3px;transition:width .5s,background .5s;width:0%}
+
+/* ── Sections ── */
+.sec-title{font-size:clamp(7.5px,2.2vw,9.5px);text-transform:uppercase;letter-spacing:.7px;color:#8b949e;
+  font-weight:600;padding:clamp(4px,1.5vw,7px) clamp(6px,2vw,10px) clamp(3px,1vw,4px)}
+
+/* ── Mode buttons ── */
+#modes{display:grid;grid-template-columns:1fr 1fr 1fr;gap:clamp(3px,1.2vw,5px);padding:0 clamp(6px,2vw,10px) clamp(5px,1.8vw,8px);flex-shrink:0}
+.mode-btn{background:#21262d;border:1px solid #30363d;border-radius:7px;
+  color:#8b949e;font-size:clamp(8.5px,2.5vw,10.5px);font-weight:700;padding:clamp(7px,2.2vw,10px) 2px;text-align:center;
+  cursor:pointer;transition:all .1s;letter-spacing:.3px}
+.mode-btn:active{opacity:.7}
+.mode-btn.active{background:#1f3d5a;border-color:#58a6ff;color:#58a6ff}
+.mode-btn.warn{color:#b07800}
+.mode-btn.warn.active{background:#3d2e00;border-color:#f0a500;color:#f0a500}
+
+/* ── Guided alt row ── */
+#guided-alt-row{align-items:center;gap:clamp(4px,1.5vw,7px);padding:0 clamp(6px,2vw,10px) clamp(5px,1.8vw,8px)}
+#guided-alt-lbl{font-size:clamp(7.5px,2.2vw,9.5px);text-transform:uppercase;letter-spacing:.6px;color:#8b949e;font-weight:600;flex-shrink:0}
+.alt-adj-btn{background:#21262d;border:1px solid #30363d;border-radius:6px;color:#e6edf3;
+  font-size:clamp(13px,4vw,17px);font-weight:700;
+  width:clamp(27px,8vw,34px);height:clamp(27px,8vw,34px);
+  cursor:pointer;flex-shrink:0;touch-action:none;user-select:none}
+#guided-alt-val{font-size:clamp(12px,3.8vw,16px);font-weight:700;color:#f0a500;flex:1;text-align:center}
+
+/* ── ARM button ── */
+#arm-wrap{padding:clamp(5px,1.8vw,8px) clamp(6px,2vw,10px);flex-shrink:0}
+#arm-btn{width:100%;height:clamp(56px,16vw,74px);border-radius:10px;border:2px solid #30363d;
+  background:#0d1117;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  gap:clamp(7px,2.2vw,11px);position:relative;overflow:hidden;transition:border-color .2s}
+#arm-btn:active{opacity:.85}
+#arm-btn.armed{border-color:rgba(248,81,73,.4);background:rgba(248,81,73,.06)}
+#arm-svg{flex-shrink:0;width:clamp(40px,12vw,56px);height:clamp(40px,12vw,56px)}
+#arm-progress{transition:stroke .3s}
+#arm-text-wrap{display:flex;flex-direction:column;align-items:flex-start}
+#arm-label{font-size:clamp(15px,5vw,22px);font-weight:800;color:#3fb950;letter-spacing:.5px}
+#arm-btn.armed #arm-label{color:#f85149}
+#arm-sub{font-size:clamp(8.5px,2.5vw,11px);color:#6e7681;margin-top:1px}
+
+/* ── Force-arm row ── */
+#force-arm-row{display:flex;align-items:center;gap:clamp(6px,2vw,9px);
+  margin-top:clamp(5px,1.5vw,8px);padding:clamp(5px,1.6vw,8px) clamp(7px,2vw,10px);
+  background:#0d1117;border:1px solid #30363d;border-radius:8px;cursor:pointer;
+  user-select:none;-webkit-tap-highlight-color:transparent;flex-wrap:wrap}
+#force-arm-row.on{border-color:rgba(248,81,73,.55);background:rgba(248,81,73,.08)}
+#force-arm-chk{width:clamp(15px,4.5vw,19px);height:clamp(15px,4.5vw,19px);
+  accent-color:#f85149;cursor:pointer;flex-shrink:0;margin:0}
+#force-arm-text{font-size:clamp(9.5px,2.8vw,12px);font-weight:700;color:#8b949e;letter-spacing:.5px;flex:1}
+#force-arm-row.on #force-arm-text{color:#f85149}
+#force-arm-sub{font-size:clamp(7.5px,2.2vw,9.5px);color:#6e7681;width:100%;padding-left:calc(clamp(15px,4.5vw,19px) + clamp(6px,2vw,9px))}
+#force-arm-row.on #force-arm-sub{color:rgba(248,81,73,.7)}
+
+/* ── HUD drag-reorder ── */
+.hud-cell{transition:transform .12s,box-shadow .12s,opacity .12s;touch-action:pan-y}
+.hud-cell.dragging{position:fixed;z-index:9000;pointer-events:none;
+  box-shadow:0 8px 22px rgba(0,0,0,.6),0 0 0 2px #58a6ff;
+  opacity:.92;transition:none}
+.hud-cell.drop-target{outline:2px dashed #58a6ff;outline-offset:-2px;background:rgba(88,166,255,.07)}
+.hud-cell.drag-source{opacity:.25}
+
+/* ── Status log ── */
+#log-wrap{background:#0d1117;border-top:1px solid #30363d;
+  height:clamp(60px,17vw,86px);overflow-y:auto;flex-shrink:0;padding:clamp(4px,1.5vw,7px) clamp(6px,2vw,10px)}
+.log-line{font-size:clamp(8.5px,2.5vw,10.5px);font-family:'Menlo','Consolas',monospace;
+  line-height:1.6;color:#8b949e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.log-line.warn{color:#c9971a}
+.log-line.err{color:#f85149}
+
+/* ── Settings modal ── */
+#settings-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
+  z-index:9999;align-items:center;justify-content:center}
+#settings-box{background:#161b22;border:1px solid #30363d;border-radius:12px;
+  padding:clamp(14px,4vw,22px);width:min(300px,90vw)}
+.set-head{font-size:clamp(12px,3.5vw,15px);font-weight:700;color:#e6edf3;margin-bottom:clamp(10px,3.5vw,18px)}
+.set-field{margin-bottom:clamp(8px,2.8vw,13px)}
+.set-field label{display:block;font-size:clamp(9.5px,2.8vw,12px);color:#8b949e;margin-bottom:4px}
+.set-field input{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;
+  color:#e6edf3;padding:clamp(6px,2vw,9px) clamp(8px,2.5vw,11px);font-size:clamp(11px,3.3vw,14px);outline:none}
+.set-field input:focus{border-color:#58a6ff}
+.set-row{display:flex;gap:8px;margin-top:4px}
+.set-btn{flex:1;padding:clamp(7px,2.2vw,10px);border-radius:8px;border:none;cursor:pointer;
+  font-size:clamp(11px,3.3vw,14px);font-weight:700}
+.set-btn-ok{background:#3fb950;color:#000}
+.set-btn-cancel{background:#30363d;color:#8b949e}
+
+/* ── Params drawer ── */
+#params-btn,#cal-btn{background:none;border:1px solid #30363d;color:#8b949e;
+  font-size:clamp(8.5px,2.5vw,11px);font-weight:600;
+  padding:clamp(3px,1vw,5px) clamp(5px,2vw,9px);border-radius:5px;
+  cursor:pointer;white-space:nowrap}
+#params-btn:active,#cal-btn:active{background:#21262d;color:#58a6ff}
+
+/* ── Compass cal modal ── */
+#compass-cal-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);
+  z-index:9700;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+#cc-box{background:#161b22;border:1px solid #30363d;border-radius:12px;
+  width:min(380px,92vw);padding:clamp(12px,3.5vw,18px);
+  max-height:95vh;overflow-y:auto;
+  box-shadow:0 12px 40px rgba(0,0,0,.7)}
+#cc-head{display:flex;align-items:center;margin-bottom:8px}
+#cc-title{font-size:clamp(13px,3.8vw,16px);font-weight:800;color:#58a6ff;flex:1}
+#cc-close{background:none;border:none;color:#8b949e;font-size:clamp(18px,5vw,22px);
+  cursor:pointer;padding:0 6px;line-height:1}
+#cc-instr{font-size:clamp(9.5px,2.8vw,12px);color:#8b949e;margin-bottom:10px;line-height:1.45}
+#cc-svg{display:block;width:100%;height:min(180px,45vw);
+  background:radial-gradient(circle at center,#0d1117 30%,#060a0f 100%);
+  border:1px solid #30363d;border-radius:10px;margin-bottom:10px}
+#cc-progress-wrap{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+#cc-progress-track{flex:1;height:8px;background:#21262d;border-radius:4px;overflow:hidden}
+#cc-progress-fill{height:100%;width:0%;background:#58a6ff;transition:width .35s,background .35s}
+#cc-progress-fill.done{background:#3fb950}
+#cc-progress-fill.fail{background:#f85149}
+#cc-progress-text{font-size:clamp(10px,3vw,13px);color:#e6edf3;font-weight:700;
+  font-family:'Menlo','Consolas',monospace;min-width:48px;text-align:right}
+#cc-status{font-size:clamp(10px,3vw,12.5px);color:#c9d1d9;margin-bottom:10px;
+  min-height:1.4em;line-height:1.4}
+#cc-status.good{color:#3fb950}
+#cc-status.bad{color:#f85149}
+#cc-row{display:flex;gap:8px}
+#cc-cancel,#cc-restart,#cc-accept{flex:1;padding:clamp(8px,2.5vw,11px);border-radius:8px;border:none;
+  cursor:pointer;font-size:clamp(11px,3.3vw,14px);font-weight:700}
+#cc-cancel{background:#30363d;color:#c9d1d9}
+#cc-cancel:active{background:#3d444d}
+#cc-restart{background:#3fb950;color:#000}
+#cc-restart:active{opacity:.8}
+#cc-accept{background:#f0a500;color:#000}
+#cc-accept:active{opacity:.8}
+/* Strictness selector inside the compass cal modal */
+#cc-strict{display:flex;align-items:center;gap:8px;margin-bottom:10px;
+  padding:clamp(5px,1.6vw,7px) clamp(7px,2.2vw,10px);
+  background:#0d1117;border:1px solid #30363d;border-radius:8px}
+#cc-strict-lbl{font-size:clamp(9px,2.6vw,11px);text-transform:uppercase;
+  letter-spacing:.5px;color:#8b949e;font-weight:700;flex-shrink:0}
+#cc-strict-row{display:flex;flex:1;gap:4px}
+.cc-strict-pill{flex:1;padding:clamp(4px,1.4vw,6px) 0;border:1px solid #30363d;
+  background:#161b22;color:#8b949e;
+  font-size:clamp(9px,2.6vw,11px);font-weight:700;letter-spacing:.4px;
+  border-radius:5px;cursor:pointer}
+.cc-strict-pill:active{opacity:.7}
+.cc-strict-pill.on{background:#1f3d5a;border-color:#58a6ff;color:#58a6ff}
+
+/* ── Calibration picker modal ── */
+#cal-pick-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);
+  z-index:9750;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+#cp-box{background:#161b22;border:1px solid #30363d;border-radius:12px;
+  width:min(360px,92vw);padding:clamp(14px,4vw,20px);
+  box-shadow:0 12px 40px rgba(0,0,0,.7)}
+#cp-head{display:flex;align-items:center;margin-bottom:10px}
+#cp-title{font-size:clamp(13px,3.8vw,16px);font-weight:800;color:#58a6ff;flex:1}
+#cp-close{background:none;border:none;color:#8b949e;font-size:clamp(18px,5vw,22px);
+  cursor:pointer;padding:0 6px;line-height:1}
+#cp-instr{font-size:clamp(10px,3vw,12.5px);color:#8b949e;margin-bottom:12px;line-height:1.45}
+.cp-opt{display:flex;align-items:center;gap:clamp(10px,3vw,14px);
+  background:#0d1117;border:1px solid #30363d;border-radius:10px;
+  padding:clamp(10px,3vw,14px);margin-bottom:8px;cursor:pointer;
+  transition:border-color .15s,background .15s}
+.cp-opt:active{background:#21262d;border-color:#58a6ff}
+.cp-opt-icon{font-size:clamp(22px,6vw,30px);flex-shrink:0;line-height:1}
+.cp-opt-body{flex:1;min-width:0}
+.cp-opt-name{font-size:clamp(12px,3.5vw,15px);font-weight:800;color:#e6edf3;margin-bottom:2px}
+.cp-opt-desc{font-size:clamp(9.5px,2.8vw,11.5px);color:#8b949e;line-height:1.4}
+
+/* ── Accel cal modal ── */
+#accel-cal-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);
+  z-index:9700;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+#ac-box{background:#161b22;border:1px solid #30363d;border-radius:12px;
+  width:min(380px,92vw);padding:clamp(12px,3.5vw,18px);
+  max-height:95vh;overflow-y:auto;
+  box-shadow:0 12px 40px rgba(0,0,0,.7)}
+#ac-head{display:flex;align-items:center;margin-bottom:8px}
+#ac-title{font-size:clamp(13px,3.8vw,16px);font-weight:800;color:#58a6ff;flex:1}
+#ac-close{background:none;border:none;color:#8b949e;font-size:clamp(18px,5vw,22px);
+  cursor:pointer;padding:0 6px;line-height:1}
+#ac-instr{font-size:clamp(9.5px,2.8vw,12px);color:#8b949e;margin-bottom:10px;line-height:1.45}
+#ac-pos-card{background:radial-gradient(circle at center,#0d1117 30%,#060a0f 100%);
+  border:1px solid #30363d;border-radius:10px;padding:clamp(14px,4vw,20px);
+  margin-bottom:12px;text-align:center}
+#ac-pos-icon{font-size:clamp(48px,14vw,72px);line-height:1;margin-bottom:8px;
+  filter:drop-shadow(0 3px 8px rgba(88,166,255,.4))}
+#ac-pos-num{font-size:clamp(9.5px,2.8vw,12px);color:#8b949e;font-weight:700;
+  letter-spacing:.8px;text-transform:uppercase;margin-bottom:4px}
+#ac-pos-name{font-size:clamp(15px,4.5vw,20px);font-weight:800;color:#58a6ff;
+  letter-spacing:.5px;margin-bottom:6px}
+#ac-pos-hint{font-size:clamp(10px,3vw,12.5px);color:#c9d1d9;line-height:1.4}
+#ac-progress-wrap{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+#ac-progress-track{flex:1;height:8px;background:#21262d;border-radius:4px;overflow:hidden}
+#ac-progress-fill{height:100%;width:0%;background:#58a6ff;transition:width .35s,background .35s}
+#ac-progress-fill.done{background:#3fb950}
+#ac-progress-fill.fail{background:#f85149}
+#ac-progress-text{font-size:clamp(10px,3vw,13px);color:#e6edf3;font-weight:700;
+  font-family:'Menlo','Consolas',monospace;min-width:48px;text-align:right}
+#ac-status{font-size:clamp(10px,3vw,12.5px);color:#c9d1d9;margin-bottom:10px;
+  min-height:1.4em;line-height:1.4}
+#ac-status.good{color:#3fb950}
+#ac-status.bad{color:#f85149}
+#ac-row{display:flex;gap:8px}
+#ac-cancel,#ac-restart,#ac-next{flex:1;padding:clamp(8px,2.5vw,11px);border-radius:8px;border:none;
+  cursor:pointer;font-size:clamp(11px,3.3vw,14px);font-weight:700}
+#ac-cancel{background:#30363d;color:#c9d1d9}
+#ac-cancel:active{background:#3d444d}
+#ac-restart{background:#3fb950;color:#000}
+#ac-restart:active{opacity:.8}
+#ac-next{background:#f0a500;color:#000}
+#ac-next:active{opacity:.8}
+#ac-next:disabled{background:#30363d;color:#6e7681;cursor:not-allowed}
+
+#params-drawer{position:fixed;top:0;right:0;bottom:0;
+  width:min(420px,92vw);background:#0d1117;border-left:1px solid #30363d;
+  z-index:9500;transform:translateX(105%);transition:transform .25s ease-out;
+  display:flex;flex-direction:column;box-shadow:-6px 0 22px rgba(0,0,0,.55)}
+#params-drawer.open{transform:translateX(0)}
+#params-header{flex-shrink:0;padding:clamp(10px,3vw,14px) clamp(10px,3vw,14px) clamp(6px,2vw,9px);
+  border-bottom:1px solid #30363d}
+#params-title-row{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+#params-title{font-size:clamp(13px,3.8vw,16px);font-weight:800;color:#58a6ff;flex:1}
+.params-icon-btn{background:#21262d;border:1px solid #30363d;border-radius:6px;
+  color:#8b949e;font-size:clamp(11px,3.2vw,13px);font-weight:700;cursor:pointer;
+  padding:clamp(5px,1.8vw,8px) clamp(8px,2.5vw,12px)}
+.params-icon-btn:active{background:#30363d;color:#c9d1d9}
+#params-close-btn{background:none;border:none;color:#8b949e;font-size:clamp(18px,5vw,24px);
+  cursor:pointer;padding:0 6px;line-height:1}
+#params-search{width:100%;background:#161b22;border:1px solid #30363d;border-radius:7px;
+  color:#e6edf3;padding:clamp(7px,2.2vw,10px) clamp(9px,2.8vw,12px);
+  font-size:clamp(11px,3.3vw,14px);outline:none;font-family:'Menlo','Consolas',monospace}
+#params-search:focus{border-color:#58a6ff}
+#params-progress{height:3px;background:#21262d;border-radius:2px;overflow:hidden;
+  margin-top:8px;display:none}
+#params-progress.active{display:block}
+#params-progress-fill{height:100%;background:#58a6ff;width:0%;transition:width .25s}
+#params-meta{font-size:clamp(9px,2.6vw,11px);color:#8b949e;margin-top:6px;
+  display:flex;justify-content:space-between}
+#params-body{flex:1;overflow-y:auto;padding:clamp(6px,2vw,10px) clamp(8px,2.5vw,12px);
+  position:relative}
+#params-body.editing-active .param-row:not(.editing),
+#params-body.editing-active .params-section-lbl{
+  filter:blur(3px) brightness(.55);opacity:.55;
+  pointer-events:none;transition:filter .2s,opacity .2s}
+#params-body.editing-active .param-row.editing{
+  position:relative;z-index:5;
+  box-shadow:0 10px 32px rgba(0,0,0,.7),0 0 0 1px rgba(88,166,255,.45);
+  transform:scale(1.01);transform-origin:center;transition:transform .15s}
+.params-section-lbl{font-size:clamp(8.5px,2.5vw,10.5px);text-transform:uppercase;
+  letter-spacing:.8px;color:#6e7681;font-weight:700;
+  padding:clamp(8px,2.5vw,11px) 2px clamp(4px,1.5vw,6px);
+  background:#0d1117}
+.param-row{background:#161b22;border:1px solid #30363d;border-radius:7px;
+  padding:clamp(8px,2.5vw,11px) clamp(10px,3vw,13px);margin-bottom:5px;cursor:pointer;
+  display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.param-row:active{background:#21262d}
+.param-row.editing{border-color:#58a6ff;background:rgba(88,166,255,.06);cursor:default}
+.param-row.pending{border-color:#f0a500}
+.param-row.fav-row{border-left:3px solid #f0a500}
+.param-fav-star{font-size:clamp(13px,4vw,17px);color:#484f58;cursor:pointer;
+  flex-shrink:0;width:clamp(20px,6vw,26px);text-align:center;line-height:1;
+  user-select:none}
+.param-fav-star.on{color:#f0a500}
+.param-fav-star:active{transform:scale(1.2)}
+.param-name{font-size:clamp(10px,3vw,12.5px);font-weight:700;color:#e6edf3;
+  font-family:'Menlo','Consolas',monospace;letter-spacing:.3px;flex:1;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.param-val{font-size:clamp(10px,3vw,12.5px);font-weight:700;color:#3fb950;
+  font-family:'Menlo','Consolas',monospace;flex-shrink:0}
+.param-row.pending .param-val{color:#f0a500}
+.param-edit-row{display:flex;gap:6px;margin-top:4px;width:100%;flex-wrap:wrap}
+.param-edit-row input[type=text],
+.param-edit-row select.param-select{flex:1 1 60%;background:#0d1117;border:1px solid #30363d;border-radius:6px;
+  color:#e6edf3;padding:clamp(6px,2vw,9px) clamp(8px,2.5vw,11px);font-size:clamp(11px,3.3vw,14px);
+  outline:none;font-family:'Menlo','Consolas',monospace;min-width:0}
+.param-edit-row input:focus,
+.param-edit-row select.param-select:focus{border-color:#58a6ff}
+.param-edit-btn{padding:clamp(6px,2vw,9px) clamp(10px,3vw,13px);border-radius:6px;border:none;
+  font-size:clamp(10px,3vw,13px);font-weight:700;cursor:pointer}
+.param-edit-btn.save{background:#3fb950;color:#000}
+.param-edit-btn.cancel{background:#30363d;color:#8b949e}
+.param-bitmask-list{flex:1 1 100%;background:#0d1117;border:1px solid #30363d;
+  border-radius:6px;padding:clamp(6px,2vw,9px);max-height:55vh;overflow-y:auto}
+.param-bitmask-row{display:flex;align-items:center;gap:8px;padding:clamp(3px,1vw,5px) 2px;
+  font-size:clamp(10px,3vw,12.5px);color:#c9d1d9;cursor:pointer}
+.param-bitmask-row input[type=checkbox]{accent-color:#58a6ff;width:clamp(14px,4vw,17px);
+  height:clamp(14px,4vw,17px);flex-shrink:0;cursor:pointer}
+.param-bitmask-lbl{font-family:'Menlo','Consolas',monospace;letter-spacing:.2px}
+.param-bitmask-raw{margin-top:6px;padding-top:6px;border-top:1px solid #30363d;
+  font-size:clamp(9.5px,2.8vw,12px);color:#8b949e;font-family:'Menlo','Consolas',monospace}
+.param-bitmask-raw span{color:#3fb950;font-weight:700}
+.param-empty{text-align:center;color:#6e7681;font-size:clamp(10px,3vw,12.5px);
+  padding:clamp(20px,6vw,32px) 10px;line-height:1.6}
+.param-empty .small{font-size:clamp(9px,2.6vw,11px);color:#484f58;margin-top:6px}
+.param-disconnected{color:#f85149;font-weight:700}
+</style>
+</head>
+<body>
+
+<!-- Topbar -->
+<div id="topbar">
+  <div id="status-dot"></div>
+  <div id="app-name">AeroNav GCS</div>
+  <span id="mode-badge">—</span>
+  <span id="arm-badge" class="disarmed">DISARMED</span>
+  <button id="follow-btn" class="on" onclick="toggleFollow()">⊙ FOLLOW</button>
+  <button id="cal-btn" onclick="openCalibrationsPicker()">🛠 CAL</button>
+  <button id="params-btn" onclick="openParams()">≡ PARAMS</button>
+  <button id="settings-btn" onclick="showSettings()">⚙</button>
+</div>
+
+<!-- Main row -->
+<div id="main">
+  <div id="map"></div>
+
+  <!-- Right panel -->
+  <div id="panel">
+    <div class="sec-title">TELEMETRY</div>
+    <div id="hud">
+      <div class="hud-grid" id="hud-grid">
+        <div class="hud-cell" data-cell-id="spd"><div class="hud-lbl">GND SPD</div><div class="hud-val" id="h-spd">—</div><div class="hud-unit">km/h</div></div>
+        <div class="hud-cell" data-cell-id="alt"><div class="hud-lbl">ALT AGL</div><div class="hud-val" id="h-alt">—</div><div class="hud-unit">m</div></div>
+        <div class="hud-cell" data-cell-id="clb"><div class="hud-lbl">CLIMB</div><div class="hud-val" id="h-clb">—</div><div class="hud-unit">m/s</div></div>
+        <div class="hud-cell" data-cell-id="hdg"><div class="hud-lbl">HEADING</div><div class="hud-val" id="h-hdg">—</div><div class="hud-unit">°</div></div>
+        <div class="hud-cell" data-cell-id="rol"><div class="hud-lbl">ROLL</div><div class="hud-val" id="h-rol">—</div><div class="hud-unit">°</div></div>
+        <div class="hud-cell" data-cell-id="pit"><div class="hud-lbl">PITCH</div><div class="hud-val" id="h-pit">—</div><div class="hud-unit">°</div></div>
+        <div class="hud-cell" data-cell-id="thr"><div class="hud-lbl">THROTTLE</div><div class="hud-val" id="h-thr">—</div><div class="hud-unit">%</div></div>
+        <div class="hud-cell" data-cell-id="gps" id="gps-cell"><div class="hud-lbl">GPS SATS</div><div class="hud-val" id="h-gps">—</div></div>
+        <div class="hud-cell" data-cell-id="dist"><div class="hud-lbl">DIST HOME</div><div class="hud-val" id="h-dist">—</div><div class="hud-unit" id="h-dist-unit">m</div></div>
+        <div class="hud-cell" data-cell-id="brg"><div class="hud-lbl">BRG HOME</div><div class="hud-val" id="h-brg">—</div><div class="hud-unit">°</div></div>
+        <div class="hud-cell" data-cell-id="esc1-rpm"><div class="hud-lbl" id="lbl-esc1-rpm">ESC RPM</div><div class="hud-val" id="h-esc1-rpm">—</div></div>
+        <div class="hud-cell" data-cell-id="esc1-tmp" id="cell-esc1-tmp"><div class="hud-lbl" id="lbl-esc1-tmp">ESC TEMP</div><div class="hud-val" id="h-esc1-tmp">—</div><div class="hud-unit">°C</div></div>
+      </div>
+    </div>
+    <div id="bat-wrap">
+      <div id="bat-top"><span id="bat-lbl">BATTERY</span><span id="bat-val">—V  —%</span></div>
+      <div id="bat-track"><div id="bat-fill"></div></div>
+    </div>
+
+    <div class="sec-title">FLIGHT MODE</div>
+    <div id="modes"><!-- populated from HEARTBEAT MAV_TYPE --></div>
+    <div id="guided-alt-row" style="display:none">
+      <span id="guided-alt-lbl">GUIDED ALT</span>
+      <button class="alt-adj-btn" onpointerdown="startAltHold(-5)" onpointerup="stopAltHold()" onpointerleave="stopAltHold()">−</button>
+      <span id="guided-alt-val">30m</span>
+      <button class="alt-adj-btn" onpointerdown="startAltHold(5)"  onpointerup="stopAltHold()" onpointerleave="stopAltHold()">+</button>
+    </div>
+
+    <div class="sec-title">ARM / DISARM</div>
+    <div id="arm-wrap">
+      <div id="arm-btn"
+           onpointerdown="armDown(event)" onpointerup="armUp()" onpointerleave="armUp()">
+        <svg id="arm-svg" width="54" height="54" viewBox="0 0 54 54">
+          <circle cx="27" cy="27" r="22" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="3"/>
+          <circle id="arm-progress" cx="27" cy="27" r="22" fill="none" stroke="#3fb950"
+            stroke-width="3" stroke-linecap="round"
+            stroke-dasharray="138.23" stroke-dashoffset="138.23"
+            transform="rotate(-90 27 27)"/>
+        </svg>
+        <div id="arm-text-wrap">
+          <div id="arm-label">ARM</div>
+          <div id="arm-sub">hold to confirm</div>
+        </div>
+      </div>
+      <label id="force-arm-row" onclick="event.stopPropagation()">
+        <input type="checkbox" id="force-arm-chk" onchange="onForceArmToggle()">
+        <span id="force-arm-text">SAFETY OVERRIDE</span>
+        <span id="force-arm-sub">force-arm — bypass pre-arm checks</span>
+      </label>
+    </div>
+
+    <div class="sec-title">STATUS LOG</div>
+    <div id="log-wrap"><div id="log-inner"></div></div>
+  </div>
+</div>
+
+<!-- Settings modal -->
+<div id="settings-modal">
+  <div id="settings-box">
+    <div class="set-head">Connection Settings</div>
+    <div class="set-field">
+      <label>FC / WiFi Module IP</label>
+      <input id="s-ip" type="text" inputmode="decimal" value="192.168.4.1">
+    </div>
+    <div class="set-field">
+      <label>UDP Receive Port (GCS listens)</label>
+      <input id="s-recv" type="number" inputmode="numeric" value="14550">
+    </div>
+    <div class="set-field">
+      <label>UDP Send Port (FC listens)</label>
+      <input id="s-send" type="number" inputmode="numeric" value="14555">
+    </div>
+    <div class="set-row">
+      <button class="set-btn set-btn-ok" onclick="applySettings()">Connect</button>
+      <button class="set-btn set-btn-cancel" onclick="hideSettings()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="leaflet.min.js"></script>
+<script>
+'use strict';
+
+// ── Telemetry state ───────────────────────────────────────────────────────────
+const tele = {
+  armed: false, customMode: 0, modeName: 'UNKNOWN', mavType: -1, fcSysId: 1,
+  lat: null, lon: null, altRel: null, hdg: 0,
+  groundspeed: null, climbRate: null, throttle: null,
+  battPct: null, volts: null, gpsFix: 0, gpsSats: 0,
+  roll: null, pitch: null,
+  homeLat: null, homeLon: null,
+  // Per-ESC RPMs and temps (up to 12). Indexes 0..11 = ESC 1..12.
+  escRpms:  new Array(12).fill(null),
+  escTemps: new Array(12).fill(null),
+  escCount: 0,  // sticky max — number of ESCs we've ever seen report a non-zero temp
+};
+
+// ── Mode definitions per vehicle type ────────────────────────────────────────
+const MODE_SETS = {
+  copter: [
+    { id: 0,  name: 'STABILIZE' }, { id: 2,  name: 'ALT HOLD'  },
+    { id: 5,  name: 'LOITER'    }, { id: 16, name: 'POSHOLD'   },
+    { id: 3,  name: 'AUTO'      }, { id: 4,  name: 'GUIDED'    },
+    { id: 6,  name: 'RTL',  warn: true }, { id: 21, name: 'SMART RTL', warn: true },
+    { id: 9,  name: 'LAND', warn: true },
+  ],
+  plane: [
+    { id: 0,  name: 'MANUAL'    }, { id: 5,  name: 'FBWA'      },
+    { id: 6,  name: 'FBWB'      }, { id: 2,  name: 'STABILIZE' },
+    { id: 7,  name: 'CRUISE'    }, { id: 12, name: 'LOITER'    },
+    { id: 10, name: 'AUTO'      }, { id: 15, name: 'GUIDED'    },
+    { id: 11, name: 'RTL',  warn: true }, { id: 13, name: 'TAKEOFF'   },
+  ],
+  rover: [
+    { id: 0,  name: 'MANUAL'   }, { id: 1,  name: 'ACRO'      },
+    { id: 3,  name: 'STEERING' }, { id: 4,  name: 'HOLD'      },
+    { id: 10, name: 'AUTO'     }, { id: 15, name: 'GUIDED'    },
+    { id: 11, name: 'RTL', warn: true }, { id: 12, name: 'SMRT RTL', warn: true },
+    { id: 16, name: 'LOITER'   },
+  ],
+};
+
+const MODE_NAMES = {
+  copter: { 0:'STABILIZE',1:'ACRO',2:'ALT_HOLD',3:'AUTO',4:'GUIDED',
+            5:'LOITER',6:'RTL',7:'CIRCLE',9:'LAND',11:'DRIFT',
+            16:'POSHOLD',17:'BRAKE',21:'SMART_RTL' },
+  plane:  { 0:'MANUAL',1:'CIRCLE',2:'STABILIZE',3:'TRAINING',4:'ACRO',
+            5:'FBWA',6:'FBWB',7:'CRUISE',8:'AUTOTUNE',10:'AUTO',
+            11:'RTL',12:'LOITER',13:'TAKEOFF',15:'GUIDED',
+            17:'QSTABILIZE',18:'QHOVER',19:'QLOITER',20:'QLAND',21:'QRTL' },
+  rover:  { 0:'MANUAL',1:'ACRO',3:'STEERING',4:'HOLD',10:'AUTO',
+            11:'RTL',12:'SMART_RTL',15:'GUIDED',16:'LOITER' },
+};
+
+function vehicleKind(mavType) {
+  if (mavType === 1) return 'plane';                         // MAV_TYPE_FIXED_WING
+  if (mavType === 10 || mavType === 11) return 'rover';      // GROUND_ROVER, SURFACE_BOAT
+  return 'copter';                                           // quad/hex/octo/heli/etc.
+}
+
+let _renderedKind = null;
+function updateModeButtons() {
+  const kind = vehicleKind(tele.mavType);
+  if (kind === _renderedKind) return;
+  _renderedKind = kind;
+  const el = document.getElementById('modes');
+  el.innerHTML = MODE_SETS[kind].map(m =>
+    `<div class="mode-btn${m.warn?' warn':''}" data-mode="${m.id}" onclick="sendMode(${m.id})">${m.name}</div>`
+  ).join('');
+}
+
+// ── Leaflet map setup ─────────────────────────────────────────────────────────
+const map = L.map('map', {
+  center: [0, 0], zoom: 2,
+  zoomControl: true,
+  attributionControl: true,
+});
+
+// IndexedDB tile cache
+const DB_NAME = 'aeronav-tiles-v1';
+let tileDb = null;
+(function openDb() {
+  const req = indexedDB.open(DB_NAME, 1);
+  req.onupgradeneeded = e => e.target.result.createObjectStore('tiles');
+  req.onsuccess = e => { tileDb = e.target.result; };
+})();
+
+function dbGet(key) {
+  return new Promise(res => {
+    if (!tileDb) { res(null); return; }
+    const r = tileDb.transaction('tiles','readonly').objectStore('tiles').get(key);
+    r.onsuccess = () => res(r.result || null);
+    r.onerror   = () => res(null);
+  });
+}
+function dbPut(key, blob) {
+  if (!tileDb) return;
+  tileDb.transaction('tiles','readwrite').objectStore('tiles').put(blob, key);
+}
+
+// Cached satellite tile layer
+const CachedLayer = L.TileLayer.extend({
+  createTile(coords, done) {
+    const img = document.createElement('img');
+    img.crossOrigin = 'anonymous';
+    const key = `${coords.z}/${coords.x}/${coords.y}`;
+    const url = this.getTileUrl(coords);
+    dbGet(key).then(cached => {
+      if (cached) {
+        img.src = URL.createObjectURL(cached);
+        done(null, img);
+      } else {
+        fetch(url)
+          .then(r => r.ok ? r.blob() : Promise.reject())
+          .then(blob => { dbPut(key, blob); img.src = URL.createObjectURL(blob); done(null, img); })
+          .catch(() => { img.src = url; done(null, img); });
+      }
+    });
+    return img;
+  }
+});
+
+// Esri World Imagery (free, no API key)
+new CachedLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  { maxZoom: 19, attribution: 'Tiles © Esri' }
+).addTo(map);
+
+// Esri road/label overlay on top
+L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+  { maxZoom: 19, opacity: 0.6 }
+).addTo(map);
+
+// ── Plane marker ──────────────────────────────────────────────────────────────
+let planeMarker = null;
+let followMode  = true;
+let routeLine   = null;
+const wpMarkers = [];
+
+// Trail
+const trailPoints = [];
+const TRAIL_MAX   = 300;
+let   trailLine   = null;
+
+function makePlaneIcon(hdg) {
+  // Arrow SVG pointing north (0°), rotated to heading
+  return L.divIcon({
+    className: '',
+    html: `<svg class="plane-marker" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+      <g transform="rotate(${hdg},20,20)">
+        <polygon points="20,3 33,35 20,28 7,35"
+          fill="#58a6ff" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
+      </g>
+    </svg>`,
+    iconSize:   [40, 40],
+    iconAnchor: [20, 20],
+  });
+}
+
+function updatePlane() {
+  if (tele.lat == null || tele.lat === 0) return;
+  const ll = [tele.lat, tele.lon];
+
+  // Update trail
+  trailPoints.push(ll);
+  if (trailPoints.length > TRAIL_MAX) trailPoints.shift();
+  if (!trailLine) {
+    trailLine = L.polyline(trailPoints, { color: '#00eaff', weight: 3, opacity: 0.85, smoothFactor: 1 }).addTo(map);
+  } else {
+    trailLine.setLatLngs(trailPoints);
+  }
+
+  if (!planeMarker) {
+    planeMarker = L.marker(ll, { icon: makePlaneIcon(tele.hdg), zIndexOffset: 1000 }).addTo(map);
+    map.setView(ll, 17);
+  } else {
+    planeMarker.setLatLng(ll);
+    planeMarker.setIcon(makePlaneIcon(tele.hdg));
+  }
+  if (followMode) map.panTo(ll, { animate: true, duration: 0.5 });
+}
+
+function toggleFollow() {
+  followMode = !followMode;
+  document.getElementById('follow-btn').className = followMode ? 'on' : '';
+  if (followMode && tele.lat) map.panTo([tele.lat, tele.lon]);
+}
+
+// ── Home marker ───────────────────────────────────────────────────────────────
+let homeMarker    = null;
+let _autoHomeSet  = false;
+
+function checkAutoHome() {
+  if (_autoHomeSet) return;
+  if (tele.gpsSats < 8) return;
+  if (!tele.lat || tele.lat === 0) return;
+  _autoHomeSet = true;
+  tele.homeLat = tele.lat;
+  tele.homeLon = tele.lon;
+  updateHomeMarker();
+  showToast('Home set (' + tele.gpsSats + ' sats)', 3000);
+  addLog('Home set from GPS (' + tele.gpsSats + ' sats) ' + tele.lat.toFixed(6) + ', ' + tele.lon.toFixed(6), 6);
+}
+
+function updateHomeMarker() {
+  if (!tele.homeLat || !tele.homeLon) return;
+  if (homeMarker) homeMarker.remove();
+  homeMarker = L.marker([tele.homeLat, tele.homeLon], {
+    icon: L.divIcon({ className:'', html:'<div class="home-marker">H</div>', iconSize:[22,22], iconAnchor:[11,11] }),
+    zIndexOffset: 500
+  }).addTo(map).bindTooltip('Home', { permanent: false, direction: 'top' });
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+let _toastTimer = null;
+function showToast(msg, durationMs = 2500) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.opacity = '1';
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.style.opacity = '0'; }, durationMs);
+}
+
+// ── Guided tap-to-fly ─────────────────────────────────────────────────────────
+let guidedTargetMarker = null;
+let guidedAlt = 30;
+let guidedAltSet = false;
+
+function adjustGuidedAlt(delta) {
+  guidedAlt = Math.max(5, Math.min(500, guidedAlt + delta));
+  guidedAltSet = true;
+  document.getElementById('guided-alt-val').textContent = guidedAlt + 'm';
+}
+
+let _altHoldRepeat = null, _altHoldDelay = null;
+function startAltHold(delta) {
+  adjustGuidedAlt(delta);                                  // immediate step
+  _altHoldDelay = setTimeout(() => {
+    _altHoldRepeat = setInterval(() => adjustGuidedAlt(delta), 80); // fast repeat
+  }, 400);                                                 // delay before repeat starts
+}
+function stopAltHold() {
+  clearTimeout(_altHoldDelay);
+  clearInterval(_altHoldRepeat);
+  _altHoldDelay = _altHoldRepeat = null;
+}
+
+function clearGuidedTarget() {
+  if (guidedTargetMarker) { guidedTargetMarker.remove(); guidedTargetMarker = null; }
+}
+
+map.on('click', function(e) {
+  if (tele.modeName !== 'GUIDED') return; // only active in GUIDED mode
+  if (!guidedAltSet) {
+    showToast('⚠ Set a GUIDED ALT before placing a target!');
+    beep(440, 200);
+    return;
+  }
+  const { lat, lng } = e.latlng;
+  clearGuidedTarget();
+  guidedTargetMarker = L.marker([lat, lng], {
+    icon: L.divIcon({ className:'', html:'<div class="guided-target">✕</div>', iconSize:[28,28], iconAnchor:[14,14] })
+  }).addTo(map);
+  followMode = false;
+  document.getElementById('follow-btn').className = '';
+  fcSend(buildGuidedTarget(lat, lng, guidedAlt));
+  addLog('→ GUIDED ' + lat.toFixed(5) + ',' + lng.toFixed(5) + ' alt=' + guidedAlt + 'm', 6);
+});
+
+// ── Distance & bearing helpers ────────────────────────────────────────────────
+function haversineDist(lat1, lon1, lat2, lon2) {
+  const R = 6371000, r = Math.PI/180;
+  const dLat = (lat2-lat1)*r, dLon = (lon2-lon1)*r;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+function bearingDeg(lat1, lon1, lat2, lon2) {
+  const r = Math.PI/180;
+  const y = Math.sin((lon2-lon1)*r)*Math.cos(lat2*r);
+  const x = Math.cos(lat1*r)*Math.sin(lat2*r) - Math.sin(lat1*r)*Math.cos(lat2*r)*Math.cos((lon2-lon1)*r);
+  return (Math.atan2(y,x)/r + 360) % 360;
+}
+
+// ── Waypoints (received via MAVLink MISSION_ITEM — future) ────────────────────
+function updateRoute(wps) {
+  wpMarkers.forEach(m => m.remove());
+  wpMarkers.length = 0;
+  if (routeLine) { routeLine.remove(); routeLine = null; }
+  if (!wps.length) return;
+  const lls = wps.map(wp => [wp.lat, wp.lon]);
+  routeLine = L.polyline(lls, { color: '#58a6ff', weight: 1.5, dashArray: '6,4', opacity: 0.7 }).addTo(map);
+  wps.forEach((wp, i) => {
+    const icon = L.divIcon({
+      className: '',
+      html: `<div class="wp-marker">${i+1}</div>`,
+      iconSize: [22, 22], iconAnchor: [11, 11],
+    });
+    wpMarkers.push(L.marker([wp.lat, wp.lon], { icon }).addTo(map));
+  });
+}
+
+// ── MAVLink parser (v1 + v2) ──────────────────────────────────────────────────
+function r32(p, o) { return new DataView(p.buffer, p.byteOffset+o, 4).getFloat32(0, true); }
+function i32(p, o) { return new DataView(p.buffer, p.byteOffset+o, 4).getInt32(0, true); }
+function u16(p, o) { return new DataView(p.buffer, p.byteOffset+o, 2).getUint16(0, true); }
+function u32(p, o) { return new DataView(p.buffer, p.byteOffset+o, 4).getUint32(0, true); }
+
+let _lastSysId = 1;
+
+class MAVParser {
+  constructor(onMsg) { this._buf = new Uint8Array(0); this._onMsg = onMsg; }
+  push(bytes) {
+    const c = new Uint8Array(this._buf.length + bytes.length);
+    c.set(this._buf); c.set(bytes, this._buf.length); this._buf = c;
+    this._drain();
+  }
+  _drain() {
+    while (this._buf.length > 0) {
+      const b0 = this._buf[0];
+      if (b0 === 0xFE) { if (!this._tryV1()) break; }
+      else if (b0 === 0xFD) { if (!this._tryV2()) break; }
+      else { this._buf = this._buf.slice(1); }
+    }
+  }
+  _tryV1() {
+    const buf = this._buf;
+    if (buf.length < 8) return false;
+    const payLen = buf[1], frameLen = 8 + payLen;
+    if (buf.length < frameLen) return false;
+    _lastSysId = buf[3];
+    const msgId = buf[5];
+    const payload = buf.slice(6, 6 + payLen);
+    this._buf = buf.slice(frameLen);
+    this._onMsg(msgId, payload);
+    return true;
+  }
+  _tryV2() {
+    const buf = this._buf;
+    if (buf.length < 12) return false;
+    const payLen = buf[1];
+    const incompat = buf[2];
+    const sigLen = (incompat & 0x01) ? 13 : 0; // MAVLINK_IFLAG_SIGNED adds 13-byte signature
+    const frameLen = 12 + payLen + sigLen;
+    if (buf.length < frameLen) return false;
+    _lastSysId = buf[5];
+    const msgId = buf[7] | (buf[8] << 8) | (buf[9] << 16);
+    const payload = buf.slice(10, 10 + payLen);
+    this._buf = buf.slice(frameLen);
+    this._onMsg(msgId, payload);
+    return true;
+  }
+}
+
+const _mavParser = new MAVParser((msgId, payload) => handleMAV(msgId, payload));
+
+window.onUdpData = function(b64) {
+  _mavParser.push(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+};
+
+window.onUdpStatus = function(active) {
+  document.getElementById('status-dot').className = active ? 'ok' : '';
+  if (!active) {
+    // Reset so streams/WPs re-request when connection comes back
+    _streamsRequested = false;
+    _missionLoaded = false;
+    _missionDl = { active: false, count: 0, items: [], timer: null };
+    triggerCommsLost();
+  }
+};
+
+// ── Comms lost / regained ─────────────────────────────────────────────────────
+let _commsLost        = false;
+let _lastHbTime       = 0;
+let _commsWatchdog    = null;
+let _commsRegainTimer = null;
+let _lastKnownPos     = null;
+let _lostMarker       = null;
+const COMMS_TIMEOUT_MS = 5000;
+
+function triggerCommsLost() {
+  if (_commsLost) return;
+  _commsLost = true;
+  // Param snapshot is tied to the current connection — invalidate so the next
+  // drawer open re-fetches. A new FC (or the same FC after a reboot) may have
+  // entirely different param values.
+  _param.fresh = false;
+  beep(300, 600, 0.6);
+  if (typeof navigator.vibrate === 'function') navigator.vibrate([300, 100, 300, 100, 600]);
+
+  document.getElementById('comms-overlay').className = 'lost';
+  document.getElementById('comms-title').textContent = 'COMMUNICATIONS LOST';
+
+  const card = document.getElementById('comms-location-card');
+  if (tele.lat != null && tele.lat !== 0) {
+    _lastKnownPos = { lat: tele.lat, lon: tele.lon, alt: tele.altRel, hdg: tele.hdg, spd: tele.groundspeed };
+    document.getElementById('comms-location-coords').innerHTML =
+      tele.lat.toFixed(6) + '<br>' + tele.lon.toFixed(6);
+    let sub = '';
+    if (tele.altRel      != null) sub += 'Alt <b>' + tele.altRel.toFixed(1) + ' m</b>';
+    if (tele.hdg         != null) sub += '&emsp;Hdg <b>' + Math.round(tele.hdg) + '&deg;</b>';
+    if (tele.groundspeed != null) sub += '&emsp;Spd <b>' + tele.groundspeed.toFixed(1) + ' m/s</b>';
+    document.getElementById('comms-location-sub').innerHTML = sub;
+    card.className = '';
+    document.getElementById('comms-maps-btn').style.display = 'block';
+    _renderCommsQR(tele.lat, tele.lon);
+    // Pulsing red pin on map at last known position
+    if (_lostMarker) { _lostMarker.remove(); _lostMarker = null; }
+    _lostMarker = L.marker([tele.lat, tele.lon], {
+      icon: L.divIcon({ className: '', html: '<div class="lost-marker-dot"></div>',
+                        iconSize: [16, 16], iconAnchor: [8, 8] }),
+      zIndexOffset: 2000
+    }).addTo(map);
+  } else {
+    _lastKnownPos = null;
+    document.getElementById('comms-location-coords').textContent = 'No position fix recorded';
+    document.getElementById('comms-location-sub').innerHTML = '';
+    document.getElementById('comms-maps-btn').style.display = 'none';
+    document.getElementById('comms-qr-wrap').style.display = 'none';
+    card.className = 'no-fix';
+  }
+  card.style.display = 'block';
+  addLog('⚠ COMMUNICATIONS LOST', 2);
+}
+
+function triggerCommsRegained() {
+  if (!_commsLost) return;
+  _commsLost = false;
+  beep(880, 150); setTimeout(() => beep(1100, 200), 180);
+  if (typeof navigator.vibrate === 'function') navigator.vibrate([80, 50, 80]);
+
+  document.getElementById('comms-overlay').className = 'regained';
+  document.getElementById('comms-title').textContent = 'COMMUNICATIONS REGAINED';
+  document.getElementById('comms-location-card').style.display = 'none';
+  document.getElementById('comms-qr-wrap').style.display = 'none';
+  if (_lostMarker) { _lostMarker.remove(); _lostMarker = null; }
+  addLog('✓ Communications regained', 5);
+  clearTimeout(_commsRegainTimer);
+  _commsRegainTimer = setTimeout(() => { document.getElementById('comms-overlay').className = ''; }, 2500);
+}
+
+function openLastKnownInMaps() {
+  if (!_lastKnownPos) return;
+  if (typeof Android !== 'undefined') {
+    Android.openMaps(_lastKnownPos.lat, _lastKnownPos.lon);
+  }
+}
+
+// Render a QR encoding a universal maps URL for the last-known fix. Scanning
+// it on an iPhone/iPad opens Apple Maps (or Google Maps app if installed);
+// on Android, Google Maps. Works fully offline — no library/CDN required.
+function _renderCommsQR(lat, lon) {
+  const wrap = document.getElementById('comms-qr-wrap');
+  const host = document.getElementById('comms-qr-svg');
+  if (!wrap || !host) return;
+  if (typeof qrcode === 'undefined') { wrap.style.display = 'none'; return; }
+  // 6 decimal places ≈ 11 cm precision, plenty for a recovery walk.
+  const url = 'https://maps.google.com/?q=' + lat.toFixed(6) + ',' + lon.toFixed(6);
+  try {
+    host.innerHTML = qrcode.toSVG(url, { margin: 2, moduleSize: 4 });
+    wrap.style.display = 'block';
+  } catch (e) {
+    wrap.style.display = 'none';
+    addLog('QR render failed: ' + e.message, 4);
+  }
+}
+
+function dismissCommsOverlay() {
+  // Hide the overlay immediately
+  document.getElementById('comms-overlay').className = '';
+  document.getElementById('comms-location-card').style.display = 'none';
+  document.getElementById('comms-qr-wrap').style.display = 'none';
+  // Keep _commsLost true so triggerCommsRegained still fires when link comes back,
+  // but allow the watchdog and UDP auto-retry in Java to keep working silently.
+  addLog('Comms overlay dismissed by user', 6);
+}
+
+function startCommsWatchdog() {
+  clearInterval(_commsWatchdog);
+  _commsWatchdog = setInterval(() => {
+    if (_lastHbTime > 0 && Date.now() - _lastHbTime > COMMS_TIMEOUT_MS) {
+      triggerCommsLost();
+    }
+  }, 1000);
+}
+
+let _hbInterval = null;
+let _pendingMode = null, _pendingModeTimer = null;
+window.onGCSReady = function(ip, recv, send, active) {
+  document.getElementById('status-dot').className = active ? 'ok' : '';
+  // Reset stream/mission state so reconnect or new FC triggers fresh download
+  _streamsRequested = false;
+  _missionLoaded    = false;
+  _autoHomeSet      = false;
+  _missionDl = { active: false, count: 0, items: [], timer: null };
+  sendHeartbeat();
+  clearInterval(_hbInterval);
+  _hbInterval = setInterval(sendHeartbeat, 1000);
+  startCommsWatchdog();
+};
+
+function sendHeartbeat() {
+  // GCS heartbeat: custom_mode=0, type=6(GCS), autopilot=8(INVALID), base_mode=0, status=4(ACTIVE), mavlink_version=3
+  const frame = buildFrame(0, [0,0,0,0, 6, 0, 0, 4, 3]);
+  const b64 = btoa(String.fromCharCode(...frame));
+  if (typeof Android !== 'undefined') Android.sendBroadcast(b64);
+}
+
+function handleMAV(msgId, p) {
+  switch (msgId) {
+    case 0: {
+      if (p[4] === 6) break; // skip GCS heartbeats (our own loopback)
+      _lastHbTime = Date.now();
+      triggerCommsRegained();
+      tele.fcSysId = _lastSysId;
+      tele.customMode = u32(p, 0);
+      tele.armed      = !!(p[6] & 0x80);
+      const newType   = p[4]; // MAV_TYPE byte
+      if (newType !== tele.mavType) {
+        tele.mavType = newType;
+        updateModeButtons();
+        loadParamMeta(vehicleKind(newType));
+      }
+      const names = MODE_NAMES[vehicleKind(tele.mavType)];
+      tele.modeName = names[tele.customMode] || ('MODE_' + tele.customMode);
+      if (_pendingMode !== null && tele.customMode === _pendingMode) {
+        clearTimeout(_pendingModeTimer); _pendingMode = null;
+        addLog('Mode confirmed: ' + tele.modeName, 6);
+      }
+      requestStreams(); // negotiate streams + kick off WP download on first HB
+      break;
+    }
+    case 1:
+      if (p.length >= 31) { tele.volts = u16(p, 14) / 1000; tele.battPct = p[30]; }
+      break;
+    case 24:
+      if (p.length >= 30) { tele.gpsFix = p[28]; tele.gpsSats = p[29]; checkAutoHome(); }
+      break;
+    case 30:
+      tele.roll  = +(r32(p, 4) * 180 / Math.PI).toFixed(1);
+      tele.pitch = +(r32(p, 8) * 180 / Math.PI).toFixed(1);
+      break;
+    case 33:
+      tele.lat    = i32(p, 4)  / 1e7;
+      tele.lon    = i32(p, 8)  / 1e7;
+      tele.altRel = i32(p, 16) / 1000;
+      tele.hdg    = u16(p, 26) / 100;
+      updatePlane();
+      checkAutoHome();
+      break;
+    case 74:
+      tele.groundspeed = r32(p, 4);
+      tele.climbRate   = r32(p, 12);
+      tele.throttle    = u16(p, 18);
+      break;
+    case 11030: // ESC_TELEMETRY_1_TO_4  (ESCs 1..4)
+    case 11031: // ESC_TELEMETRY_5_TO_8  (ESCs 5..8)
+    case 11032: { // ESC_TELEMETRY_9_TO_12 (ESCs 9..12)
+      // Wire layout (MAVLink v2, largest field first):
+      //   voltage[4]      u16  bytes  0..7   [cV]
+      //   current[4]      u16  bytes  8..15  [cA]
+      //   totalcurrent[4] u16  bytes 16..23  [mAh]
+      //   rpm[4]          u16  bytes 24..31  [rpm]
+      //   count[4]        u16  bytes 32..39
+      //   temperature[4]  u8   bytes 40..43  [°C]
+      const base = msgId === 11030 ? 0 : msgId === 11031 ? 4 : 8;
+      for (let i = 0; i < 4; i++) {
+        const tIdx = base + i;
+        if (p.length >= 41 + i) {
+          const t = p[40 + i];
+          tele.escTemps[tIdx] = t;
+          if (t > 0 && tIdx + 1 > tele.escCount) tele.escCount = tIdx + 1;
+        }
+        // RPM only valid when armed (ESCs report bogus startup values at idle)
+        tele.escRpms[tIdx] = (tele.armed && p.length >= 26 + i*2) ? u16(p, 24 + i*2) : null;
+      }
+      break;
+    }
+    case 44: { // MISSION_COUNT
+      const cnt = u16(p, 0);
+      clearTimeout(_missionDl.timer); _missionDl.timer = null; // stop request-list retries
+      addLog('MISSION_COUNT=' + cnt, 6);
+      if (cnt === 0) { addLog('No waypoints on FC', 6); _missionDl.active = false; return; }
+      _missionDl = { active: true, count: cnt, items: [], timer: null };
+      _requestMissionItem(0);
+      return;
+    }
+    case 39: // MISSION_ITEM (float lat/lon — old firmware fallback)
+    case 73: { // MISSION_ITEM_INT (int32 lat/lon *1e7)
+      if (!_missionDl.active) break;
+      clearTimeout(_missionDl.timer);
+      const seq2 = u16(p, 28);
+      let lat2, lon2;
+      if (msgId === 73) {
+        lat2 = p.length >= 24 ? i32(p, 16) / 1e7 : 0;
+        lon2 = p.length >= 24 ? i32(p, 20) / 1e7 : 0;
+      } else {
+        lat2 = p.length >= 24 ? r32(p, 16) : 0;
+        lon2 = p.length >= 24 ? r32(p, 20) : 0;
+      }
+      if (seq2 === 0 && lat2 !== 0 && lon2 !== 0) {
+        tele.homeLat = lat2; tele.homeLon = lon2; updateHomeMarker();
+      }
+      _missionDl.items[seq2] = seq2 === 0 ? null : { lat: lat2, lon: lon2 }; // seq0 = home, skip
+      const got = _missionDl.items.filter(x => x !== undefined).length;
+      addLog('WP ' + seq2 + '/' + (_missionDl.count-1) + ' lat=' + lat2.toFixed(5), 6);
+      if (got >= _missionDl.count) {
+        _finishMissionDownload();
+      } else {
+        _requestMissionItem(seq2 + 1);
+      }
+      return;
+    }
+    case 47: { // MISSION_ACK (received from FC — often means error/rejection)
+      clearTimeout(_missionDl.timer); _missionDl.timer = null;
+      _missionDl.active = false;
+      const MRES = ['ACCEPTED','ERROR','UNSUPPORTED','NO_SPACE','INVALID_SEQ','CANCELLED','UNKNOWN'];
+      const mtype = p[2];
+      addLog('MISSION_ACK ' + (MRES[mtype] || mtype), mtype === 0 ? 6 : 4);
+      return;
+    }
+    case 77: { // COMMAND_ACK
+      const cmd = u16(p, 0), res = p[2];
+      const RESULTS = ['OK','TEMP_REJECT','DENIED','UNSUPPORTED','FAILED','IN_PROGRESS'];
+      addLog('ACK cmd=' + cmd + ' ' + (RESULTS[res] || res), res === 0 ? 6 : 4);
+      if (cmd === 42424 && res !== 0 && _compassCal.open) onMagCalStartRejected(res);
+      if (cmd === 241   && _accelCal.open) onAccelCalAck(res);
+      return;
+    }
+    case 22: { // PARAM_VALUE
+      if (p.length < 25) return;
+      const value = r32(p, 0);
+      const count = u16(p, 4);
+      const index = u16(p, 6);
+      const name  = decodeParamId(p, 8);
+      const ptype = p[24];
+      onParamValue(name, value, ptype, index, count);
+      return;
+    }
+    case 191: { // MAG_CAL_PROGRESS — v2 may strip trailing zeros, so read defensively
+      const getF = o => (o + 4 <= p.length) ? r32(p, o) : 0;
+      const getU = o => (o < p.length) ? p[o] : 0;
+      // completion_mask: 10 bytes / 80 bits at offsets 17–26
+      const mask = new Uint8Array(10);
+      for (let i = 0; i < 10; i++) mask[i] = getU(17 + i);
+      onMagCalProgress({
+        dirX: getF(0), dirY: getF(4), dirZ: getF(8),
+        compassId: getU(12), calMask: getU(13), status: getU(14),
+        attempt: getU(15), pct: getU(16),
+        completionMask: mask,
+      });
+      return;
+    }
+    case 192: { // MAG_CAL_REPORT — same defensive read
+      const getF = o => (o + 4 <= p.length) ? r32(p, o) : 0;
+      const getU = o => (o < p.length) ? p[o] : 0;
+      onMagCalReport({
+        fitness: getF(0), status: getU(42), autosaved: getU(43),
+      });
+      return;
+    }
+    case 253: {
+      const SEV = ['EMRG','ALRT','CRIT','ERR','WARN','NOTE','INFO','DBG'];
+      const text = new TextDecoder().decode(p.slice(1)).replace(/\0+$/, '').trim();
+      if (text) {
+        addLog('[' + (SEV[p[0]] || p[0]) + '] ' + text, p[0]);
+        if (_accelCal.open) onAccelCalText(text);
+      }
+      return;
+    }
+    case 42: { // MISSION_CURRENT — FC broadcasts current WP seq; v2 includes total count
+      if (p.length >= 4 && !_missionLoaded) {
+        const total = u16(p, 2);
+        if (total > 0 && !_missionDl.active) {
+          // FC told us how many items it has — use it directly instead of MISSION_REQUEST_LIST
+          clearTimeout(_missionDl.timer); _missionDl.timer = null;
+          _missionDl = { active: true, count: total, items: [], timer: null };
+          addLog('MISSION_CURRENT: total=' + total + ' → downloading', 6);
+          _requestMissionItem(0);
+        } else if (total > 0 && _missionDl.active && _missionDl.count === 0) {
+          // Already active from startMissionDownload but waiting for COUNT — fill it in
+          clearTimeout(_missionDl.timer); _missionDl.timer = null;
+          _missionDl.count = total;
+          addLog('MISSION_CURRENT: total=' + total + ' → downloading', 6);
+          _requestMissionItem(0);
+        }
+      }
+      return;
+    }
+    default:
+      if ((msgId >= 37 && msgId <= 55) || msgId === 73) addLog('RX msgId=' + msgId + ' len=' + p.length, 6);
+      return;
+  }
+  scheduleUpdate();
+}
+
+// ── MAVLink command builder ───────────────────────────────────────────────────
+let txSeq = 0;
+const CRC_EXTRA = { 0:50, 1:124, 11:89, 20:214, 21:159, 22:220, 23:168, 24:24, 30:39, 33:104, 39:254, 40:230, 43:149, 44:221, 47:153, 51:196, 66:148, 73:38, 74:20, 76:152, 77:143, 86:5, 191:92, 192:36, 253:83 };
+
+function crc16(data) {
+  let c = 0xFFFF;
+  for (const b of data) { let t = b^(c&0xFF); t^=(t<<4)&0xFF; c=((t<<8)^(c>>8)^(t<<3)^(t>>4))&0xFFFF; }
+  return c;
+}
+function f32b(v) { const b=new ArrayBuffer(4); new DataView(b).setFloat32(0,v??0,true); return [...new Uint8Array(b)]; }
+function u16b(v) { return [v&0xFF,(v>>8)&0xFF]; }
+function u32b(v) { const b=new ArrayBuffer(4); new DataView(b).setUint32(0,v>>>0,true); return [...new Uint8Array(b)]; }
+function i32b(v) { const b=new ArrayBuffer(4); new DataView(b).setInt32(0,v,true);   return [...new Uint8Array(b)]; }
+function i16b(v) { const b=new ArrayBuffer(2); new DataView(b).setInt16(0,v,true);   return [...new Uint8Array(b)]; }
+function paramId16(name) { const o=new Array(16).fill(0); for (let i=0;i<Math.min(name.length,16);i++) o[i]=name.charCodeAt(i)&0xFF; return o; }
+function decodeParamId(p, o) { let s=''; for (let i=0;i<16;i++) { const b=p[o+i]; if (!b) break; s+=String.fromCharCode(b); } return s; }
+
+// ── Mission download state ────────────────────────────────────────────────────
+let _missionDl = { active: false, count: 0, items: [], timer: null };
+let _missionLoaded = false; // true after successful download — prevents MISSION_CURRENT re-trigger
+
+function startMissionDownload() {
+  if (_missionDl.active) return;
+  _missionDl = { active: true, count: 0, items: [], timer: null };
+  _sendMissionRequestList();
+}
+
+function _sendMissionRequestList() {
+  if (!_missionDl.active || _missionDl.count > 0) return; // stop once we got COUNT
+  const sys = tele.fcSysId || 1;
+  // MAVLink v2 with mission_type=0 — ArduPilot requires v2 for mission protocol
+  fcSend(buildFrameV2(43, [sys, 1, 0])); // MISSION_REQUEST_LIST + mission_type=0
+  _missionDl.timer = setTimeout(_sendMissionRequestList, 2000); // retry every 2s until answered
+}
+
+function _requestMissionItem(seq) {
+  const sys = tele.fcSysId || 1;
+  // Send both MISSION_REQUEST_INT (v2) and MISSION_REQUEST (v1 fallback)
+  // so we work with both old and new ArduPilot firmware
+  fcSend(buildFrameV2(51, [...u16b(seq), sys, 1, 0])); // MISSION_REQUEST_INT v2
+  fcSend(buildFrame(40, [...u16b(seq), sys, 1]));       // MISSION_REQUEST v1 fallback
+  addLog('Req WP ' + seq + '/' + (_missionDl.count - 1), 6);
+  _missionDl.timer = setTimeout(() => _requestMissionItem(seq), 1500); // retry
+}
+
+function _finishMissionDownload() {
+  clearTimeout(_missionDl.timer);
+  _missionDl.active = false;
+  _missionLoaded = true; // prevent MISSION_CURRENT from re-triggering download
+  const sys = tele.fcSysId || 1;
+  fcSend(buildFrameV2(47, [sys, 1, 0, 0])); // MISSION_ACK type=0 accepted, mission_type=0
+  const navItems = _missionDl.items.filter(w => w && (w.lat !== 0 || w.lon !== 0));
+  updateRoute(navItems);
+  addLog('Loaded ' + navItems.length + ' waypoints', 6);
+}
+
+// ── Request telemetry streams ─────────────────────────────────────────────────
+let _streamsRequested = false;
+function requestStreams() {
+  if (_streamsRequested) return;
+  _streamsRequested = true;
+  const sys = tele.fcSysId || 1;
+  addLog('FC sysid=' + sys + ' type=' + tele.mavType + ' — requesting streams', 6);
+  // REQUEST_DATA_STREAM: [rate_lo, rate_hi, target_sys, target_comp, stream_id, start_stop]
+  for (const sid of [0, 2, 11, 12]) { // ALL, EXTENDED_STATUS, EXTRA2, EXTRA3
+    fcSend(buildFrame(66, [...u16b(2), sys, 1, sid, 1]));
+  }
+  setTimeout(() => {
+    addLog('Requesting mission list…', 6);
+    startMissionDownload();
+  }, 1000);
+}
+
+const GCS_SYS  = 255;
+const GCS_COMP = 190; // MAV_COMP_ID_MISSIONPLANNER
+
+function buildFrame(msgId, payload) {
+  const seq = (txSeq++)&0xFF;
+  const crc = crc16([payload.length,seq,GCS_SYS,GCS_COMP,msgId,...payload,CRC_EXTRA[msgId]??0]);
+  return new Uint8Array([0xFE,payload.length,seq,GCS_SYS,GCS_COMP,msgId,...payload,crc&0xFF,crc>>8]);
+}
+
+// MAVLink v2 — required for mission messages (mission_type extension field)
+function buildFrameV2(msgId, payload) {
+  const seq = (txSeq++)&0xFF;
+  const mid0=msgId&0xFF, mid1=(msgId>>8)&0xFF, mid2=(msgId>>16)&0xFF;
+  const crc = crc16([payload.length,0,0,seq,GCS_SYS,GCS_COMP,mid0,mid1,mid2,...payload,CRC_EXTRA[msgId]??0]);
+  return new Uint8Array([0xFD,payload.length,0,0,seq,GCS_SYS,GCS_COMP,mid0,mid1,mid2,...payload,crc&0xFF,crc>>8]);
+}
+function cmdLong(cmd,p1=0,p2=0,p3=0,p4=0,p5=0,p6=0,p7=0) {
+  const sys = tele.fcSysId || 1;
+  return buildFrame(76,[...f32b(p1),...f32b(p2),...f32b(p3),...f32b(p4),...f32b(p5),...f32b(p6),...f32b(p7),...u16b(cmd),sys,1,0]);
+}
+function setModeFrame(m) {
+  const sys = tele.fcSysId || 1;
+  return buildFrame(11, [...u32b(m), sys, 1]);
+}
+function buildGuidedTarget(lat, lon, altM) {
+  const sys = tele.fcSysId || 1;
+  // SET_POSITION_TARGET_GLOBAL_INT (#86): use position only, relative alt frame
+  return buildFrameV2(86, [
+    ...u32b(0),                       // time_boot_ms
+    ...i32b(Math.round(lat * 1e7)),   // lat_int (*1e7)
+    ...i32b(Math.round(lon * 1e7)),   // lon_int (*1e7)
+    ...f32b(altM),                    // alt (m, relative)
+    ...f32b(0),...f32b(0),...f32b(0), // vx,vy,vz (ignored)
+    ...f32b(0),...f32b(0),...f32b(0), // afx,afy,afz (ignored)
+    ...f32b(0),...f32b(0),            // yaw, yaw_rate (ignored)
+    ...u16b(0x0FF8),                  // type_mask: use position only
+    sys, 1,                           // target_system, target_component
+    6                                 // MAV_FRAME_GLOBAL_RELATIVE_ALT_INT
+  ]);
+}
+
+function fcSend(frame) {
+  if (typeof Android !== 'undefined')
+    Android.sendBroadcast(btoa(String.fromCharCode(...frame)));
+}
+
+// ── Parameter protocol ───────────────────────────────────────────────────────
+// ArduPilot param IO: PARAM_REQUEST_LIST (#21), PARAM_REQUEST_READ (#20),
+// PARAM_SET (#23), PARAM_VALUE (#22 — incoming).
+
+// Default favorites (used once until the user customizes via the ★ button):
+const PARAM_DEFAULT_FAVS = [
+  'RTL_ALT', 'WPNAV_SPEED', 'BATT_LOW_VOLT', 'BATT_CRT_VOLT',
+  'FS_THR_ENABLE', 'FENCE_ENABLE', 'FENCE_ALT_MAX',
+  'ARMING_CHECK', 'COMPASS_USE', 'GPS_TYPE',
+];
+const FAVS_KEY = 'aeronav_param_favs';
+
+function loadFavs() {
+  try {
+    const raw = localStorage.getItem(FAVS_KEY);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch {}
+  return new Set(PARAM_DEFAULT_FAVS);
+}
+function saveFavs(set) {
+  try { localStorage.setItem(FAVS_KEY, JSON.stringify([...set])); } catch {}
+}
+function toggleFavorite(name, ev) {
+  if (ev) ev.stopPropagation();
+  const favs = loadFavs();
+  if (favs.has(name)) favs.delete(name); else favs.add(name);
+  saveFavs(favs);
+  renderParams();
+}
+
+// ── Param metadata (enums & bitmasks) ────────────────────────────────────────
+// Full ArduPilot apm.pdef.json metadata is loaded async from assets per vehicle
+// type (see loadParamMeta below). The hand-curated PARAM_META below is a small
+// override layer used for tweaks/relabels — it takes priority over the loaded
+// data when a key collides.
+// Per-vehicle metadata cache. Preloaded at page init since the WebView's
+// file:// fetch behaviour is flaky; XHR is reliable.
+const _loadedMetas = { copter: null, plane: null, rover: null };
+let _currentMetaKind = 'plane'; // updated from heartbeat MAV_TYPE
+function _xhrJson(path, cb) {
+  const xhr = new XMLHttpRequest();
+  xhr.open('GET', path, true);
+  xhr.onload = () => {
+    if (xhr.status === 200 || xhr.status === 0) {
+      try { cb(JSON.parse(xhr.responseText)); }
+      catch (e) { addLog('⚠ Bad JSON ' + path + ': ' + e, 4); }
+    } else {
+      addLog('⚠ Load failed ' + path + ' HTTP ' + xhr.status, 4);
+    }
+  };
+  xhr.onerror = () => addLog('⚠ Network error loading ' + path, 4);
+  xhr.send();
+}
+function preloadAllParamMeta() {
+  for (const kind of ['copter', 'plane', 'rover']) {
+    _xhrJson('pdef_' + kind + '.json', json => {
+      _loadedMetas[kind] = json;
+      addLog('Param metadata loaded: ' + Object.keys(json).length + ' entries (' + kind + ')', 6);
+      if (_param.drawerOpen) renderParams();
+    });
+  }
+}
+function loadParamMeta(kind) {
+  _currentMetaKind = kind;
+  // If for some reason it hasn't preloaded yet, kick it off.
+  if (!_loadedMetas[kind]) {
+    _xhrJson('pdef_' + kind + '.json', json => {
+      _loadedMetas[kind] = json;
+      if (_param.drawerOpen) renderParams();
+    });
+  } else if (_param.drawerOpen) {
+    renderParams();
+  }
+}
+// Generic bit-0..15 labels — used as a fallback for *_OPTIONS params whose
+// firmware metadata doesn't enumerate individual bits.
+const GENERIC_OPTIONS_BITMASK = Object.fromEntries(
+  Array.from({ length: 16 }, (_, i) => [i, 'Bit ' + i])
+);
+
+function _metaFromJson(j) {
+  if (!j) return null;
+  const out = {};
+  if (j.v) out.values  = j.v;
+  if (j.b) out.bitmask = j.b;
+  return (out.values || out.bitmask) ? out : null;
+}
+function metaFor(name) {
+  // Try the current-vehicle metadata first, then the others (some params are
+  // defined on one vehicle but used on multiple). Then hand-curated overrides.
+  // Finally, generic _OPTIONS bitmask as the last-resort fallback.
+  const order = [_currentMetaKind, 'plane', 'copter', 'rover'];
+  for (const k of order) {
+    const j = _loadedMetas[k] && _loadedMetas[k][name];
+    const m = _metaFromJson(j);
+    if (m) return m;
+  }
+  if (PARAM_META[name]) return PARAM_META[name];
+  if (/_OPTIONS?$/.test(name)) return { bitmask: GENERIC_OPTIONS_BITMASK };
+  return null;
+}
+preloadAllParamMeta();
+
+const GPS_TYPE_VALUES = { 0:'None', 1:'AUTO', 2:'uBlox', 5:'NMEA', 6:'SiRF', 7:'HIL',
+  8:'SwiftNav', 9:'DroneCAN', 10:'SBF', 11:'GSOF', 13:'ERB', 14:'MAV', 15:'NOVA',
+  16:'HemisphereNMEA', 17:'uBlox-MB-Base', 18:'uBlox-MB-Rover', 19:'MSP',
+  20:'AllyStar', 21:'ExternalAHRS' };
+const PARAM_META = {
+  COMPASS_USE:     { values: { 0:'Disabled', 1:'Enabled' } },
+  COMPASS_USE2:    { values: { 0:'Disabled', 1:'Enabled' } },
+  COMPASS_USE3:    { values: { 0:'Disabled', 1:'Enabled' } },
+  COMPASS_LEARN:   { values: { 0:'Disabled', 1:'Internal', 2:'EKF', 3:'In-Flight' } },
+  COMPASS_AUTO_ROT:{ values: { 0:'Disabled', 1:'On Boot', 2:'Each Boot' } },
+  FENCE_ENABLE:    { values: { 0:'Disabled', 1:'Enabled' } },
+  FENCE_AUTOENABLE:{ values: { 0:'Disabled', 1:'OnTakeoff', 2:'OnArming', 3:'OnlyMin' } },
+  FENCE_ACTION:    { values: { 0:'Report Only', 1:'RTL or Land', 2:'Always Land',
+                               3:'SmartRTL or RTL', 4:'Brake or Land', 5:'SmartRTL or Land' } },
+  AHRS_GPS_USE:    { values: { 0:'Disabled', 1:'Enabled', 2:'Enabled NoFallback' } },
+  EK3_ENABLE:      { values: { 0:'Disabled', 1:'Enabled' } },
+  EK2_ENABLE:      { values: { 0:'Disabled', 1:'Enabled' } },
+  TERRAIN_ENABLE:  { values: { 0:'Disabled', 1:'Enabled' } },
+  TERRAIN_FOLLOW:  { values: { 0:'Disabled', 1:'Enabled' } },
+  GPS_TYPE:        { values: GPS_TYPE_VALUES },
+  GPS_TYPE2:       { values: GPS_TYPE_VALUES },
+  RTL_AUTOLAND:    { values: { 0:'Disabled', 1:'On Land Wp', 2:'Always Land',
+                               3:'On Pilot Input' } },
+  // Copter failsafes
+  FS_THR_ENABLE:   { values: { 0:'Disabled', 1:'Enabled Always RTL',
+                               2:'Enabled Continue with Mission', 3:'Enabled Always Land',
+                               4:'Enabled SmartRTL or RTL', 5:'Enabled SmartRTL or Land',
+                               6:'Enabled Auto DO_LAND_START or RTL' } },
+  FS_GCS_ENABLE:   { values: { 0:'Disabled', 1:'Enabled Always RTL',
+                               2:'Continue with Mission', 3:'SmartRTL or RTL',
+                               4:'SmartRTL or Land', 5:'Land', 6:'Auto DO_LAND_START or RTL' } },
+  FS_EKF_ACTION:   { values: { 1:'Land', 2:'AltHold', 3:'Land Even In Stabilize' } },
+  FS_EKF_THRESH:   { values: { 0.6:'Strict', 0.8:'Default', 1.0:'Relaxed' } },
+  FS_OPTIONS:      { bitmask: { 0:'Continue if in Auto on RC failsafe',
+                                1:'Continue if in Auto on GCS failsafe',
+                                2:'Continue if landing on any failsafe',
+                                3:'Continue if in pilot control on GCS failsafe',
+                                4:'Release Gripper' } },
+  // Plane failsafes
+  FS_SHORT_ACTN:   { values: { 0:'Continue', 1:'Circle', 2:'FBWA', 3:'Disable' } },
+  FS_LONG_ACTN:    { values: { 0:'Continue', 1:'RTL', 2:'Glide', 3:'Parachute', 4:'Auto' } },
+  FS_BATT_ENABLE:  { values: { 0:'None', 1:'Land', 2:'RTL' } },
+  // Bitmasks
+  ARMING_CHECK:    { bitmask: { 0:'All Checks Enabled (sets value=1)',
+                                1:'Barometer', 2:'Compass', 3:'GPS Lock', 4:'INS',
+                                5:'Parameters', 6:'RC Channels', 7:'Board Voltage',
+                                8:'Battery Level', 9:'Airspeed', 10:'Logging Available',
+                                11:'Hardware safety switch', 12:'GPS Configuration',
+                                13:'System', 14:'Mission', 15:'Rangefinder',
+                                16:'Camera', 17:'AuxAuth', 18:'VisualOdometry', 19:'FFT' } },
+  FENCE_TYPE:      { bitmask: { 0:'Max altitude', 1:'Circle (radius)', 2:'Polygon',
+                                3:'Min altitude' } },
+  BRD_OPTIONS:     { bitmask: { 0:'Skip board safety check',
+                                1:'Disable Stack Overflow detection',
+                                2:'Disable Watchdog',
+                                4:'Allow set internal params',
+                                5:'Allow MAVFTP firmware updates' } },
+  LOG_BITMASK:     { bitmask: { 0:'ATTITUDE_FAST', 1:'ATTITUDE_MED', 2:'GPS', 3:'PM',
+                                4:'CTUN', 5:'NTUN', 6:'RCIN', 7:'IMU', 8:'CMD',
+                                9:'CURRENT', 10:'RCOUT', 11:'OPTFLOW', 12:'PID',
+                                13:'COMPASS', 14:'INAV', 15:'CAMERA', 17:'MOTBATT',
+                                18:'IMU_FAST', 19:'IMU_RAW' } },
+};
+
+const _param = {
+  store: new Map(),          // name -> { value, type, index }
+  count: 0,                  // total param count reported by FC
+  received: 0,               // how many unique names we've seen
+  downloading: false,
+  fresh: false,              // true after a successful full download; cleared on comms loss
+  requestTimer: null,
+  pollTimer: null,           // periodically re-requests missing indices
+  lastRxTime: 0,
+  pendingSet: new Map(),     // name -> { value, timer, retries }
+};
+
+function paramRequestList() {
+  const sys = tele.fcSysId || 1;
+  fcSend(buildFrame(21, [sys, 1]));
+}
+
+function paramRequestRead(name) {
+  const sys = tele.fcSysId || 1;
+  // wire order: int16 param_index, u8 target_sys, u8 target_comp, char[16] param_id
+  fcSend(buildFrame(20, [...i16b(-1), sys, 1, ...paramId16(name)]));
+}
+
+function paramRequestByIndex(idx) {
+  const sys = tele.fcSysId || 1;
+  fcSend(buildFrame(20, [...i16b(idx), sys, 1, ...paramId16('')]));
+}
+
+// ArduPilot accepts the value re-interpreted as a float regardless of underlying
+// type (MAV_PARAM_TYPE_REAL32 = 9). This matches MissionPlanner / MAVProxy behavior.
+function paramSet(name, value) {
+  const sys = tele.fcSysId || 1;
+  // wire order: float value, u8 target_sys, u8 target_comp, char[16] id, u8 type
+  fcSend(buildFrame(23, [...f32b(value), sys, 1, ...paramId16(name), 9]));
+}
+
+function startParamDownload() {
+  if (_param.downloading) return;
+  _param.downloading = true;
+  _param.fresh = false;
+  _param.store.clear();
+  _param.count = 0;
+  _param.received = 0;
+  _param.lastRxTime = Date.now();
+  addLog('PARAM_REQUEST_LIST →', 6);
+  paramRequestList();
+  clearTimeout(_param.requestTimer);
+  // If no PARAM_VALUE arrives within 3 s, retry the bulk request.
+  _param.requestTimer = setTimeout(() => {
+    if (_param.downloading && _param.received === 0) {
+      addLog('No PARAM_VALUE yet, retrying…', 4);
+      paramRequestList();
+      _param.requestTimer = setTimeout(() => {
+        if (_param.downloading && _param.received === 0) {
+          addLog('⚠ Param download failed — FC unresponsive', 3);
+          _param.downloading = false;
+          renderParams();
+        }
+      }, 4000);
+    }
+  }, 3000);
+  // Poll for missing indices once the count is known.
+  clearInterval(_param.pollTimer);
+  _param.pollTimer = setInterval(_paramPollMissing, 1500);
+  renderParams();
+}
+
+function _paramPollMissing() {
+  if (!_param.downloading || _param.count === 0) return;
+  // After ~1.5 s of silence, walk the index list and re-request gaps.
+  if (Date.now() - _param.lastRxTime < 1200) return;
+  const seen = new Set();
+  for (const v of _param.store.values()) seen.add(v.index);
+  let asked = 0;
+  for (let i = 0; i < _param.count && asked < 8; i++) {
+    if (!seen.has(i)) { paramRequestByIndex(i); asked++; }
+  }
+  if (asked === 0) {
+    // All received.
+    _param.downloading = false;
+    _param.fresh = true;
+    clearTimeout(_param.requestTimer);
+    clearInterval(_param.pollTimer);
+    addLog('Params downloaded: ' + _param.store.size + '/' + _param.count, 6);
+    renderParams();
+  }
+}
+
+function onParamValue(name, value, ptype, index, count) {
+  // Reject garbage: ArduPilot param names are uppercase A-Z, digits, underscore.
+  // Mis-synced MAVLink frames (we don't validate CRC) occasionally land here
+  // with junk payloads — drop them so the store and count stay clean.
+  if (!name || !/^[A-Z][A-Z0-9_]{0,15}$/.test(name)) return;
+  // Sanity-clamp the FC's reported total. ArduPilot tops out around ~1500 params;
+  // any value outside [1, 4000] is corruption.
+  if (count < 1 || count > 4000) return;
+
+  _param.lastRxTime = Date.now();
+  _param.count = count;   // trust the latest valid report rather than ratcheting upward
+  const prev = _param.store.get(name);
+  if (!prev) _param.received++;
+  _param.store.set(name, { value, type: ptype, index });
+
+  // Confirm any pending PARAM_SET — FC echoes the new value when accepted.
+  const pending = _param.pendingSet.get(name);
+  if (pending) {
+    if (Math.abs(value - pending.value) < 1e-6 ||
+        (pending.value !== 0 && Math.abs((value - pending.value) / pending.value) < 1e-4)) {
+      clearTimeout(pending.timer);
+      _param.pendingSet.delete(name);
+      showToast(name + ' set to ' + value);
+      addLog('✓ ' + name + ' = ' + value, 5);
+    }
+  }
+
+  // Complete the download once we've received every index.
+  if (_param.downloading && _param.received >= _param.count && _param.count > 0) {
+    _param.downloading = false;
+    _param.fresh = true;
+    clearTimeout(_param.requestTimer);
+    clearInterval(_param.pollTimer);
+    addLog('Params downloaded: ' + _param.store.size, 6);
+  }
+
+  if (_param.drawerOpen) renderParams();
+}
+
+function setParamWithRetry(name, value) {
+  const prev = _param.store.get(name);
+  if (!prev) { addLog('Unknown param ' + name, 3); return; }
+  _param.pendingSet.set(name, {
+    value, retries: 0,
+    timer: setTimeout(function tick() {
+      const pend = _param.pendingSet.get(name);
+      if (!pend) return;
+      if (pend.retries >= 3) {
+        _param.pendingSet.delete(name);
+        addLog('⚠ ' + name + ' set failed (no echo)', 3);
+        renderParams();
+        return;
+      }
+      pend.retries++;
+      paramSet(name, value);
+      paramRequestRead(name);
+      pend.timer = setTimeout(tick, 1500);
+    }, 1500),
+  });
+  paramSet(name, value);
+  paramRequestRead(name); // ask FC to echo the new value so we can confirm
+  addLog('PARAM_SET ' + name + ' = ' + value, 6);
+}
+
+// ── Compass calibration ─────────────────────────────────────────────────────
+// Triggers ArduPilot's onboard mag cal (MAV_CMD_DO_START_MAG_CAL = 42424) and
+// renders a live 3D cube + body-axis gizmo driven by ATTITUDE telemetry so the
+// user can see how far they've rotated. Beeps 1× at start, 2× at 50%, 3× done.
+const _compassCal = { open: false, pct: 0, status: 0, halfBeeped: false, vizRaf: 0, strictness: 'normal' };
+
+// COMPASS_OFFS_MAX values per strictness preset. Lower = stricter solver
+// (ArduPilot default is 1800); higher values let the solver accept larger
+// offsets — useful when the cal won't push past ~90% due to local magnetic
+// interference. Sent before the cal start so the threshold is in place
+// when the user taps Accept.
+const COMPASS_STRICTNESS = { strict: 1800, normal: 2500, relaxed: 4000 };
+
+function setCompassStrictness(level) {
+  if (!COMPASS_STRICTNESS[level]) return;
+  _compassCal.strictness = level;
+  document.querySelectorAll('.cc-strict-pill').forEach(b => {
+    b.classList.toggle('on', b.dataset.level === level);
+  });
+  const v = COMPASS_STRICTNESS[level];
+  if (_param.store && _param.store.has('COMPASS_OFFS_MAX')) {
+    setParamWithRetry('COMPASS_OFFS_MAX', v);
+  } else {
+    paramSet('COMPASS_OFFS_MAX', v);
+    addLog('COMPASS_OFFS_MAX → ' + v + ' (strictness ' + level + ')', 6);
+  }
+}
+
+const CUBE_VERTS = [
+  [-1,-1,-1],[ 1,-1,-1],[ 1, 1,-1],[-1, 1,-1],
+  [-1,-1, 1],[ 1,-1, 1],[ 1, 1, 1],[-1, 1, 1],
+];
+const CUBE_EDGES = [
+  [0,1],[1,2],[2,3],[3,0],   // bottom
+  [4,5],[5,6],[6,7],[7,4],   // top
+  [0,4],[1,5],[2,6],[3,7],   // verticals
+];
+
+// 80 unit-sphere points via Fibonacci spiral. ArduPilot's true sector
+// layout is icosahedral and not exposed by the protocol; this is a clean
+// readable approximation so users see which world-space orientations
+// still need to be covered. Radius 1.55 sits just outside the unit cube.
+const CC_SECTOR_COUNT = 80;
+const CC_SECTOR_RADIUS = 1.55;
+const CC_SECTORS = (() => {
+  const out = [];
+  const phi = Math.PI * (Math.sqrt(5) - 1); // golden angle
+  for (let i = 0; i < CC_SECTOR_COUNT; i++) {
+    const z = 1 - (2 * i + 1) / CC_SECTOR_COUNT; // -1..1, center of slab
+    const r = Math.sqrt(1 - z * z);
+    const t = phi * i;
+    out.push([Math.cos(t) * r * CC_SECTOR_RADIUS,
+              Math.sin(t) * r * CC_SECTOR_RADIUS,
+              z * CC_SECTOR_RADIUS]);
+  }
+  return out;
+})();
+
+// Project a body-frame point (x fwd, y right, z down) through aircraft
+// rotation, then through a fixed isometric camera, to screen coordinates.
+function _ccProject(x, y, z, roll, pitch, yaw) {
+  // Apply aircraft rotation (roll about X, pitch about Y, yaw about Z).
+  // Note: aviation Z is positive-down, so we flip Z for a more intuitive
+  // "Z points up out of the top of the cube" visualization.
+  let zv = -z;
+  let y1 = y * Math.cos(roll) - zv * Math.sin(roll);
+  let z1 = y * Math.sin(roll) + zv * Math.cos(roll);
+  let x2 = x * Math.cos(pitch) + z1 * Math.sin(pitch);
+  let z2 = -x * Math.sin(pitch) + z1 * Math.cos(pitch);
+  let x3 = x2 * Math.cos(yaw) - y1 * Math.sin(yaw);
+  let y3 = x2 * Math.sin(yaw) + y1 * Math.cos(yaw);
+  // Camera: 30° elevation, 35° azimuth iso view.
+  const cAz = Math.cos(-Math.PI*35/180), sAz = Math.sin(-Math.PI*35/180);
+  const cEl = Math.cos( Math.PI*25/180), sEl = Math.sin( Math.PI*25/180);
+  const xc =  x3 * cAz - y3 * sAz;
+  const yc =  x3 * sAz + y3 * cAz;
+  const yE =  yc * cEl - z2 * sEl;
+  // const zE =  yc * sEl + z2 * cEl;  // depth — unused currently
+  const scale = 38;
+  return { sx: xc * scale, sy: -yE * scale };
+}
+
+const CC_TRAIL_MAX = 240;          // ~24 s of trail at 10 Hz sampling
+const CC_TRAIL_SAMPLE_MS = 100;    // sample interval
+
+function _ccUpdateViz() {
+  if (!_compassCal.open) return;
+  const roll  = ((tele.roll  || 0) * Math.PI) / 180;
+  const pitch = ((tele.pitch || 0) * Math.PI) / 180;
+  const yaw   = ((tele.hdg   || 0) * Math.PI) / 180;
+
+  const verts = CUBE_VERTS.map(([x,y,z]) => _ccProject(x, y, z, roll, pitch, yaw));
+  CUBE_EDGES.forEach(([a, b], i) => {
+    const ln = document.getElementById('cc-edge-' + i);
+    if (!ln) return;
+    ln.setAttribute('x1', verts[a].sx); ln.setAttribute('y1', verts[a].sy);
+    ln.setAttribute('x2', verts[b].sx); ln.setAttribute('y2', verts[b].sy);
+  });
+
+  // Re-project sector dots so they rotate with the aircraft.
+  for (let i = 0; i < CC_SECTOR_COUNT; i++) {
+    const d = document.getElementById('cc-sec-' + i);
+    if (!d) continue;
+    const [x,y,z] = CC_SECTORS[i];
+    const sp = _ccProject(x, y, z, roll, pitch, yaw);
+    d.setAttribute('cx', sp.sx); d.setAttribute('cy', sp.sy);
+  }
+
+  const axLen = 1.5;
+  const setAxis = (axisId, lblId, end) => {
+    const a = document.getElementById(axisId);
+    const l = document.getElementById(lblId);
+    a.setAttribute('x1', 0); a.setAttribute('y1', 0);
+    a.setAttribute('x2', end.sx); a.setAttribute('y2', end.sy);
+    if (l) {
+      const dx = end.sx * 1.12, dy = end.sy * 1.12;
+      l.setAttribute('x', dx - 4); l.setAttribute('y', dy + 4);
+    }
+  };
+  const xEnd = _ccProject(axLen, 0, 0, roll, pitch, yaw);
+  setAxis('cc-axis-x', 'cc-label-x', xEnd);
+  setAxis('cc-axis-y', 'cc-label-y', _ccProject(0, axLen, 0, roll, pitch, yaw));
+  setAxis('cc-axis-z', 'cc-label-z', _ccProject(0, 0, axLen, roll, pitch, yaw));
+
+  // Nose dot follows the X-axis tip
+  const noseDot = document.getElementById('cc-nose-dot');
+  if (noseDot) { noseDot.setAttribute('cx', xEnd.sx); noseDot.setAttribute('cy', xEnd.sy); }
+
+  // Sample & extend the nose-direction trail. We project a slightly outboard
+  // point (1.5 × the unit cube) so the trail rides on a sphere of consistent
+  // radius and shows clearly where the nose has pointed during cal.
+  const now = performance.now();
+  if (now - (_compassCal.lastSample || 0) >= CC_TRAIL_SAMPLE_MS) {
+    _compassCal.lastSample = now;
+    if (!_compassCal.trail) _compassCal.trail = [];
+    const p = _ccProject(1.5, 0, 0, roll, pitch, yaw);
+    // Skip if essentially identical to previous sample (aircraft stationary)
+    const last = _compassCal.trail[_compassCal.trail.length - 1];
+    if (!last || Math.hypot(last.sx - p.sx, last.sy - p.sy) > 1.2) {
+      _compassCal.trail.push(p);
+      if (_compassCal.trail.length > CC_TRAIL_MAX) _compassCal.trail.shift();
+      const poly = document.getElementById('cc-trail');
+      if (poly) poly.setAttribute('points',
+        _compassCal.trail.map(q => q.sx.toFixed(1) + ',' + q.sy.toFixed(1)).join(' '));
+    }
+  }
+
+  _compassCal.vizRaf = requestAnimationFrame(_ccUpdateViz);
+}
+
+function onMagCalStartRejected(res) {
+  const status = document.getElementById('cc-status');
+  const fill   = document.getElementById('cc-progress-fill');
+  status.className = 'bad';
+  fill.className = 'fail';
+  let msg;
+  if (res === 1)      msg = 'TEMP REJECTED — disarm the aircraft (or finish any running cal) and try again';
+  else if (res === 2) msg = 'DENIED — disarm the aircraft and try again';
+  else if (res === 3) msg = 'UNSUPPORTED — firmware too old for onboard cal';
+  else if (res === 4) msg = 'FAILED — likely armed, or no COMPASS_USE-enabled compass';
+  else                msg = 'Rejected by FC (result ' + res + ')';
+  status.textContent = msg;
+  document.getElementById('cc-restart').style.display = 'block';
+  document.getElementById('cc-accept').style.display = 'none';
+  clearTimeout(_compassCal.diagTimer);
+  beep(280, 600, 0.45);
+  if (typeof navigator.vibrate === 'function') navigator.vibrate([200, 80, 200]);
+}
+
+function openCompassCal() {
+  if (_compassCal.open) return;
+  _compassCal.open = true;
+  _compassCal.pct = 0;
+  _compassCal.status = 0;
+  _compassCal.halfBeeped = false;
+  _compassCal.firstProgress = false;
+  _compassCal.stuckHintShown = false;
+  _compassCal.acceptShown = false;
+  _compassCal.accepting = false;
+  _compassCal.trail = [];
+  _compassCal.lastSample = 0;
+  const poly = document.getElementById('cc-trail');
+  if (poly) poly.setAttribute('points', '');
+  // Lazily build the 80 sector dots once and reuse on subsequent opens.
+  const secGroup = document.getElementById('cc-sectors');
+  if (secGroup && !secGroup.firstChild) {
+    for (let i = 0; i < CC_SECTOR_COUNT; i++) {
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('id', 'cc-sec-' + i);
+      c.setAttribute('r', '1.8');
+      c.setAttribute('fill', '#5a1a1a');
+      c.setAttribute('opacity', '0.7');
+      secGroup.appendChild(c);
+    }
+  } else if (secGroup) {
+    // Reset colors on re-open
+    for (let i = 0; i < CC_SECTOR_COUNT; i++) {
+      const d = document.getElementById('cc-sec-' + i);
+      if (d) { d.setAttribute('fill', '#5a1a1a'); d.setAttribute('opacity', '0.7'); }
+    }
+  }
+  document.getElementById('compass-cal-modal').style.display = 'flex';
+  document.getElementById('cc-progress-fill').className = '';
+  document.getElementById('cc-progress-fill').style.width = '0%';
+  document.getElementById('cc-progress-text').textContent = '0%';
+  document.getElementById('cc-status').className = '';
+  document.getElementById('cc-status').textContent = 'Starting…';
+  document.getElementById('cc-restart').style.display = 'none';
+  document.getElementById('cc-accept').style.display = 'none';
+  // Switch to MANUAL (custom mode 0 on ArduPlane) — gives the user direct
+  // control and prevents any autonomous behavior from interfering while the
+  // airframe is rotated by hand.
+  sendMode(0);
+  // Apply the selected strictness so the solver uses the right offset cap
+  // when the user taps Accept at the end.
+  const strictVal = COMPASS_STRICTNESS[_compassCal.strictness] || COMPASS_STRICTNESS.normal;
+  paramSet('COMPASS_OFFS_MAX', strictVal);
+  addLog('Compass cal: → MANUAL, strictness ' + _compassCal.strictness +
+         ' (COMPASS_OFFS_MAX=' + strictVal + ')', 6);
+
+  beep(900, 250, 0.45);  // 1× at start
+  if (typeof navigator.vibrate === 'function') navigator.vibrate(80);
+  // Small delay so the FC processes the mode change before the cal start.
+  // MAV_CMD_DO_START_MAG_CAL: p1=mask(0=all), p2=retry, p3=autosave, p4=delay, p5=autoreboot
+  setTimeout(() => {
+    if (!_compassCal.open) return;
+    fcSend(cmdLong(42424, 0, 0, 1, 0, 0, 0, 0));
+    // ArduPilot 4.4+ favors SET_MESSAGE_INTERVAL (cmd 511) over REQUEST_DATA_STREAM.
+    // Ask explicitly for MAG_CAL_PROGRESS (191) at 2 Hz and MAG_CAL_REPORT (192) on event.
+    // interval_us: 500000 → 2 Hz, -1 → default (event-driven).
+    fcSend(cmdLong(511, 191, 500000));
+    fcSend(cmdLong(511, 192, -1));
+  }, 400);
+  addLog('Compass calibration started', 6);
+  // If we don't see a progress packet within 4 s, warn the user — usually means
+  // the FC rejected the start (e.g. armed) or the stream isn't being delivered.
+  clearTimeout(_compassCal.diagTimer);
+  _compassCal.diagTimer = setTimeout(() => {
+    if (_compassCal.open && !_compassCal.firstProgress) {
+      addLog('⚠ No MAG_CAL_PROGRESS yet — check arm state / mode', 3);
+      document.getElementById('cc-status').textContent =
+        'No progress from FC. Is the aircraft disarmed?';
+    }
+  }, 4000);
+  _ccUpdateViz();
+}
+
+function cancelCompassCal() {
+  if (!_compassCal.open) return;
+  // MAV_CMD_DO_CANCEL_MAG_CAL: p1=mask(0=all)
+  fcSend(cmdLong(42426, 0));
+  closeCompassCal('cancelled');
+}
+
+function closeCompassCal(reason) {
+  _compassCal.open = false;
+  _compassCal.accepting = false;
+  if (_compassCal.vizRaf) cancelAnimationFrame(_compassCal.vizRaf);
+  _compassCal.vizRaf = 0;
+  clearTimeout(_compassCal.diagTimer);
+  document.getElementById('compass-cal-modal').style.display = 'none';
+  document.getElementById('cc-accept').style.display = 'none';
+  if (reason) addLog('Compass cal ' + reason, reason === 'success' ? 5 : 4);
+}
+
+function restartCompassCal() {
+  closeCompassCal();
+  setTimeout(openCompassCal, 150);
+}
+
+const MAG_CAL_STATUS = {
+  0:'Not started', 1:'Waiting…', 2:'Step 1 — rotate slowly',
+  3:'Step 2 — confirming', 4:'Success', 5:'Failed',
+  6:'Bad orientation', 7:'Bad radius',
+};
+
+function onMagCalProgress(m) {
+  if (!_compassCal.open) return;
+  if (!_compassCal.firstProgress) {
+    _compassCal.firstProgress = true;
+    addLog('MAG_CAL_PROGRESS streaming — rotate aircraft', 6);
+  }
+  const pct = Math.max(0, Math.min(100, m.pct | 0));
+  _compassCal.status = m.status;
+  document.getElementById('cc-progress-fill').style.width = pct + '%';
+  document.getElementById('cc-progress-text').textContent = pct + '%';
+
+  // Paint sector dots from completion_mask (80 bits across 10 bytes).
+  // ArduPilot's true icosahedral mapping isn't exposed, so we colour the
+  // Fibonacci dots by bit index; the count of green vs red is still
+  // accurate even if the spatial mapping is approximate.
+  if (m.completionMask) {
+    for (let i = 0; i < CC_SECTOR_COUNT; i++) {
+      const d = document.getElementById('cc-sec-' + i);
+      if (!d) continue;
+      const covered = (m.completionMask[i >> 3] >> (i & 7)) & 1;
+      d.setAttribute('fill', covered ? '#3fb950' : '#5a1a1a');
+      d.setAttribute('opacity', covered ? '0.95' : '0.7');
+    }
+  }
+
+  let statusTxt = (MAG_CAL_STATUS[m.status] || 'Status ' + m.status) +
+                  (m.compassId ? '  (compass ' + m.compassId + ')' : '');
+  // ArduPilot computes pct from sphere-sector coverage; the last few sectors
+  // are awkward orientations (upside-down, on the side). Prompt the user.
+  if (pct >= 90 && pct < 100 && m.status === 2) {
+    statusTxt += ' — keep rotating, or tap Accept to use current samples';
+    if (!_compassCal.stuckHintShown) {
+      _compassCal.stuckHintShown = true;
+      addLog('Cal near complete — keep rotating, or tap Accept to use current samples', 5);
+    }
+  }
+  if (_compassCal.accepting) statusTxt = 'Accepting cal — running solver…';
+  document.getElementById('cc-status').textContent = statusTxt;
+
+  // Reveal Accept once enough sectors are covered that a solve is likely
+  // viable. Below 90% the fit is usually poor — keep the user rotating.
+  if (pct >= 90 && !_compassCal.acceptShown && m.status === 2) {
+    _compassCal.acceptShown = true;
+    document.getElementById('cc-accept').style.display = 'block';
+  }
+
+  // 2× beep at the 50% mark
+  if (!_compassCal.halfBeeped && pct >= 50) {
+    _compassCal.halfBeeped = true;
+    beep(1100, 160, 0.4);
+    setTimeout(() => beep(1100, 160, 0.4), 220);
+    if (typeof navigator.vibrate === 'function') navigator.vibrate([80, 60, 80]);
+  }
+  _compassCal.pct = pct;
+}
+
+function acceptCompassCal() {
+  if (!_compassCal.open || _compassCal.accepting) return;
+  _compassCal.accepting = true;
+  // MAV_CMD_DO_ACCEPT_MAG_CAL: p1=mask(0=all compasses). FC will run the
+  // solver on whatever samples it has and emit MAG_CAL_REPORT.
+  fcSend(cmdLong(42425, 0));
+  document.getElementById('cc-accept').style.display = 'none';
+  document.getElementById('cc-status').textContent = 'Accepting cal — running solver…';
+  showToast('Accepting cal — running solver…', 2500);
+  addLog('Compass cal accept sent — waiting for solver', 6);
+}
+
+function onMagCalReport(m) {
+  if (!_compassCal.open) return;
+  _compassCal.accepting = false;
+  document.getElementById('cc-accept').style.display = 'none';
+  const status = document.getElementById('cc-status');
+  const fill   = document.getElementById('cc-progress-fill');
+  if (m.status === 4) {
+    // 3× ascending beeps at completion
+    beep(900, 140, 0.45);
+    setTimeout(() => beep(1100, 140, 0.45), 180);
+    setTimeout(() => beep(1400, 220, 0.5),  360);
+    if (typeof navigator.vibrate === 'function') navigator.vibrate([100, 50, 100, 50, 200]);
+    status.textContent = 'Success — fitness ' + (m.fitness ? m.fitness.toFixed(2) : '?') +
+                         (m.autosaved ? ' (saved)' : ' (not saved)');
+    status.className = 'good';
+    fill.className = 'done';
+    fill.style.width = '100%';
+    document.getElementById('cc-progress-text').textContent = '100%';
+    document.getElementById('cc-cancel').textContent = 'Close';
+    addLog('✓ Compass cal success — fitness ' + (m.fitness||0).toFixed(2), 5);
+  } else {
+    beep(280, 700, 0.5);
+    if (typeof navigator.vibrate === 'function') navigator.vibrate([300, 100, 300]);
+    status.textContent = (MAG_CAL_STATUS[m.status] || 'Failed') +
+                         ' — fitness ' + (m.fitness ? m.fitness.toFixed(2) : '?');
+    status.className = 'bad';
+    fill.className = 'fail';
+    document.getElementById('cc-cancel').textContent = 'Close';
+    document.getElementById('cc-restart').style.display = 'block';
+    addLog('⚠ Compass cal failed (' + (MAG_CAL_STATUS[m.status] || m.status) + ')', 3);
+  }
+}
+
+// ── Calibrations picker ─────────────────────────────────────────────────────
+// Single entry point for sensor calibrations. Lets the user pick which sensor
+// to calibrate before any FC command is sent.
+function openCalibrationsPicker() {
+  if (_compassCal.open || _accelCal.open) return;
+  document.getElementById('cal-pick-modal').style.display = 'flex';
+}
+function closeCalibrationsPicker() {
+  document.getElementById('cal-pick-modal').style.display = 'none';
+}
+function pickCalibration(which) {
+  closeCalibrationsPicker();
+  if (which === 'compass') setTimeout(openCompassCal, 120);
+  else if (which === 'accel') setTimeout(openAccelCal, 120);
+}
+
+// ── Accelerometer calibration ───────────────────────────────────────────────
+// Uses ArduPilot's simple "level" accel cal: MAV_CMD_PREFLIGHT_CALIBRATION
+// (241) with param5=4. The FC takes a single snapshot while the airframe is
+// held flat and saves it as the level reference. ArduPlane reports the full
+// 6-position cal (param5=1) as UNSUPPORTED on most builds, so we stick with
+// param5=4 here — it's quick and universally supported.
+const _accelCal = { open: false, running: false, done: false };
+
+function _renderAccelIdle() {
+  document.getElementById('ac-pos-icon').textContent = '🛬';
+  document.getElementById('ac-pos-num').textContent  = 'LEVEL CALIBRATION';
+  document.getElementById('ac-pos-name').textContent = 'PLACE LEVEL';
+  document.getElementById('ac-pos-hint').textContent =
+    'Set the plane on a flat, level surface. When ready, tap START CAL.';
+  const fill = document.getElementById('ac-progress-fill');
+  fill.className = '';
+  fill.style.width = '0%';
+  document.getElementById('ac-progress-text').textContent = '—';
+}
+
+function openAccelCal() {
+  if (_accelCal.open) return;
+  _accelCal.open = true;
+  _accelCal.running = false;
+  _accelCal.done = false;
+  document.getElementById('accel-cal-modal').style.display = 'flex';
+  document.getElementById('ac-status').className = '';
+  document.getElementById('ac-status').textContent =
+    'Ready — set the plane level, then tap START CAL.';
+  document.getElementById('ac-restart').style.display = 'none';
+  const next = document.getElementById('ac-next');
+  next.style.display = 'block';
+  next.disabled = false;
+  next.textContent = 'Start Cal';
+  document.getElementById('ac-cancel').textContent = 'Cancel';
+  _renderAccelIdle();
+  // Drop into MANUAL so the cal runs without any auto-mode interference.
+  sendMode(0);
+  addLog('Accel cal ready (level / simple)', 6);
+}
+
+function accelCalStart() {
+  if (!_accelCal.open || _accelCal.running || _accelCal.done) return;
+  _accelCal.running = true;
+  document.getElementById('ac-next').disabled = true;
+  document.getElementById('ac-status').textContent = 'Sampling — hold steady…';
+  const fill = document.getElementById('ac-progress-fill');
+  fill.className = '';
+  fill.style.width = '60%';
+  document.getElementById('ac-progress-text').textContent = '…';
+  beep(900, 250, 0.45);
+  if (typeof navigator.vibrate === 'function') navigator.vibrate(80);
+  // MAV_CMD_PREFLIGHT_CALIBRATION (241): p5=4 → simple level cal (single snapshot)
+  fcSend(cmdLong(241, 0, 0, 0, 0, 4, 0, 0));
+  addLog('Accel cal: PREFLIGHT_CALIBRATION p5=4', 6);
+  clearTimeout(_accelCal.diagTimer);
+  _accelCal.diagTimer = setTimeout(() => {
+    if (_accelCal.open && _accelCal.running && !_accelCal.done) {
+      document.getElementById('ac-status').textContent =
+        'No response from FC — is the plane disarmed and connected?';
+      addLog('⚠ No accel-cal ACK after 4 s', 3);
+    }
+  }, 4000);
+}
+
+function cancelAccelCal() {
+  if (!_accelCal.open) return;
+  closeAccelCal('cancelled');
+}
+
+function closeAccelCal(reason) {
+  _accelCal.open = false;
+  _accelCal.running = false;
+  clearTimeout(_accelCal.diagTimer);
+  document.getElementById('accel-cal-modal').style.display = 'none';
+  if (reason) addLog('Accel cal ' + reason, reason === 'success' ? 5 : 4);
+}
+
+function restartAccelCal() {
+  closeAccelCal();
+  setTimeout(openAccelCal, 150);
+}
+
+function onAccelCalAck(res) {
+  if (!_accelCal.open || _accelCal.done) return;
+  clearTimeout(_accelCal.diagTimer);
+  const status = document.getElementById('ac-status');
+  const fill   = document.getElementById('ac-progress-fill');
+  if (res === 0) {
+    _accelCal.done = true;
+    _accelCal.running = false;
+    fill.className = 'done';
+    fill.style.width = '100%';
+    document.getElementById('ac-progress-text').textContent = '✓';
+    status.className = 'good';
+    status.textContent = 'Success — level calibration saved.';
+    document.getElementById('ac-next').style.display = 'none';
+    document.getElementById('ac-cancel').textContent = 'Close';
+    beep(900, 140, 0.45);
+    setTimeout(() => beep(1100, 140, 0.45), 180);
+    setTimeout(() => beep(1400, 220, 0.5),  360);
+    if (typeof navigator.vibrate === 'function') navigator.vibrate([100, 50, 100, 50, 200]);
+    addLog('✓ Accel level cal saved', 5);
+    return;
+  }
+  // Anything non-zero is a failure of some kind — surface a useful message
+  // and let the user retry once they've addressed it.
+  _accelCal.running = false;
+  fill.className = 'fail';
+  status.className = 'bad';
+  let msg;
+  if      (res === 1) msg = 'TEMP REJECTED — disarm the aircraft (or finish any running cal) and try again';
+  else if (res === 2) msg = 'DENIED — disarm the aircraft and try again';
+  else if (res === 3) msg = 'UNSUPPORTED — firmware does not support this cal';
+  else if (res === 4) msg = 'FAILED — could not sample (vibration? not level?)';
+  else if (res === 5) msg = 'IN PROGRESS — another cal is already running';
+  else                msg = 'Rejected by FC (result ' + res + ')';
+  status.textContent = msg;
+  document.getElementById('ac-next').disabled = false;
+  document.getElementById('ac-restart').style.display = 'block';
+  beep(280, 600, 0.45);
+  if (typeof navigator.vibrate === 'function') navigator.vibrate([200, 80, 200]);
+  addLog('⚠ Accel cal failed: ' + msg, 3);
+}
+
+function onAccelCalText(txt) {
+  // Surface explicit FC verdicts. The simple cal usually finishes via the
+  // COMMAND_ACK path, but some firmwares emit a STATUSTEXT either way.
+  if (!_accelCal.open || _accelCal.done) return;
+  const lc = txt.toLowerCase();
+  if (lc.includes('calibration successful') || lc.includes('calibration success')) {
+    onAccelCalAck(0);
+  } else if (lc.includes('calibration failed') || lc.includes('calibration fail')) {
+    onAccelCalAck(4);
+  }
+}
+
+// ── Audio / vibration alerts ──────────────────────────────────────────────────
+let _audioCtx = null;
+function getAudioCtx() {
+  if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return _audioCtx;
+}
+function beep(freq=880, durMs=200, vol=0.35) {
+  try {
+    const ctx = getAudioCtx();
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = freq; osc.type = 'sine';
+    gain.gain.setValueAtTime(vol, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + durMs/1000);
+    osc.start(ctx.currentTime); osc.stop(ctx.currentTime + durMs/1000);
+  } catch(e) {}
+}
+function vibe(pattern) { try { navigator.vibrate(pattern); } catch(e) {} }
+
+const _alert = { prevArmed: false, prevGpsFix: 0, lastBattWarn: 0, lastBattCrit: 0, prevBattPct: null, prevMode: null };
+
+function checkAlerts() {
+  const now = Date.now();
+
+  // Armed → Disarmed while airborne (emergency)
+  if (_alert.prevArmed && !tele.armed && tele.altRel != null && tele.altRel > 5) {
+    beep(220, 800, 0.5); setTimeout(() => beep(220, 800, 0.5), 900);
+    vibe([200, 100, 200, 100, 500]);
+    addLog('⚠ DISARMED while airborne!', 3);
+  }
+  // Armed → Disarmed (normal on ground)
+  else if (_alert.prevArmed && !tele.armed) {
+    beep(600, 180); setTimeout(() => beep(400, 280), 220);
+    vibe([80]);
+  }
+  // Whenever we transition to disarmed, start the safety-override auto-off timer
+  if (_alert.prevArmed && !tele.armed) _maybeAutoClearOverride();
+  // Disarmed → Armed
+  if (!_alert.prevArmed && tele.armed) {
+    beep(1200, 120); setTimeout(() => beep(1400, 120), 150);
+    vibe([80, 50, 80]);
+  }
+  _alert.prevArmed = tele.armed;
+
+  // Mode changed (confirmed by FC heartbeat) — three ascending tones
+  if (_alert.prevMode !== null && tele.modeName !== _alert.prevMode) {
+    beep(1400, 200);
+    vibe([30, 30, 60]);
+    if (tele.modeName !== 'GUIDED') clearGuidedTarget();
+  }
+  _alert.prevMode = tele.modeName;
+
+  // GPS lost
+  if (_alert.prevGpsFix >= 3 && tele.gpsFix < 3) {
+    beep(440, 400); setTimeout(() => beep(350, 400), 450);
+    vibe([300, 100, 300]);
+    addLog('⚠ GPS fix lost!', 3);
+  }
+  // GPS recovered
+  if (_alert.prevGpsFix < 3 && tele.gpsFix >= 3 && _alert.prevGpsFix !== 0) {
+    beep(880, 150); setTimeout(() => beep(1100, 150), 170);
+  }
+  _alert.prevGpsFix = tele.gpsFix;
+
+  // Battery warnings (only when armed)
+  if (tele.armed && tele.battPct != null) {
+    if (tele.battPct <= 10 && now - _alert.lastBattCrit > 10000) {
+      beep(880,150); setTimeout(()=>beep(880,150),200); setTimeout(()=>beep(880,400),400);
+      vibe([100,50,100,50,300]);
+      _alert.lastBattCrit = now;
+      addLog('⚠ CRITICAL battery: ' + tele.battPct + '%', 2);
+    } else if (tele.battPct <= 20 && tele.battPct > 10 && now - _alert.lastBattWarn > 30000) {
+      beep(660, 300); setTimeout(() => beep(660, 300), 400);
+      vibe([200, 100, 200]);
+      _alert.lastBattWarn = now;
+      addLog('⚠ Low battery: ' + tele.battPct + '%', 4);
+    }
+  }
+}
+
+function sendMode(m) {
+  addLog('→ SET_MODE ' + m + ' (sys=' + (tele.fcSysId||1) + ')', 6);
+  clearTimeout(_pendingModeTimer);
+  _pendingMode = m;
+  _pendingModeTimer = setTimeout(() => {
+    if (_pendingMode !== null) addLog('⚠ Mode not confirmed — FC may not have received command', 4);
+    _pendingMode = null;
+  }, 3000);
+  fcSend(setModeFrame(m)); fcSend(cmdLong(176,1,m));
+  setTimeout(() => { fcSend(setModeFrame(m)); fcSend(cmdLong(176,1,m)); }, 200);
+  setTimeout(() => { fcSend(setModeFrame(m)); fcSend(cmdLong(176,1,m)); }, 500);
+}
+
+// ── ARM hold-to-confirm ───────────────────────────────────────────────────────
+let armRaf = null, armStart = 0;
+const HOLD_MS = 1000, CIRC = 138.23;
+
+function armDown(e) {
+  e.preventDefault();
+  if (armRaf) { cancelAnimationFrame(armRaf); armRaf = null; } // cancel any previous animation
+  armStart = performance.now();
+  (function tick() {
+    const t = Math.min((performance.now() - armStart) / HOLD_MS, 1);
+    document.getElementById('arm-progress').setAttribute('stroke-dashoffset', CIRC*(1-t));
+    if (t < 1) armRaf = requestAnimationFrame(tick);
+    else { armRaf = null; commitArm(); }
+  })();
+}
+function armUp() {
+  if (armRaf) { cancelAnimationFrame(armRaf); armRaf = null; }
+  document.getElementById('arm-progress').setAttribute('stroke-dashoffset', CIRC);
+}
+function commitArm() {
+  armUp();
+  if (tele.armed) {
+    // Disarm — never force
+    fcSend(cmdLong(400, 0));
+  } else {
+    const force = document.getElementById('force-arm-chk')?.checked;
+    // param2=21196 bypasses pre-arm checks (matches MissionPlanner force-arm)
+    fcSend(cmdLong(400, 1, force ? 21196 : 0));
+    if (force) addLog('⚠ FORCE-ARM sent (pre-arm bypass)', 4);
+  }
+}
+
+function onForceArmToggle() {
+  const chk = document.getElementById('force-arm-chk');
+  const row = document.getElementById('force-arm-row');
+  if (row) row.classList.toggle('on', !!chk?.checked);
+  if (chk?.checked) addLog('⚠ Safety override armed — next ARM will force', 4);
+}
+
+// Auto-clear safety override 5 s after disarm (matches planner behavior)
+let _overrideAutoOffTimer = null;
+function _maybeAutoClearOverride() {
+  const chk = document.getElementById('force-arm-chk');
+  if (!chk?.checked) return;
+  clearTimeout(_overrideAutoOffTimer);
+  _overrideAutoOffTimer = setTimeout(() => {
+    if (!tele.armed && chk.checked) {
+      chk.checked = false;
+      onForceArmToggle();
+      addLog('Safety override auto-cleared (5 s after disarm)', 6);
+    }
+  }, 5000);
+}
+
+// ── UI updates ────────────────────────────────────────────────────────────────
+let updatePending = false;
+function scheduleUpdate() {
+  if (!updatePending) {
+    updatePending = true;
+    requestAnimationFrame(() => { updatePending = false; checkAlerts(); updateUI(); });
+  }
+}
+
+function fmt(v, d=1) { return v != null ? v.toFixed(d) : '—'; }
+
+function updateUI() {
+  document.getElementById('h-spd').textContent = tele.groundspeed != null ? (tele.groundspeed*3.6).toFixed(1) : '—';
+  document.getElementById('h-alt').textContent = fmt(tele.altRel);
+  document.getElementById('h-clb').textContent = tele.climbRate != null ? (tele.climbRate>=0?'+':'')+tele.climbRate.toFixed(1) : '—';
+  document.getElementById('h-hdg').textContent = tele.hdg != null ? Math.round(tele.hdg) : '—';
+  document.getElementById('h-rol').textContent = fmt(tele.roll);
+  document.getElementById('h-pit').textContent = fmt(tele.pitch);
+  document.getElementById('h-thr').textContent = tele.throttle != null ? tele.throttle : '—';
+
+  const fix = tele.gpsFix >= 3;
+  document.getElementById('h-gps').textContent = (fix?'✓ ':'✗ ')+tele.gpsSats;
+  document.getElementById('gps-cell').className = 'hud-cell '+(fix?'gps-ok':'gps-bad');
+
+  const pct = tele.battPct ?? 0;
+  const fill = document.getElementById('bat-fill');
+  fill.style.width = Math.max(0,Math.min(100,pct))+'%';
+  fill.style.background = pct>30?'#3fb950':pct>15?'#f0a500':'#f85149';
+  document.getElementById('bat-val').textContent =
+    (tele.volts!=null?tele.volts.toFixed(1)+'V':'—V')+'  '+(tele.battPct!=null?tele.battPct+'%':'—%');
+
+  document.getElementById('mode-badge').textContent = tele.modeName;
+  const ab = document.getElementById('arm-badge');
+  ab.textContent = tele.armed ? 'ARMED' : 'DISARMED';
+  ab.className   = tele.armed ? 'armed' : 'disarmed';
+
+  document.getElementById('arm-btn').className = tele.armed ? 'armed' : '';
+  document.getElementById('arm-label').textContent = tele.armed ? 'DISARM' : 'ARM';
+  document.getElementById('arm-progress').style.stroke = tele.armed ? '#f85149' : '#3fb950';
+
+  document.querySelectorAll('#modes .mode-btn').forEach(b =>
+    b.classList.toggle('active', +b.dataset.mode === tele.customMode));
+
+  document.getElementById('guided-alt-row').style.display = tele.modeName === 'GUIDED' ? 'flex' : 'none';
+
+  // Distance & bearing to home
+  if (tele.lat != null && tele.homeLat != null && tele.homeLat !== 0) {
+    const d = haversineDist(tele.lat, tele.lon, tele.homeLat, tele.homeLon);
+    const b = bearingDeg(tele.lat, tele.lon, tele.homeLat, tele.homeLon);
+    document.getElementById('h-dist').textContent = d >= 1000 ? (d/1000).toFixed(1) : Math.round(d);
+    document.getElementById('h-dist-unit').textContent = d >= 1000 ? 'km' : 'm';
+    document.getElementById('h-brg').textContent = Math.round(b);
+  }
+
+  // ESC telemetry — ensure cells exist for every detected ESC, then update values
+  ensureEscCells(tele.escCount);
+  const showPerEsc = tele.escCount > 1;
+  const escMax = Math.max(tele.escCount, 1);
+  for (let i = 0; i < escMax; i++) {
+    const idx  = i + 1;
+    const rpm  = tele.escRpms[i];
+    const tmp  = tele.escTemps[i];
+    const rpmEl = document.getElementById('h-esc' + idx + '-rpm');
+    const tmpEl = document.getElementById('h-esc' + idx + '-tmp');
+    const rpmLbl = document.getElementById('lbl-esc' + idx + '-rpm');
+    const tmpLbl = document.getElementById('lbl-esc' + idx + '-tmp');
+    if (rpmEl)  rpmEl.textContent = rpm != null ? rpm.toLocaleString() : '—';
+    if (tmpEl)  tmpEl.textContent = tmp != null ? tmp : '—';
+    if (rpmLbl) rpmLbl.textContent = showPerEsc ? 'ESC' + idx + ' RPM'  : 'ESC RPM';
+    if (tmpLbl) tmpLbl.textContent = showPerEsc ? 'ESC' + idx + ' TEMP' : 'ESC TEMP';
+    const tmpCell = document.getElementById('cell-esc' + idx + '-tmp');
+    if (tmpCell) tmpCell.className =
+      'hud-cell' + (tmp != null && tmp >= 80 ? ' gps-bad' : tmp != null && tmp >= 60 ? ' warn' : '');
+  }
+}
+
+// ── Dynamic ESC cells (created when >1 ESC reports) ───────────────────────────
+function ensureEscCells(count) {
+  const grid = document.getElementById('hud-grid');
+  if (!grid) return;
+  for (let i = 2; i <= count; i++) {
+    if (document.querySelector('[data-cell-id="esc' + i + '-rpm"]')) continue;
+    const rpmCell = document.createElement('div');
+    rpmCell.className = 'hud-cell';
+    rpmCell.dataset.cellId = 'esc' + i + '-rpm';
+    rpmCell.innerHTML =
+      '<div class="hud-lbl" id="lbl-esc' + i + '-rpm">ESC' + i + ' RPM</div>' +
+      '<div class="hud-val" id="h-esc' + i + '-rpm">—</div>';
+    const tmpCell = document.createElement('div');
+    tmpCell.className = 'hud-cell';
+    tmpCell.id = 'cell-esc' + i + '-tmp';
+    tmpCell.dataset.cellId = 'esc' + i + '-tmp';
+    tmpCell.innerHTML =
+      '<div class="hud-lbl" id="lbl-esc' + i + '-tmp">ESC' + i + ' TEMP</div>' +
+      '<div class="hud-val" id="h-esc' + i + '-tmp">—</div>' +
+      '<div class="hud-unit">°C</div>';
+    grid.appendChild(rpmCell);
+    grid.appendChild(tmpCell);
+  }
+  // After creating new cells, re-apply any saved order so they land in the right spot
+  applyHudOrder();
+}
+
+// ── HUD cell drag-to-reorder ──────────────────────────────────────────────────
+const HUD_ORDER_KEY = 'gcs.hudOrder';
+function loadHudOrder() {
+  try { return JSON.parse(localStorage.getItem(HUD_ORDER_KEY)) || []; }
+  catch { return []; }
+}
+function saveHudOrder() {
+  const ids = [...document.querySelectorAll('#hud-grid .hud-cell')].map(c => c.dataset.cellId);
+  try { localStorage.setItem(HUD_ORDER_KEY, JSON.stringify(ids)); } catch {}
+}
+function applyHudOrder() {
+  const order = loadHudOrder();
+  if (!order.length) return;
+  const grid = document.getElementById('hud-grid');
+  if (!grid) return;
+  // Reorder existing cells per saved order; unknown cells stay in current relative position at the end.
+  const byId = new Map([...grid.querySelectorAll('.hud-cell')].map(c => [c.dataset.cellId, c]));
+  order.forEach(id => { const c = byId.get(id); if (c) { grid.appendChild(c); byId.delete(id); } });
+  byId.forEach(c => grid.appendChild(c));  // any new/unknown cells go at the end
+}
+
+(function initHudDragReorder() {
+  const grid = document.getElementById('hud-grid');
+  if (!grid) return;
+  let dragCell = null, dragGhostXY = null, startXY = null, longPressTimer = null, cellRect = null;
+  let activePointerId = null, captureHolder = null;
+
+  function releaseCapture() {
+    if (captureHolder && activePointerId != null) {
+      try { captureHolder.releasePointerCapture(activePointerId); } catch {}
+    }
+    captureHolder = null;
+    activePointerId = null;
+  }
+
+  function clearDropTargets() {
+    document.querySelectorAll('#hud-grid .hud-cell.drop-target')
+      .forEach(c => c.classList.remove('drop-target'));
+  }
+
+  function startDrag(cell, x, y) {
+    if (typeof navigator.vibrate === 'function') navigator.vibrate(20);
+    cellRect = cell.getBoundingClientRect();
+    // Lock width so the fixed-position clone keeps its visual size
+    cell.style.width  = cellRect.width  + 'px';
+    cell.style.height = cellRect.height + 'px';
+    cell.classList.add('dragging');
+    dragGhostXY = { offX: x - cellRect.left, offY: y - cellRect.top };
+    cell.style.left = (x - dragGhostXY.offX) + 'px';
+    cell.style.top  = (y - dragGhostXY.offY) + 'px';
+    dragCell = cell;
+  }
+
+  function endDrag(commit) {
+    if (!dragCell) { releaseCapture(); return; }
+    const target = document.querySelector('#hud-grid .hud-cell.drop-target');
+    if (commit && target && target !== dragCell) {
+      // Swap DOM positions: insert dragCell before target, target where dragCell was
+      const parent = dragCell.parentNode;
+      const placeholder = document.createElement('div');
+      parent.insertBefore(placeholder, dragCell);
+      parent.insertBefore(dragCell, target);
+      parent.insertBefore(target, placeholder);
+      parent.removeChild(placeholder);
+      saveHudOrder();
+    }
+    dragCell.classList.remove('dragging');
+    dragCell.style.left = dragCell.style.top = dragCell.style.width = dragCell.style.height = '';
+    clearDropTargets();
+    dragCell = null;
+    releaseCapture();
+  }
+
+  grid.addEventListener('pointerdown', e => {
+    const cell = e.target.closest('.hud-cell');
+    if (!cell || !grid.contains(cell)) return;
+    startXY = { x: e.clientX, y: e.clientY };
+    // Capture the pointer to the grid so the WebView can't reinterpret the touch
+    // as a scroll/pan mid-drag (which would fire pointercancel and abort).
+    activePointerId = e.pointerId;
+    captureHolder = grid;
+    try { grid.setPointerCapture(e.pointerId); } catch {}
+    clearTimeout(longPressTimer);
+    longPressTimer = setTimeout(() => {
+      longPressTimer = null;
+      startDrag(cell, startXY.x, startXY.y);
+    }, 450);
+  });
+
+  function onMove(e) {
+    if (activePointerId != null && e.pointerId !== activePointerId) return;
+    if (longPressTimer && startXY) {
+      // Cancel long-press if finger moved too far before it fires (it's a scroll, not a drag)
+      if (Math.abs(e.clientX - startXY.x) > 8 || Math.abs(e.clientY - startXY.y) > 8) {
+        clearTimeout(longPressTimer); longPressTimer = null;
+        // Not a drag — let go of the captured pointer so taps still register normally.
+        releaseCapture();
+      }
+    }
+    if (!dragCell) return;
+    e.preventDefault();
+    dragCell.style.left = (e.clientX - dragGhostXY.offX) + 'px';
+    dragCell.style.top  = (e.clientY - dragGhostXY.offY) + 'px';
+    // Find drop target under finger (ignore dragged cell itself)
+    clearDropTargets();
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const target = el && el.closest && el.closest('#hud-grid .hud-cell');
+    if (target && target !== dragCell) target.classList.add('drop-target');
+  }
+
+  function onUp(e)     { if (activePointerId != null && e.pointerId !== activePointerId) return;
+                         clearTimeout(longPressTimer); longPressTimer = null; endDrag(true);  releaseCapture(); }
+  function onCancel(e) { if (activePointerId != null && e.pointerId !== activePointerId) return;
+                         clearTimeout(longPressTimer); longPressTimer = null; endDrag(false); releaseCapture(); }
+
+  // Listen on the grid (captured target) AND document so we still get events
+  // whether or not setPointerCapture succeeded on this WebView.
+  grid.addEventListener('pointermove', onMove, { passive: false });
+  grid.addEventListener('pointerup', onUp);
+  grid.addEventListener('pointercancel', onCancel);
+  document.addEventListener('pointermove', onMove, { passive: false });
+  document.addEventListener('pointerup', onUp);
+  document.addEventListener('pointercancel', onCancel);
+
+  // While a drag is in flight, suppress native scrolling so the page doesn't
+  // slide out from under the dragged cell. Outside of a drag, touch-action:pan-y
+  // on .hud-cell lets the user scroll the page normally.
+  document.addEventListener('touchmove', e => {
+    if (dragCell) e.preventDefault();
+  }, { passive: false });
+})();
+
+// Apply the saved cell order once on load
+applyHudOrder();
+
+// ── Status log ────────────────────────────────────────────────────────────────
+const logLines = [];
+function addLog(text, sev) {
+  const cls = sev<=3?'err':sev===4?'warn':'';
+  logLines.push({text,cls});
+  if (logLines.length>40) logLines.shift();
+  document.getElementById('log-inner').innerHTML =
+    logLines.slice(-20).map(l=>`<div class="log-line ${l.cls}">${l.text}</div>`).join('');
+  document.getElementById('log-wrap').scrollTop = 99999;
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function showSettings() {
+  if (typeof Android !== 'undefined') {
+    const cfg = Android.getConfig().split(',');
+    document.getElementById('s-ip').value   = cfg[0];
+    document.getElementById('s-recv').value = cfg[1];
+    document.getElementById('s-send').value = cfg[2];
+  }
+  document.getElementById('settings-modal').style.display = 'flex';
+}
+function hideSettings() {
+  document.getElementById('settings-modal').style.display = 'none';
+}
+function applySettings() {
+  if (typeof Android !== 'undefined')
+    Android.setConfig(
+      document.getElementById('s-ip').value.trim(),
+      parseInt(document.getElementById('s-recv').value),
+      parseInt(document.getElementById('s-send').value));
+  hideSettings();
+}
+
+// ── Params drawer UI ──────────────────────────────────────────────────────────
+_param.drawerOpen = false;
+_param.filter = '';
+_param.editing = null; // name currently being edited (for inline editor)
+
+let _paramsWired = false;
+function _wireParamsDrawer() {
+  if (_paramsWired) return;
+  const input = document.getElementById('params-search');
+  if (!input) return; // drawer DOM not in tree yet — shouldn't happen if called from openParams
+  _paramsWired = true;
+  let _paramSearchTimer = null;
+  input.addEventListener('input', e => {
+    _param.filter = e.target.value;
+    clearTimeout(_paramSearchTimer);
+    _paramSearchTimer = setTimeout(renderParams, 80);
+  });
+}
+
+function openParams() {
+  _wireParamsDrawer();
+  _param.drawerOpen = true;
+  _param.editing = null;
+  document.getElementById('params-drawer').classList.add('open');
+  document.getElementById('params-search').value = _param.filter;
+  // Re-download only when we don't already have a fresh snapshot for this connection.
+  // Cleared on comms-lost (see triggerCommsLost) and on manual refresh button.
+  if (!_param.fresh && !_param.downloading) startParamDownload();
+  renderParams();
+}
+
+function closeParams() {
+  _param.drawerOpen = false;
+  _param.editing = null;
+  document.getElementById('params-drawer').classList.remove('open');
+}
+
+function refreshParams() {
+  if (_param.downloading) return;
+  startParamDownload();
+}
+
+function _paramMatchesFilter(name, q) {
+  if (!q) return true;
+  return name.toUpperCase().includes(q.toUpperCase());
+}
+
+function _paramValueDisplay(entry) {
+  if (!entry) return '—';
+  const v = entry.value;
+  if (Number.isInteger(v) || Math.abs(v - Math.round(v)) < 1e-7) return Math.round(v).toString();
+  return parseFloat(v.toFixed(6)).toString();
+}
+
+function _paramEditorHtml(name, entry) {
+  const meta = metaFor(name);
+  const current = entry ? entry.value : 0;
+  // Enum (single-choice dropdown)
+  if (meta && meta.values) {
+    const opts = Object.entries(meta.values).map(([v, lbl]) => {
+      const sel = (parseFloat(v) === current) ? ' selected' : '';
+      return `<option value="${v}"${sel}>${v} — ${lbl}</option>`;
+    });
+    // If the current value isn't in the known set, expose it so user sees what's set.
+    if (!Object.keys(meta.values).map(parseFloat).some(v => v === current)) {
+      opts.unshift(`<option value="${current}" selected>${current} — (current, unmapped)</option>`);
+    }
+    return `<select id="param-edit-input" data-meta="values" class="param-select"
+              onclick="event.stopPropagation()">${opts.join('')}</select>`;
+  }
+  // Bitmask (multi-toggle)
+  if (meta && meta.bitmask) {
+    const intVal = Math.round(current) | 0;
+    const rows = Object.entries(meta.bitmask).map(([bit, lbl]) => {
+      const b = parseInt(bit, 10);
+      const on = (intVal & (1 << b)) ? ' checked' : '';
+      return `<label class="param-bitmask-row">
+        <input type="checkbox" data-bit="${b}"${on} onclick="event.stopPropagation();_paramBitmaskUpdate()">
+        <span class="param-bitmask-lbl">bit ${b}: ${lbl}</span></label>`;
+    }).join('');
+    return `<div id="param-edit-input" data-meta="bitmask" class="param-bitmask-list">${rows}
+      <div class="param-bitmask-raw">Value: <span id="param-bitmask-val">${intVal}</span></div></div>`;
+  }
+  // Plain number
+  const initial = entry ? _paramValueDisplay(entry) : '';
+  return `<input id="param-edit-input" data-meta="number" type="text" inputmode="decimal"
+                 value="${initial}" onclick="event.stopPropagation()" autocomplete="off">`;
+}
+
+function _paramBitmaskUpdate() {
+  const wrap = document.getElementById('param-edit-input');
+  if (!wrap) return;
+  let v = 0;
+  wrap.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    if (cb.checked) v |= (1 << parseInt(cb.dataset.bit, 10));
+  });
+  document.getElementById('param-bitmask-val').textContent = v;
+}
+
+function _paramRowHtml(name, entry, isFav) {
+  const editing = _param.editing === name;
+  const pending = _param.pendingSet.has(name);
+  const cls = ['param-row'];
+  if (isFav) cls.push('fav-row');
+  if (editing) cls.push('editing');
+  if (pending) cls.push('pending');
+  const val = entry ? _paramValueDisplay(entry) : '<span class="param-disconnected">—</span>';
+  const star = isFav ? '★' : '☆';
+  const starCls = 'param-fav-star' + (isFav ? ' on' : '');
+  const head = `<span class="${starCls}" onclick="toggleFavorite('${name}',event)">${star}</span>` +
+               `<span class="param-name">${name}</span>` +
+               `<span class="param-val">${val}</span>`;
+  if (!editing) {
+    return `<div class="${cls.join(' ')}" onclick="editParam('${name}')">${head}</div>`;
+  }
+  return `<div class="${cls.join(' ')}">${head}
+    <div class="param-edit-row">
+      ${_paramEditorHtml(name, entry)}
+      <button class="param-edit-btn save" onclick="saveParamEdit('${name}')">Save</button>
+      <button class="param-edit-btn cancel" onclick="cancelParamEdit()">Cancel</button>
+    </div></div>`;
+}
+
+function renderParams() {
+  if (!_param.drawerOpen) return;
+  const body = document.getElementById('params-body');
+  const meta = document.getElementById('params-meta-count');
+  const status = document.getElementById('params-meta-status');
+  const prog = document.getElementById('params-progress');
+  const fill = document.getElementById('params-progress-fill');
+
+  // Progress bar
+  if (_param.downloading && _param.count > 0) {
+    prog.classList.add('active');
+    fill.style.width = Math.min(100, (_param.store.size / _param.count) * 100) + '%';
+    status.textContent = 'downloading…';
+  } else if (_param.downloading) {
+    prog.classList.add('active');
+    fill.style.width = '4%';
+    status.textContent = 'requesting…';
+  } else {
+    prog.classList.remove('active');
+    status.textContent = _param.store.size ? 'ready' : 'no data';
+  }
+  meta.textContent = _param.store.size + (_param.count ? ' / ' + _param.count : '') + ' params';
+
+  // Empty state
+  if (_param.store.size === 0) {
+    body.innerHTML = `<div class="param-empty">
+      ${_param.downloading ? 'Downloading parameters from FC…' : 'No parameters loaded.'}
+      <div class="small">${_param.downloading ? 'This typically takes 30–90 s over WiFi.' : 'Tap ⟳ to retry.'}</div>
+    </div>`;
+    return;
+  }
+
+  const q = _param.filter.trim();
+  const all = [..._param.store.keys()].sort();
+  const favSet = loadFavs();
+
+  // Favorites: alphabetical, only those actually present, filtered by search.
+  const favs = [...favSet].filter(n => _param.store.has(n) && _paramMatchesFilter(n, q)).sort();
+  const rest = all.filter(n => !favSet.has(n) && _paramMatchesFilter(n, q));
+
+  let html = '';
+  if (favs.length) {
+    html += `<div class="params-section-lbl">Favorites</div>`;
+    html += favs.map(n => _paramRowHtml(n, _param.store.get(n), true)).join('');
+  }
+  if (rest.length) {
+    html += `<div class="params-section-lbl">All Parameters</div>`;
+    html += rest.map(n => _paramRowHtml(n, _param.store.get(n), false)).join('');
+  } else if (q && favs.length === 0) {
+    html += `<div class="param-empty">No params match “${q}”.</div>`;
+  }
+  body.innerHTML = html;
+  body.classList.toggle('editing-active', !!_param.editing);
+
+  if (_param.editing) {
+    // Center the editing row and focus its input after layout settles.
+    requestAnimationFrame(() => {
+      const row = body.querySelector('.param-row.editing');
+      if (row) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      const inp = document.getElementById('param-edit-input');
+      if (inp && inp.tagName === 'INPUT' && inp.type === 'text') {
+        inp.focus();
+        try { inp.select(); } catch {}
+      } else if (inp && inp.tagName === 'SELECT') {
+        inp.focus();
+      }
+    });
+  }
+}
+
+function editParam(name) {
+  _param.editing = name;
+  renderParams();
+}
+
+function cancelParamEdit() {
+  _param.editing = null;
+  renderParams();
+}
+
+function saveParamEdit(name) {
+  const inp = document.getElementById('param-edit-input');
+  if (!inp) return;
+  let v;
+  const kind = inp.dataset.meta;
+  if (kind === 'values') {
+    v = parseFloat(inp.value);
+  } else if (kind === 'bitmask') {
+    v = 0;
+    inp.querySelectorAll('input[type=checkbox]').forEach(cb => {
+      if (cb.checked) v |= (1 << parseInt(cb.dataset.bit, 10));
+    });
+  } else {
+    const raw = inp.value.trim();
+    v = parseFloat(raw);
+    if (!isFinite(v)) { showToast('⚠ Invalid number: ' + raw); return; }
+  }
+  const entry = _param.store.get(name);
+  if (entry && Math.abs(entry.value - v) < 1e-9) {
+    _param.editing = null;
+    renderParams();
+    return;
+  }
+  _param.editing = null;
+  setParamWithRetry(name, v);
+  renderParams();
+}
+
+// (Search listener is attached lazily in _wireParamsDrawer() once the drawer DOM exists.)
+</script>
+<div id="comms-overlay">
+  <div id="comms-title"></div>
+  <div id="comms-location-card">
+    <div id="comms-location-label">LAST KNOWN LOCATION</div>
+    <div id="comms-location-coords"></div>
+    <div id="comms-location-sub"></div>
+    <button id="comms-maps-btn" onclick="openLastKnownInMaps()">Open in Maps</button>
+    <div id="comms-qr-wrap">
+      <div id="comms-qr-svg"></div>
+      <div id="comms-qr-cap">Scan with <b>phone or iPad</b> to open in Maps</div>
+    </div>
+  </div>
+  <button id="comms-dismiss-btn" onclick="dismissCommsOverlay()">✕  DISMISS</button>
+</div>
+<div id="toast"></div>
+
+<!-- Calibrations picker modal -->
+<div id="cal-pick-modal">
+  <div id="cp-box">
+    <div id="cp-head">
+      <span id="cp-title">Sensor Calibrations</span>
+      <button id="cp-close" onclick="closeCalibrationsPicker()">✕</button>
+    </div>
+    <div id="cp-instr">Pick which sensor to calibrate. Aircraft must be disarmed.</div>
+    <div class="cp-opt" onclick="pickCalibration('compass')">
+      <div class="cp-opt-icon">🧭</div>
+      <div class="cp-opt-body">
+        <div class="cp-opt-name">Compass</div>
+        <div class="cp-opt-desc">Rotate aircraft slowly in all directions until every axis is covered.</div>
+      </div>
+    </div>
+    <div class="cp-opt" onclick="pickCalibration('accel')">
+      <div class="cp-opt-icon">📐</div>
+      <div class="cp-opt-body">
+        <div class="cp-opt-name">Accelerometer (6-position)</div>
+        <div class="cp-opt-desc">Place aircraft level, on each side, nose up/down, and on its back.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Accelerometer calibration modal -->
+<div id="accel-cal-modal">
+  <div id="ac-box">
+    <div id="ac-head">
+      <span id="ac-title">Accelerometer Calibration</span>
+      <button id="ac-close" onclick="cancelAccelCal()">✕</button>
+    </div>
+    <div id="ac-instr">Place the plane flat and level on a stable surface, then tap START CAL.</div>
+    <div id="ac-pos-card">
+      <div id="ac-pos-icon">🛬</div>
+      <div id="ac-pos-num">LEVEL CALIBRATION</div>
+      <div id="ac-pos-name">PLACE LEVEL</div>
+      <div id="ac-pos-hint">Set the plane on a flat, level surface. When ready, tap START CAL.</div>
+    </div>
+    <div id="ac-progress-wrap">
+      <div id="ac-progress-track"><div id="ac-progress-fill"></div></div>
+      <div id="ac-progress-text">—</div>
+    </div>
+    <div id="ac-status">Waiting for FC…</div>
+    <div id="ac-row">
+      <button id="ac-cancel" onclick="cancelAccelCal()">Cancel</button>
+      <button id="ac-next" onclick="accelCalStart()">Start Cal</button>
+      <button id="ac-restart" onclick="restartAccelCal()" style="display:none">Retry</button>
+    </div>
+  </div>
+</div>
+
+<!-- Compass calibration modal -->
+<div id="compass-cal-modal">
+  <div id="cc-box">
+    <div id="cc-head">
+      <span id="cc-title">Compass Calibration</span>
+      <button id="cc-close" onclick="cancelCompassCal()">✕</button>
+    </div>
+    <div id="cc-instr">Rotate the aircraft slowly in all directions until each axis is covered.</div>
+    <div id="cc-strict">
+      <span id="cc-strict-lbl">Strictness</span>
+      <div id="cc-strict-row">
+        <button class="cc-strict-pill"    data-level="strict"  onclick="setCompassStrictness('strict')">STRICT</button>
+        <button class="cc-strict-pill on" data-level="normal"  onclick="setCompassStrictness('normal')">NORMAL</button>
+        <button class="cc-strict-pill"    data-level="relaxed" onclick="setCompassStrictness('relaxed')">RELAXED</button>
+      </div>
+    </div>
+    <svg id="cc-svg" viewBox="-100 -100 200 200">
+      <!-- 80 sector dots (rendered first → behind cube/axes). Fibonacci-sphere
+           layout reprojected each frame so dots rotate with the aircraft. -->
+      <g id="cc-sectors"></g>
+      <!-- Dotted trail of where the nose has pointed during cal -->
+      <polyline id="cc-trail" fill="none" stroke="#f0a500" stroke-width="2.5"
+                stroke-linecap="round" stroke-dasharray="0 5.5" opacity="0.85"/>
+      <!-- 12 cube edges; coords are updated live -->
+      <g id="cc-cube" stroke="#58a6ff" stroke-width="1.5" fill="none" opacity="0.55">
+        <line id="cc-edge-0"/><line id="cc-edge-1"/><line id="cc-edge-2"/><line id="cc-edge-3"/>
+        <line id="cc-edge-4"/><line id="cc-edge-5"/><line id="cc-edge-6"/><line id="cc-edge-7"/>
+        <line id="cc-edge-8"/><line id="cc-edge-9"/><line id="cc-edge-10"/><line id="cc-edge-11"/>
+      </g>
+      <!-- Body axes -->
+      <line id="cc-axis-x" stroke="#f85149" stroke-width="3" stroke-linecap="round"/>
+      <line id="cc-axis-y" stroke="#3fb950" stroke-width="3" stroke-linecap="round"/>
+      <line id="cc-axis-z" stroke="#58a6ff" stroke-width="3" stroke-linecap="round"/>
+      <!-- Bright dot at the nose tip so it's obvious where you are now -->
+      <circle id="cc-nose-dot" r="3.5" fill="#f0a500" stroke="#fff" stroke-width="1"/>
+      <!-- Axis labels -->
+      <text id="cc-label-x" fill="#f85149" font-size="11" font-weight="800">X</text>
+      <text id="cc-label-y" fill="#3fb950" font-size="11" font-weight="800">Y</text>
+      <text id="cc-label-z" fill="#58a6ff" font-size="11" font-weight="800">Z</text>
+    </svg>
+    <div id="cc-progress-wrap">
+      <div id="cc-progress-track"><div id="cc-progress-fill"></div></div>
+      <div id="cc-progress-text">0%</div>
+    </div>
+    <div id="cc-status">Waiting for FC…</div>
+    <div id="cc-row">
+      <button id="cc-cancel" onclick="cancelCompassCal()">Cancel</button>
+      <button id="cc-accept" onclick="acceptCompassCal()" style="display:none">Accept</button>
+      <button id="cc-restart" onclick="restartCompassCal()" style="display:none">Retry</button>
+    </div>
+  </div>
+</div>
+
+<div id="params-drawer">
+  <div id="params-header">
+    <div id="params-title-row">
+      <span id="params-title">ArduPilot Parameters</span>
+      <button class="params-icon-btn" onclick="refreshParams()" title="Re-download all">⟳</button>
+      <button id="params-close-btn" onclick="closeParams()">✕</button>
+    </div>
+    <input id="params-search" type="text" placeholder="Search (e.g. RTL, BATT, FENCE)…"
+           autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+    <div id="params-progress"><div id="params-progress-fill"></div></div>
+    <div id="params-meta"><span id="params-meta-count">—</span><span id="params-meta-status">—</span></div>
+  </div>
+  <div id="params-body"></div>
+</div>
+</body>
+</html>

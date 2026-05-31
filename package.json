@@ -1,6 +1,6 @@
 {
   "name": "aeronav",
-  "version": "2026.5.15",
+  "version": "2026.5.31",
   "description": "AeroNav — Waypoint Mission & Flight Planner",
   "main": "main.js",
   "scripts": {

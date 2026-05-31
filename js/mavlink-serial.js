@@ -29,7 +29,12 @@
     122: 203, // LOG_REQUEST_END  (sent by us)
     11:  89,  // SET_MODE              (sent by us — change flight mode)
     76:  152, // COMMAND_LONG          (sent by us — arm/disarm, etc.)
-    70:  124  // RC_CHANNELS_OVERRIDE  (sent by us — joystick RC input)
+    70:  124, // RC_CHANNELS_OVERRIDE  (sent by us — joystick RC input)
+    // ── Parameter protocol (ArduPlane / ArduCopter param read/write) ──────
+    20:  214, // PARAM_REQUEST_READ  (sent by us)
+    21:  159, // PARAM_REQUEST_LIST  (sent by us)
+    22:  220, // PARAM_VALUE         (received)
+    23:  168  // PARAM_SET           (sent by us)
   };
 
   function crc16 (data) {
@@ -204,6 +209,53 @@
       ...f32(p5 ?? 0), ...f32(p6 ?? 0), ...f32(p7 ?? 0),
       ...u16(cmd),
       tSys, tComp, confirm ?? 0
+    ]);
+  }
+
+  // ─── Param protocol helpers ──────────────────────────────────────────────
+  // Pack a parameter ID into a fixed 16-byte char array (zero-padded).
+  function packParamId (name) {
+    const out = new Array(16).fill(0);
+    const s = String(name).slice(0, 16);
+    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 0xFF;
+    return out;
+  }
+
+  // Decode a 16-byte char array (param_id) into a JS string, trimming nulls.
+  function unpackParamId (bytes) {
+    let s = '';
+    for (let i = 0; i < 16 && i < bytes.length; i++) {
+      const c = bytes[i];
+      if (c === 0) break;
+      s += String.fromCharCode(c);
+    }
+    return s;
+  }
+
+  // PARAM_REQUEST_READ (id=20) — wire: param_index(i16,0), target_sys(u8,2), target_comp(u8,3), param_id(char[16],4..20)
+  // Use param_index = -1 (0xFFFF) to look up by name; otherwise the index is used and the name is ignored.
+  function buildParamRequestRead (tSys, tComp, name, index) {
+    const idx = (index ?? -1) & 0xFFFF;
+    return buildFrame(20, [
+      idx & 0xFF, (idx >> 8) & 0xFF,
+      tSys, tComp,
+      ...packParamId(name || '')
+    ]);
+  }
+
+  // PARAM_REQUEST_LIST (id=21) — wire: target_sys(u8,0), target_comp(u8,1)
+  function buildParamRequestList (tSys, tComp) {
+    return buildFrame(21, [tSys, tComp]);
+  }
+
+  // PARAM_SET (id=23) — wire: param_value(f32,0), target_sys(u8,4), target_comp(u8,5), param_id(char[16],6..22), param_type(u8,22)
+  // ArduPilot wire-transmits param values as float32 regardless of underlying type; param_type is informational.
+  function buildParamSet (tSys, tComp, name, value, type) {
+    return buildFrame(23, [
+      ...f32(value),
+      tSys, tComp,
+      ...packParamId(name),
+      type ?? 9 // MAV_PARAM_TYPE_REAL32
     ]);
   }
 
@@ -708,6 +760,16 @@
           logDownState.chunkEnd = Math.min(logDownState.highWaterOfs + CHUNK_SIZE, logDownState.totalSize);
           logDownState.sendChunk();
         }
+        break;
+      }
+      case 22: { // PARAM_VALUE — param_value(f32,0), param_count(u16,4), param_index(u16,6), param_id(char[16],8..24), param_type(u8,24)
+        if (payload.length < 25) break;
+        const value = dv.getFloat32(0, true);
+        const count = dv.getUint16(4, true);
+        const index = dv.getUint16(6, true);
+        const name  = unpackParamId(payload.slice(8, 24));
+        const type  = payload[24];
+        window._onParamValue?.(0, name, value, type, index, count);
         break;
       }
       case 253: { // STATUSTEXT — severity + 50-char text
@@ -1706,6 +1768,30 @@
           .catch(() => {});
   };
 
+  // ─── PARAM read / write (ArduPlane + ArduCopter shared protocol) ─────────
+  window.serialParamRequest = (name, index) => {
+    if (!writer) { addLog('[param] Not connected'); return; }
+    const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
+    writer.write(buildParamRequestRead(tSys, tComp, name, index)).catch(e => addLog('[param] ' + e.message));
+  };
+
+  window.serialParamRequestAll = () => {
+    if (!writer) { addLog('[param] Not connected'); return; }
+    const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
+    writer.write(buildParamRequestList(tSys, tComp)).catch(e => addLog('[param] ' + e.message));
+    addLog(`[param] PARAM_REQUEST_LIST → sysid=${tSys}`);
+  };
+
+  window.serialParamSet = (name, value, type) => {
+    if (!writer) { addLog('[param] Not connected'); return; }
+    const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
+    writer.write(buildParamSet(tSys, tComp, name, value, type ?? 9)).catch(e => addLog('[param] ' + e.message));
+    addLog(`[param] PARAM_SET ${name}=${value} → sysid=${tSys}`);
+  };
+
   window.serialExportCSV        = exportTelCSV;
   window.serialClearLog         = clearLog;
   window.serialToggleLogPause   = toggleLogPause;
@@ -1714,6 +1800,43 @@
   window.serialRequestLogList   = requestLogList;
   window.serialDownloadLog      = downloadLog;
   window.serialCancelLogDownload = cancelLogDownload;
+
+  // ─── ADS-B collision avoidance: DO_CHANGE_ALTITUDE (186) ─────────────────
+  // Commands the FC to descend (or climb) by deltaM metres from current alt_rel.
+  // ArduPlane accepts this in CRUISE/AUTO/GUIDED/LOITER without a mode switch.
+  // ArduCopter (4.3+) requires GUIDED — we briefly switch first for copter types.
+  function changeAltitudeRel (deltaM, minAltRel, maxAltRel) {
+    if (!writer) { addLog('[avoid] Not connected'); return false; }
+    const cur = tele.altRel;
+    if (cur == null) { addLog('[avoid] No altitude telemetry — refusing'); return false; }
+    const safeMin = (minAltRel != null) ? minAltRel : 30;
+    const safeMax = (maxAltRel != null) ? maxAltRel : 10000;
+    const target = Math.max(safeMin, Math.min(safeMax, cur + deltaM));
+    const tSys  = parseInt(document.getElementById('serial-sysid')?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById('serial-compid')?.value ?? '1', 10);
+    const isCopter = tele.mavType != null && tele.mavType !== 1;
+    if (isCopter) {
+      // GUIDED for copter is custom_mode 4
+      try { writer.write(buildSetMode(4, tSys)); } catch {}
+      try { writer.write(buildCommandLong(tSys, tComp, 176, 1, 4, 0, 0, 0, 0, 0, 0)); } catch {}
+    }
+    const send = () => {
+      try {
+        // MAV_CMD_DO_CHANGE_ALTITUDE: p1=altitude(m), p2=frame (3 = GLOBAL_RELATIVE_ALT)
+        writer.write(buildCommandLong(tSys, tComp, 186, target, 3, 0, 0, 0, 0, 0, 0));
+      } catch {}
+    };
+    if (isCopter) setTimeout(send, 250); else send();
+    addLog(`[avoid] DO_CHANGE_ALTITUDE current=${cur.toFixed(1)}m → target=${target.toFixed(1)}m (Δ=${deltaM.toFixed(1)}m)`);
+    return true;
+  }
+  window.serialChangeAltitude = (deltaM, minAltRel, slot, maxAltRel) => {
+    const s = slot ?? (window._activeGCSSlot ?? 0);
+    if (s === 0) return changeAltitudeRel(deltaM, minAltRel, maxAltRel);
+    const reg = window._mavSlotRegistry?.[s];
+    return reg?.changeAltitude?.(deltaM, minAltRel, maxAltRel) ?? false;
+  };
+  window._mavSlot0GetTele = () => ({ ...tele });
 
   // ─── Global IPC dispatch (set up once; routes data to per-slot parsers) ──
   window._setupMavIPCDispatch = function () {
@@ -1745,6 +1868,10 @@
   window._buildSetMode              = buildSetMode;
   window._buildCommandLong          = buildCommandLong;
   window._buildRequestDataStream    = buildRequestDataStream;
+  window._buildParamRequestRead     = buildParamRequestRead;
+  window._buildParamRequestList     = buildParamRequestList;
+  window._buildParamSet             = buildParamSet;
+  window._unpackParamId             = unpackParamId;
 
 })();
 
@@ -1889,6 +2016,16 @@ function createMavSlot (n, color) {
           if (consumed >= 0) tele.battConsumedMah = consumed;
         }
         renderTele(); break;
+      }
+      case 22: { // PARAM_VALUE
+        if (payload.length < 25) break;
+        const value = dv.getFloat32(0, true);
+        const count = dv.getUint16(4, true);
+        const index = dv.getUint16(6, true);
+        const name  = window._unpackParamId?.(payload.slice(8, 24)) ?? '';
+        const type  = payload[24];
+        window._onParamValue?.(n, name, value, type, index, count);
+        break;
       }
       case 253: { // STATUSTEXT
         if (payload.length < 2) break;
@@ -2102,17 +2239,71 @@ function createMavSlot (n, color) {
     addLog(`[servo] DO_SET_SERVO servo=${servo} pwm=${pwm}`);
   }
 
+  function paramRequest (name, index) {
+    if (!writer) { addLog('[param] Not connected'); return; }
+    const tSys  = parseInt(document.getElementById(`slot${n}-sysid`)?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById(`slot${n}-compid`)?.value ?? '1', 10);
+    const f = window._buildParamRequestRead?.(tSys, tComp, name, index);
+    if (f) writer.write(f).catch(() => {});
+  }
+
+  function paramRequestAll () {
+    if (!writer) { addLog('[param] Not connected'); return; }
+    const tSys  = parseInt(document.getElementById(`slot${n}-sysid`)?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById(`slot${n}-compid`)?.value ?? '1', 10);
+    const f = window._buildParamRequestList?.(tSys, tComp);
+    if (f) writer.write(f).catch(() => {});
+    addLog(`[param] PARAM_REQUEST_LIST → sysid=${tSys}`);
+  }
+
+  function paramSet (name, value, type) {
+    if (!writer) { addLog('[param] Not connected'); return; }
+    const tSys  = parseInt(document.getElementById(`slot${n}-sysid`)?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById(`slot${n}-compid`)?.value ?? '1', 10);
+    const f = window._buildParamSet?.(tSys, tComp, name, value, type ?? 9);
+    if (f) writer.write(f).catch(() => {});
+    addLog(`[param] PARAM_SET ${name}=${value}`);
+  }
+
+  // ADS-B collision avoidance: descend / climb by deltaM metres from current alt_rel.
+  function changeAltitude (deltaM, minAltRel, maxAltRel) {
+    if (!writer) { addLog('[avoid] Not connected'); return false; }
+    const cur = tele.altRel;
+    if (cur == null) { addLog('[avoid] No altitude telemetry — refusing'); return false; }
+    const safeMin = (minAltRel != null) ? minAltRel : 30;
+    const safeMax = (maxAltRel != null) ? maxAltRel : 10000;
+    const target = Math.max(safeMin, Math.min(safeMax, cur + deltaM));
+    const tSys  = parseInt(document.getElementById(`slot${n}-sysid`)?.value  ?? '1', 10);
+    const tComp = parseInt(document.getElementById(`slot${n}-compid`)?.value ?? '1', 10);
+    const isCopter = tele.mavType != null && tele.mavType !== 1;
+    const cl  = window._buildCommandLong;
+    const sm  = window._buildSetMode;
+    if (isCopter) {
+      try { const f = sm?.(4, tSys); if (f) writer.write(f); } catch {}
+      try { const f = cl?.(tSys, tComp, 176, 1, 4, 0, 0, 0, 0, 0, 0); if (f) writer.write(f); } catch {}
+    }
+    const send = () => {
+      try { const f = cl?.(tSys, tComp, 186, target, 3, 0, 0, 0, 0, 0, 0); if (f) writer.write(f); } catch {}
+    };
+    if (isCopter) setTimeout(send, 250); else send();
+    addLog(`[avoid] DO_CHANGE_ALTITUDE current=${cur.toFixed(1)}m → target=${target.toFixed(1)}m (Δ=${deltaM.toFixed(1)}m)`);
+    return true;
+  }
+
   // Register in the global slot registry
   if (!window._mavSlotRegistry) window._mavSlotRegistry = {};
-  window._mavSlotRegistry[n] = { connect, disconnect, setMode, armDisarm, setServo };
+  window._mavSlotRegistry[n] = { connect, disconnect, setMode, armDisarm, setServo, paramRequest, paramRequestAll, paramSet, changeAltitude, getTele: () => ({ ...tele }) };
 
   // Install registry-based command dispatchers once on the first createMavSlot call
   if (!window._mavSlotDispatchInstalled) {
     window._mavSlotDispatchInstalled = true;
-    const _s0SetMode   = window.serialSetMode;
-    const _s0ArmDisarm = window.serialArmDisarm;
-    const _s0SendRC    = window.serialSendRC;
-    const _s0SetServo  = window.serialSetServo;
+    const _s0SetMode         = window.serialSetMode;
+    const _s0ArmDisarm       = window.serialArmDisarm;
+    const _s0SendRC          = window.serialSendRC;
+    const _s0SetServo        = window.serialSetServo;
+    const _s0ParamRequest    = window.serialParamRequest;
+    const _s0ParamRequestAll = window.serialParamRequestAll;
+    const _s0ParamSet        = window.serialParamSet;
 
     window.serialSetMode = (customMode, slot) => {
       const s = slot ?? (window._activeGCSSlot ?? 0);
@@ -2131,6 +2322,24 @@ function createMavSlot (n, color) {
       const reg = window._mavSlotRegistry?.[s];
       if (reg?.setServo) { reg.setServo(servo, pwm); return; }
       _s0SetServo?.(servo, pwm);
+    };
+    window.serialParamRequest = (name, index, slot) => {
+      const s = slot ?? (window._activeGCSSlot ?? 0);
+      const reg = window._mavSlotRegistry?.[s];
+      if (reg?.paramRequest) { reg.paramRequest(name, index); return; }
+      _s0ParamRequest?.(name, index);
+    };
+    window.serialParamRequestAll = (slot) => {
+      const s = slot ?? (window._activeGCSSlot ?? 0);
+      const reg = window._mavSlotRegistry?.[s];
+      if (reg?.paramRequestAll) { reg.paramRequestAll(); return; }
+      _s0ParamRequestAll?.();
+    };
+    window.serialParamSet = (name, value, type, slot) => {
+      const s = slot ?? (window._activeGCSSlot ?? 0);
+      const reg = window._mavSlotRegistry?.[s];
+      if (reg?.paramSet) { reg.paramSet(name, value, type); return; }
+      _s0ParamSet?.(name, value, type);
     };
     window.serialSendRC = (chs, slot) => {
       const s = slot ?? (window._activeGCSSlot ?? 0);

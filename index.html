@@ -495,10 +495,15 @@
   #gcs-panel.active { display:flex; }
   body.gcs-minimised #gcs-panel { display:none; }
   body.gcs-minimised #main.video-split { margin-right:0; }
-  /* When GCS is minimised, hide the planning-mode chrome so only the map remains */
-  body.gcs-active.gcs-minimised #sidebar,
-  body.gcs-active.gcs-minimised #profile-wrap,
-  body.gcs-active.gcs-minimised #map-hint { display:none !important; }
+  /* In GCS mode, hide the planning-mode chrome entirely (sidebar would otherwise
+     show through when the GCS panel is minimised, and is redundant behind it
+     when the panel is open). */
+  body.gcs-active #sidebar,
+  body.gcs-active #profile-wrap,
+  body.gcs-active #map-hint { display:none !important; }
+  /* Reserve space for the GCS panel so the map doesn't render behind it.
+     Cleared when minimised so the map fills the screen. */
+  body.gcs-active:not(.gcs-minimised) #main { margin-right:360px; }
   #gcs-restore-btn {
     display:none; position:fixed; top:58px; right:10px; z-index:3001;
     background:var(--panel); border:1px solid var(--border); color:var(--sec);
@@ -683,6 +688,101 @@
     color:var(--sec); font-size:11px; font-weight:600; cursor:pointer;
   }
   .gcs-mavtype-tab.active { background:var(--card); color:var(--text); }
+  /* ── Parameters panel (ArduPlane / ArduCopter) ──────────────────────── */
+  .gcs-params-card {
+    background:var(--card); border:1px solid var(--border); border-radius:8px;
+    padding:8px; display:flex; flex-direction:column; gap:6px;
+  }
+  .gcs-params-vehicle-row {
+    display:flex; align-items:center; justify-content:space-between; gap:6px;
+    font-size:10px; color:var(--sec); text-transform:uppercase; letter-spacing:.5px;
+  }
+  .gcs-params-vehicle-tag {
+    padding:2px 7px; border-radius:4px; font-weight:700; font-size:10px;
+    border:1px solid var(--border); color:var(--sec); letter-spacing:.4px;
+  }
+  .gcs-params-vehicle-tag.plane  { color:#58a6ff; border-color:rgba(88,166,255,.45); background:rgba(88,166,255,.10); }
+  .gcs-params-vehicle-tag.copter { color:#3fb950; border-color:rgba(63,185,80,.45); background:rgba(63,185,80,.10); }
+  .gcs-params-actions { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .gcs-params-search {
+    width:100%; box-sizing:border-box; padding:6px 8px; font-size:11px;
+    background:var(--bg); border:1px solid var(--border); border-radius:5px;
+    color:var(--text); outline:none;
+  }
+  .gcs-params-search:focus { border-color:var(--blue); }
+  .gcs-params-status { font-size:10px; color:var(--sec); min-height:13px; }
+  .gcs-params-list {
+    max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:3px;
+    background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:5px;
+  }
+  .gcs-param-row {
+    display:grid; grid-template-columns:1fr 78px 44px; gap:5px; align-items:center;
+    padding:4px 6px; border-radius:4px; background:var(--card); border:1px solid transparent;
+    font-size:11px;
+  }
+  .gcs-param-row.dirty   { border-color:#e3b341; background:rgba(227,179,65,.06); }
+  .gcs-param-row.unknown { opacity:.55; }
+  .gcs-param-name {
+    font-family: 'Consolas','SF Mono',Menlo,monospace; font-size:10.5px;
+    font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .gcs-param-name .gcs-param-unit { color:var(--sec); font-weight:400; margin-left:4px; font-size:9.5px; }
+  .gcs-param-input {
+    width:100%; box-sizing:border-box; background:var(--bg); border:1px solid var(--border);
+    border-radius:4px; color:var(--text); padding:3px 5px; font-size:11px;
+    font-variant-numeric:tabular-nums; outline:none;
+  }
+  .gcs-param-input:focus { border-color:var(--blue); }
+  .gcs-param-row.dirty .gcs-param-input { border-color:#e3b341; }
+  .gcs-param-set {
+    padding:3px 0; font-size:10px; font-weight:700; border-radius:4px;
+    background:var(--card); color:var(--sec); border:1px solid var(--border); cursor:pointer;
+  }
+  .gcs-param-set:hover { background:#2d333b; border-color:var(--blue); color:var(--blue); }
+  .gcs-param-row.dirty .gcs-param-set {
+    background:rgba(227,179,65,.16); color:#e3b341; border-color:#e3b341;
+  }
+  /* Enum (dropdown) variant — same grid slot as the text input */
+  select.gcs-param-input {
+    appearance:none; -webkit-appearance:none; background-image:
+      linear-gradient(45deg, transparent 50%, var(--sec) 50%),
+      linear-gradient(135deg, var(--sec) 50%, transparent 50%);
+    background-position: calc(100% - 9px) 50%, calc(100% - 5px) 50%;
+    background-size:4px 4px, 4px 4px; background-repeat:no-repeat;
+    padding-right:14px; cursor:pointer;
+  }
+  select.gcs-param-input option { background:var(--card); color:var(--text); }
+  /* Bitmask variant — small "open editor" button shows current int + popcount */
+  .gcs-param-bits-btn {
+    width:100%; box-sizing:border-box; padding:3px 5px; font-size:11px;
+    background:var(--bg); border:1px solid var(--border); border-radius:4px;
+    color:var(--text); text-align:left; cursor:pointer;
+    font-variant-numeric:tabular-nums; overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap;
+  }
+  .gcs-param-bits-btn:hover { border-color:var(--blue); }
+  .gcs-param-bits-btn .gcs-param-bits-count {
+    float:right; color:var(--sec); font-size:9.5px; margin-left:4px;
+  }
+  .gcs-param-row.dirty .gcs-param-bits-btn { border-color:#e3b341; }
+  /* Expanded bitmask editor row — spans the full grid below its row */
+  .gcs-param-bits-panel {
+    grid-column: 1 / -1; margin-top:4px; padding:6px 8px;
+    background:var(--bg); border:1px dashed var(--border); border-radius:5px;
+    display:none; flex-direction:column; gap:3px;
+  }
+  .gcs-param-row.bits-open .gcs-param-bits-panel { display:flex; }
+  .gcs-param-bits-row { display:flex; align-items:center; gap:6px; font-size:10.5px; color:var(--text); cursor:pointer; }
+  .gcs-param-bits-row input { margin:0; cursor:pointer; }
+  .gcs-param-bits-row .b-num { color:var(--sec); font-variant-numeric:tabular-nums; min-width:14px; }
+  .gcs-param-bits-footer {
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    margin-top:4px; padding-top:5px; border-top:1px solid var(--border);
+    font-size:10px; color:var(--sec);
+  }
+  .gcs-params-meta-status {
+    font-size:9px; color:var(--sec); padding:2px 4px 0; letter-spacing:.3px;
+  }
   .topbtn.gcs-on { border-color:var(--purple); color:var(--purple); background:rgba(162,155,254,.1); }
   .topbtn.windmill-on { border-color:#00cec9; color:#00cec9; background:rgba(0,206,201,.15); box-shadow:0 0 10px rgba(0,206,201,.3); }
   body.windmill-placing #map { cursor: crosshair !important; }
@@ -721,6 +821,81 @@
   .wm-card .wm-btn:hover { background:#21262d; }
   .wm-card .wm-btn.danger { border-color:#f85149; color:#f85149; }
   .wm-card .wm-btn.danger:hover { background:rgba(248,81,73,.15); }
+  /* ADS-B live aircraft markers */
+  .adsb-marker { background:none !important; border:none !important; pointer-events:auto; }
+  .adsb-marker .adsb-lbl { position:absolute; top:21px; left:50%; transform:translateX(-50%); white-space:nowrap; font-size:9px; line-height:1.05; text-align:center; font-weight:600; color:#fff; text-shadow:0 0 3px #000,0 0 3px #000,0 0 3px #000; }
+  #adsb-status {
+    position:absolute; bottom:168px; left:10px; z-index:500;
+    background:rgba(13,17,23,.82); border:1px solid var(--border); border-radius:12px;
+    color:var(--text); padding:4px 11px; font-size:11px; white-space:nowrap;
+    display:none; cursor:default; box-shadow:0 2px 8px rgba(0,0,0,.5);
+  }
+  #adsb-status .adsb-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--green); margin-right:6px; vertical-align:1px; }
+  #adsb-status.adsb-err .adsb-dot { background:var(--red); }
+  #adsb-status .adsb-src { color:var(--sec); font-size:9px; }
+  .adsb-popup .leaflet-popup-content-wrapper { background:#0d1117; color:#e6edf3; border:1px solid #30363d; border-radius:10px; box-shadow:0 8px 28px rgba(0,0,0,.7); padding:0; }
+  .adsb-popup .leaflet-popup-content { margin:0; min-width:210px; }
+  .adsb-popup .leaflet-popup-tip { background:#0d1117; border:1px solid #30363d; }
+  .adsb-popup .leaflet-popup-close-button { color:#8b949e; padding:6px 8px 0 0; }
+  .adsb-card { padding:11px 13px; font-size:12px; line-height:1.4; }
+  .adsb-card .adsb-h { display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+  .adsb-card .adsb-cs { font-weight:700; font-size:14px; color:#58a6ff; letter-spacing:.5px; }
+  .adsb-card .adsb-tp { font-size:10px; color:#8b949e; }
+  .adsb-card .adsb-row { display:flex; justify-content:space-between; padding:2px 0; border-bottom:1px dashed rgba(48,54,61,.6); }
+  .adsb-card .adsb-row:last-child { border-bottom:none; }
+  .adsb-card .adsb-row .k { color:#8b949e; }
+  .adsb-card .adsb-row .v { color:#e6edf3; font-weight:600; }
+  /* ADS-B Collision Avoidance panel */
+  #avoid-panel {
+    position:absolute; bottom:200px; left:10px; z-index:501;
+    background:rgba(13,17,23,.92); border:1px solid var(--border); border-radius:12px;
+    color:var(--text); padding:6px 10px; font-size:11px; min-width:230px;
+    display:none; box-shadow:0 4px 14px rgba(0,0,0,.6);
+  }
+  #avoid-panel.avoid-armed   { border-color:#3fb950; }
+  #avoid-panel.avoid-alert   { border-color:#f85149; background:rgba(60,12,12,.95);
+                                animation: avoidPulse 0.9s ease-in-out infinite alternate; }
+  #avoid-panel.avoid-cooldown{ border-color:#d29922; }
+  @keyframes avoidPulse {
+    from { box-shadow:0 0 4px rgba(248,81,73,.4); }
+    to   { box-shadow:0 0 18px rgba(248,81,73,.85); }
+  }
+  #avoid-panel .av-row { display:flex; align-items:center; gap:8px; }
+  #avoid-panel .av-title { font-weight:700; flex:1; letter-spacing:.3px; }
+  #avoid-panel .av-mode {
+    border:1px solid var(--border); background:#161b22; color:var(--text);
+    border-radius:6px; padding:2px 6px; font-size:10px; cursor:pointer;
+  }
+  #avoid-panel .av-mode.active { border-color:var(--green); color:var(--green); }
+  #avoid-panel .av-mode.auto   { border-color:#f85149; color:#f85149; }
+  #avoid-panel .av-threat {
+    display:flex; justify-content:space-between; gap:6px; padding:3px 0;
+    border-top:1px dashed rgba(48,54,61,.6); font-size:10px;
+  }
+  #avoid-panel .av-threat .tcs { font-weight:700; color:#f85149; }
+  #avoid-panel .av-threat .tdt { color:var(--sec); }
+  #avoid-panel .av-btn {
+    width:100%; margin-top:5px; padding:7px 8px; font-size:12px; font-weight:700;
+    background:#f85149; color:#fff; border:none; border-radius:7px; cursor:pointer;
+    letter-spacing:.5px; text-transform:uppercase;
+  }
+  #avoid-panel .av-btn:hover { background:#ff6660; }
+  #avoid-panel .av-btn:disabled { background:#3a3a3a; cursor:not-allowed; opacity:.5; }
+  #avoid-panel .av-cfg-toggle { color:var(--sec); cursor:pointer; font-size:10px; user-select:none; }
+  #avoid-panel .av-cfg { display:none; margin-top:6px; padding-top:6px; border-top:1px solid var(--border); }
+  #avoid-panel .av-cfg.open { display:block; }
+  #avoid-panel .av-cfg-row { display:flex; align-items:center; justify-content:space-between; margin:3px 0; gap:6px; }
+  #avoid-panel .av-cfg-row label { color:var(--sec); font-size:10px; }
+  #avoid-panel .av-cfg-row input {
+    width:62px; background:#161b22; border:1px solid var(--border); color:var(--text);
+    border-radius:4px; padding:2px 4px; font-size:10px; text-align:right;
+  }
+  /* Conflict aircraft ring on map */
+  .adsb-conflict-ring {
+    border:2px solid #f85149 !important; background:rgba(248,81,73,.18) !important;
+    border-radius:50% !important; pointer-events:none;
+    animation: avoidPulse 0.9s ease-in-out infinite alternate;
+  }
   /* Map Popup button — shown only in GCS mode */
   .topbtn.popup-btn {
     display:inline-flex; align-items:center;
@@ -1073,6 +1248,7 @@
     <button class="topbtn" id="view3d-btn" onclick="toggle3DView()">3D View</button>
     <button class="topbtn" id="nfz-btn" style="display:none" onclick="toggleNFZ()">NFZ Off</button>
     <button class="topbtn" id="windmill-btn" onclick="toggleWindmillMode()" title="Place a WeatherMill — click it to see weather at that spot">⊕ WeatherMill</button>
+    <button class="topbtn" id="wind-overlay-btn" onclick="toggleWindOverlay()" title="Show wind arrows on mission legs from nearest WeatherMill">≋ Wind On</button>
     <button class="topbtn" id="offline-btn" onclick="openCacheManager()" title="Offline Map Cache Manager">⬡ Offline</button>
     <button class="topbtn danger" onclick="clearMission()">Clear</button>
   </div>
@@ -1097,6 +1273,9 @@
   <div style="height:1px;background:var(--border);margin:4px 0"></div>
   <div class="ctx-item" id="ctx-nfz-item"   onclick="toggleNFZ();closeMapCtx()">NFZ</div>
   <div class="ctx-item" id="ctx-cache-item"  onclick="openCacheManager();closeMapCtx()">Offline Cache…</div>
+  <div style="height:1px;background:var(--border);margin:4px 0"></div>
+  <div class="ctx-item" id="ctx-adsb-item"   onclick="toggleADSB();closeMapCtx()">✈ Live Aircraft (ADS-B)</div>
+  <div class="ctx-item" id="ctx-avoid-item"  onclick="toggleAvoidance();closeMapCtx()">⚠ Collision Avoidance</div>
 </div>
 <!-- GCS CONTROL STATION PANEL -->
 <div id="gcs-panel">
@@ -1240,6 +1419,26 @@
       <input type="checkbox" id="gcs-force-arm-chk" onchange="gcsForceArmToggle()">
       <span class="slider"></span>
     </label>
+  </div>
+
+  <!-- ====================== PARAMETERS PANEL ====================== -->
+  <div class="gcs-section-title" style="display:flex;align-items:center;justify-content:space-between">
+    <span>Parameters</span>
+    <span class="gcs-params-vehicle-tag" id="gcs-params-vehicle-tag">DETECTING…</span>
+  </div>
+  <div class="gcs-params-card">
+    <div class="gcs-params-vehicle-row">
+      <span id="gcs-params-vehicle-label">Auto-detected from heartbeat</span>
+      <span id="gcs-params-count-label" style="font-size:9px">0 loaded</span>
+    </div>
+    <div class="gcs-params-actions">
+      <button class="btn primary" id="gcs-params-load-common-btn" onclick="gcsParamsLoadCommon()" style="font-size:11px;padding:6px">⤓ Read Common</button>
+      <button class="btn" onclick="gcsParamsLoadAll()" style="font-size:11px;padding:6px" title="Fetch every parameter from the FC (slow)">⇣ Read All</button>
+    </div>
+    <input type="text" class="gcs-params-search" id="gcs-params-search" placeholder="Filter (e.g. ARSPD, RTL, BATT)…" oninput="gcsParamsFilter()">
+    <div class="gcs-params-meta-status" id="gcs-params-meta-status">Loading parameter metadata…</div>
+    <div class="gcs-params-status" id="gcs-params-status">Connect to FC and press “Read Common”.</div>
+    <div class="gcs-params-list" id="gcs-params-list"></div>
   </div>
 
   <!-- LOGBOOK CONTROLS -->
@@ -1413,6 +1612,27 @@
     <div id="map"></div>
 
     <div id="map-hint">Click to place waypoints • Drag to reposition</div>
+    <div id="adsb-status" title="Live ADS-B traffic — data from airplanes.live"><span class="adsb-dot"></span><span id="adsb-status-txt">ADS-B…</span> <span class="adsb-src">airplanes.live</span></div>
+    <div id="avoid-panel" class="avoid-armed">
+      <div class="av-row">
+        <span class="av-title">⚠ COLLISION AVOID</span>
+        <button class="av-mode active" id="avoid-src-btn" onclick="cycleAvoidanceSource()" title="Cycle threat source: Both / ADS-B only / RC planes only">BOTH</button>
+        <button class="av-mode active" id="avoid-mode-btn" onclick="cycleAvoidanceMode()" title="Toggle MANUAL / AUTO">MANUAL</button>
+      </div>
+      <div id="avoid-status" style="color:var(--sec);margin-top:3px;font-size:10px">No conflicts • watching…</div>
+      <div id="avoid-threats"></div>
+      <button class="av-btn" id="avoid-now-btn" onclick="avoidNow()" style="display:none">↓ AVOID NOW</button>
+      <div class="av-cfg-toggle" onclick="document.getElementById('avoid-cfg').classList.toggle('open')" style="margin-top:5px">⚙ Thresholds…</div>
+      <div class="av-cfg" id="avoid-cfg">
+        <div class="av-cfg-row"><label>Horiz (m)</label><input type="number" id="av-cfg-horiz" value="1000" min="200" max="10000" step="100"></div>
+        <div class="av-cfg-row"><label>Vert (m)</label><input type="number" id="av-cfg-vert" value="200" min="50" max="1000" step="25"></div>
+        <div class="av-cfg-row"><label>Time (s)</label><input type="number" id="av-cfg-time" value="30" min="5" max="120" step="5"></div>
+        <div class="av-cfg-row"><label>Descend (m)</label><input type="number" id="av-cfg-desc" value="30" min="10" max="150" step="5" title="≈ 100ft"></div>
+        <div class="av-cfg-row"><label>Min alt (m)</label><input type="number" id="av-cfg-min" value="30" min="10" max="500" step="5"></div>
+        <div class="av-cfg-row"><label>Max alt (m)</label><input type="number" id="av-cfg-max" value="400" min="50" max="5000" step="10" title="Ceiling for climb resolutions"></div>
+        <div class="av-cfg-row"><label>Cooldown (s)</label><input type="number" id="av-cfg-cool" value="30" min="5" max="300" step="5"></div>
+      </div>
+    </div>
     <div id="profile-wrap" style="height:160px">
       <div id="profile-header" onclick="toggleProfile()">
         <span id="profile-label">Elevation profile</span>
@@ -1899,6 +2119,8 @@ let weatherData = null;
 // ====================== WINDMILL WEATHER MARKERS ======================
 let _windmillPlacing = false;
 const _windmills = []; // { id, lat, lon, marker, weather, fetchedAt }
+let _windOverlayLayer   = null;
+let _windOverlayEnabled = (() => { try { return localStorage.getItem('windOverlayEnabled') !== '0'; } catch { return true; } })();
 
 // ====================== SPEED UNITS ======================
 let speedUnit = (() => { try { return localStorage.getItem('speedUnit') || 'kmh'; } catch { return 'kmh'; } })();
@@ -2507,6 +2729,7 @@ function updatePolyline() {
   missionPolyline = firstPolyline;
 
   updateGimbalLines();
+  updateWindOverlay();
 }
 
 // ====================== GIMBAL DIRECTION LINES ======================
@@ -4117,6 +4340,7 @@ function removeWindmill(wm) {
   try { map.closePopup(); } catch {}
   _windmills.splice(i, 1);
   saveWindmills();
+  updateWindOverlay();
 }
 
 async function fetchWindmillWeather(wm) {
@@ -4126,6 +4350,7 @@ async function fetchWindmillWeather(wm) {
   const data = await res.json();
   wm.weather = data;
   wm.fetchedAt = Date.now();
+  updateWindOverlay();
   return data;
 }
 
@@ -4241,11 +4466,101 @@ function loadWindmills() {
         _windmills.push(wm);
       }
     }
+    // Background-fetch weather for saved windmills so the wind overlay populates on load.
+    // Staggered 250 ms apart to avoid hammering Open-Meteo on app start.
+    _windmills.forEach((wm, i) => {
+      setTimeout(() => { fetchWindmillWeather(wm).catch(() => {}); }, 250 * i);
+    });
   } catch {}
 }
 
 // Load saved windmills on first paint (after map is ready)
 setTimeout(loadWindmills, 0);
+
+// ─── Wind overlay: arrows on each mission leg, sourced from nearest WeatherMill ───
+function _haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371, toRad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * toRad;
+  const dLon = (lon2 - lon1) * toRad;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function _nearestWindmillWithWx(lat, lon, maxKm) {
+  let best = null, bestD = Infinity;
+  for (const wm of _windmills) {
+    if (!wm.weather?.current_weather) continue;
+    const d = _haversineKm(lat, lon, wm.lat, wm.lon);
+    if (d < bestD && d <= maxKm) { best = wm; bestD = d; }
+  }
+  return best;
+}
+
+// dirDeg = direction wind is FROM (Open-Meteo convention). Arrow points where wind is GOING.
+// SVG arrowhead is at the bottom of the icon, so at rot=0 it points south on the map.
+// Wind from 0° (north) blows south → rot=0; wind from 90° (east) blows west → rot=90; etc.
+function _windArrowHTML(speedKmh, dirDeg) {
+  const rot = ((dirDeg % 360) + 360) % 360;
+  const h   = Math.min(34, 14 + speedKmh * 0.5);   // tall = strong
+  const color = speedKmh < 20 ? '#3fb950'
+              : speedKmh < 40 ? '#d29922'
+              : speedKmh < 60 ? '#db6d28'
+              :                 '#f85149';
+  return `<svg width="14" height="${h}" viewBox="0 0 14 ${h}" style="transform:rotate(${rot}deg);transform-origin:7px ${h / 2}px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7));overflow:visible">
+    <line x1="7" y1="2" x2="7" y2="${h - 2}" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+    <polygon points="7,${h - 1} 2,${h - 8} 12,${h - 8}" fill="${color}"/>
+  </svg>`;
+}
+
+function _syncWindOverlayBtn() {
+  const btn = document.getElementById('wind-overlay-btn');
+  if (!btn) return;
+  btn.classList.toggle('windmill-on', _windOverlayEnabled);
+  btn.textContent = _windOverlayEnabled ? '≋ Wind On' : '≋ Wind Off';
+}
+
+function toggleWindOverlay() {
+  _windOverlayEnabled = !_windOverlayEnabled;
+  try { localStorage.setItem('windOverlayEnabled', _windOverlayEnabled ? '1' : '0'); } catch {}
+  _syncWindOverlayBtn();
+  updateWindOverlay();
+}
+
+// Sync button to persisted state on load
+setTimeout(_syncWindOverlayBtn, 0);
+
+function updateWindOverlay() {
+  if (typeof map === 'undefined' || !map) return;
+  if (!_windOverlayLayer) _windOverlayLayer = L.layerGroup().addTo(map);
+  _windOverlayLayer.clearLayers();
+  if (!_windOverlayEnabled || waypoints.length < 2 || _windmills.length === 0) return;
+
+  const placed = new Set();   // dedupe arrows for identical (lat,lon,wm) leg midpoints
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const a = waypoints[i], b = waypoints[i + 1];
+    const midLat = (a.lat + b.lat) / 2;
+    const midLon = (a.lon + b.lon) / 2;
+    const wm = _nearestWindmillWithWx(midLat, midLon, 50);
+    if (!wm) continue;
+    const key = midLat.toFixed(5) + ',' + midLon.toFixed(5);
+    if (placed.has(key)) continue;
+    placed.add(key);
+    const cw    = wm.weather.current_weather;
+    const speed = cw.windspeed ?? 0;
+    const dir   = cw.winddirection ?? 0;
+    const h     = Math.min(34, 14 + speed * 0.5);
+    L.marker([midLat, midLon], {
+      icon: L.divIcon({
+        className: 'wind-arrow-marker',
+        html: _windArrowHTML(speed, dir),
+        iconSize:   [14, h],
+        iconAnchor: [7, h / 2],
+      }),
+      interactive: false,
+      zIndexOffset: 350,
+    }).addTo(_windOverlayLayer);
+  }
+}
 
 function bearingToCompass(deg) {
   const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
@@ -6443,7 +6758,507 @@ function gcsShowModes(type) {
   document.getElementById('gcs-modes-plane').style.display  = type === 'plane'  ? '' : 'none';
   document.getElementById('gcs-tab-copter').classList.toggle('active', type === 'copter');
   document.getElementById('gcs-tab-plane').classList.toggle('active',  type === 'plane');
+  // Sync the parameters panel to the same vehicle so the common list matches
+  gcsParamsSyncVehicle?.();
 }
+
+// ====================== PARAM METADATA (ArduPilot pdef enums + bitmasks) ======================
+// Async-loaded from js/pdef/pdef_<kind>.json (one per vehicle, ~380 KB each).
+// Each entry is { v: {value→label} } for enums or { b: {bit→label} } for bitmasks,
+// matching the upstream ArduPilot apm.pdef.json schema. PARAM_META below is a hand-curated
+// override layer — applied with priority over the loaded JSON when keys collide.
+const _loadedMetas = { copter: null, plane: null };
+let _currentMetaKind = 'copter';
+
+function _xhrJson(path, cb) {
+  // fetch() works in Electron over file:// for files inside the asar bundle.
+  fetch(path).then(r => {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(cb).catch(e => {
+    console.warn('[pdef] Load failed', path, e);
+    const el = document.getElementById('gcs-params-meta-status');
+    if (el) el.textContent = `⚠ ${path} failed: ${e.message}`;
+  });
+}
+
+function _preloadAllParamMeta() {
+  for (const kind of ['copter', 'plane']) {
+    _xhrJson('js/pdef/pdef_' + kind + '.json', json => {
+      _loadedMetas[kind] = json;
+      const ml = document.getElementById('gcs-params-meta-status');
+      if (ml) {
+        const c = _loadedMetas.copter ? Object.keys(_loadedMetas.copter).length : 0;
+        const p = _loadedMetas.plane  ? Object.keys(_loadedMetas.plane).length  : 0;
+        ml.textContent = `Metadata: ${p} plane / ${c} copter param defs`;
+      }
+      gcsParamsRenderList();
+    });
+  }
+}
+
+const GENERIC_OPTIONS_BITMASK = Object.fromEntries(
+  Array.from({ length: 16 }, (_, i) => [i, 'Bit ' + i])
+);
+
+const GPS_TYPE_VALUES = { 0:'None', 1:'AUTO', 2:'uBlox', 5:'NMEA', 6:'SiRF', 7:'HIL',
+  8:'SwiftNav', 9:'DroneCAN', 10:'SBF', 11:'GSOF', 13:'ERB', 14:'MAV', 15:'NOVA',
+  16:'HemisphereNMEA', 17:'uBlox-MB-Base', 18:'uBlox-MB-Rover', 19:'MSP',
+  20:'AllyStar', 21:'ExternalAHRS' };
+
+// Hand-curated overrides — take priority over loaded pdef JSON when keys collide.
+const PARAM_META = {
+  COMPASS_USE:     { values: { 0:'Disabled', 1:'Enabled' } },
+  COMPASS_USE2:    { values: { 0:'Disabled', 1:'Enabled' } },
+  COMPASS_USE3:    { values: { 0:'Disabled', 1:'Enabled' } },
+  COMPASS_LEARN:   { values: { 0:'Disabled', 1:'Internal', 2:'EKF', 3:'In-Flight' } },
+  COMPASS_ENABLE:  { values: { 0:'Disabled', 1:'Enabled' } },
+  COMPASS_AUTO_ROT:{ values: { 0:'Disabled', 1:'On Boot', 2:'Each Boot' } },
+  FENCE_ENABLE:    { values: { 0:'Disabled', 1:'Enabled' } },
+  FENCE_AUTOENABLE:{ values: { 0:'Disabled', 1:'OnTakeoff', 2:'OnArming', 3:'OnlyMin' } },
+  FENCE_ACTION:    { values: { 0:'Report Only', 1:'RTL or Land', 2:'Always Land',
+                               3:'SmartRTL or RTL', 4:'Brake or Land', 5:'SmartRTL or Land' } },
+  GPS_TYPE:        { values: GPS_TYPE_VALUES },
+  GPS_TYPE2:       { values: GPS_TYPE_VALUES },
+  RTL_AUTOLAND:    { values: { 0:'Disabled', 1:'On Land Wp', 2:'Always Land',
+                               3:'On Pilot Input' } },
+  // Copter failsafes
+  FS_THR_ENABLE:   { values: { 0:'Disabled', 1:'Enabled Always RTL',
+                               2:'Enabled Continue with Mission', 3:'Enabled Always Land',
+                               4:'Enabled SmartRTL or RTL', 5:'Enabled SmartRTL or Land',
+                               6:'Enabled Auto DO_LAND_START or RTL' } },
+  FS_GCS_ENABLE:   { values: { 0:'Disabled', 1:'Enabled Always RTL',
+                               2:'Continue with Mission', 3:'SmartRTL or RTL',
+                               4:'SmartRTL or Land', 5:'Land', 6:'Auto DO_LAND_START or RTL' } },
+  BATT_FS_LOW_ACT: { values: { 0:'None', 1:'Land', 2:'RTL', 3:'SmartRTL or RTL',
+                               4:'SmartRTL or Land', 5:'Terminate', 6:'Auto DO_LAND_START or RTL' } },
+  // Plane failsafes
+  FS_SHORT_ACTN:   { values: { 0:'Continue', 1:'Circle', 2:'FBWA', 3:'Disable' } },
+  FS_LONG_ACTN:    { values: { 0:'Continue', 1:'RTL', 2:'Glide', 3:'Parachute', 4:'Auto' } },
+  FS_BATT_ENABLE:  { values: { 0:'None', 1:'Land', 2:'RTL' } },
+  THR_FAILSAFE:    { values: { 0:'Disabled', 1:'Enabled' } },
+  // Bitmasks
+  ARMING_CHECK:    { bitmask: { 0:'All Checks Enabled (sets value=1)',
+                                1:'Barometer', 2:'Compass', 3:'GPS Lock', 4:'INS',
+                                5:'Parameters', 6:'RC Channels', 7:'Board Voltage',
+                                8:'Battery Level', 9:'Airspeed', 10:'Logging Available',
+                                11:'Hardware safety switch', 12:'GPS Configuration',
+                                13:'System', 14:'Mission', 15:'Rangefinder',
+                                16:'Camera', 17:'AuxAuth', 18:'VisualOdometry', 19:'FFT' } },
+  FENCE_TYPE:      { bitmask: { 0:'Max altitude', 1:'Circle (radius)', 2:'Polygon',
+                                3:'Min altitude' } },
+};
+
+function _metaFromJson(j) {
+  if (!j) return null;
+  const out = {};
+  if (j.v) out.values  = j.v;
+  if (j.b) out.bitmask = j.b;
+  return (out.values || out.bitmask) ? out : null;
+}
+
+// Look up metadata for `name` — current-vehicle pdef first, then the other vehicle,
+// then hand-curated overrides, then a generic _OPTIONS bitmask fallback.
+function metaFor(name) {
+  if (PARAM_META[name]) return PARAM_META[name];
+  const order = _currentMetaKind === 'plane' ? ['plane', 'copter'] : ['copter', 'plane'];
+  for (const k of order) {
+    const j = _loadedMetas[k] && _loadedMetas[k][name];
+    const m = _metaFromJson(j);
+    if (m) return m;
+  }
+  if (/_OPTIONS?$/.test(name)) return { bitmask: GENERIC_OPTIONS_BITMASK };
+  return null;
+}
+
+// ====================== PARAMETERS PANEL (ArduPlane + ArduCopter) ======================
+// Curated common parameter sets. Auto-detected via MAV_TYPE on heartbeat:
+//   MAV_TYPE_FIXED_WING (1) → ArduPlane;  2/13/14 (quad/hex/octo) → ArduCopter.
+// "Read All" fetches every parameter; "Read Common" only refreshes the curated list.
+const ARDUPLANE_PARAMS = [
+  { name: 'AIRSPEED_CRUISE',  unit: 'm/s',  type: 9 },
+  { name: 'AIRSPEED_MIN',     unit: 'm/s',  type: 9 },
+  { name: 'AIRSPEED_MAX',     unit: 'm/s',  type: 9 },
+  { name: 'TRIM_THROTTLE',    unit: '%',    type: 6 },
+  { name: 'THR_MIN',          unit: '%',    type: 6 },
+  { name: 'THR_MAX',          unit: '%',    type: 6 },
+  { name: 'ALT_HOLD_RTL',     unit: 'cm',   type: 6 },
+  { name: 'RTL_AUTOLAND',     unit: '',     type: 6 },
+  { name: 'WP_RADIUS',        unit: 'm',    type: 9 },
+  { name: 'WP_LOITER_RAD',    unit: 'm',    type: 9 },
+  { name: 'LIM_ROLL_CD',      unit: 'cdeg', type: 6 },
+  { name: 'LIM_PITCH_MAX',    unit: 'cdeg', type: 6 },
+  { name: 'LIM_PITCH_MIN',    unit: 'cdeg', type: 6 },
+  { name: 'TECS_CLMB_MAX',    unit: 'm/s',  type: 9 },
+  { name: 'TECS_SINK_MIN',    unit: 'm/s',  type: 9 },
+  { name: 'LAND_FLARE_ALT',   unit: 'm',    type: 9 },
+  { name: 'LAND_FLARE_SEC',   unit: 's',    type: 9 },
+  { name: 'FS_LONG_ACTN',     unit: '',     type: 6 },
+  { name: 'FS_LONG_TIMEOUT',  unit: 's',    type: 9 },
+  { name: 'FS_SHORT_ACTN',    unit: '',     type: 6 },
+  { name: 'FS_SHORT_TIMEOUT', unit: 's',    type: 9 },
+  { name: 'THR_FAILSAFE',     unit: '',     type: 6 },
+  { name: 'THR_FS_VALUE',     unit: 'µs',   type: 6 },
+  { name: 'ARMING_CHECK',     unit: 'bits', type: 6 },
+  { name: 'BATT_LOW_VOLT',    unit: 'V',    type: 9 },
+  { name: 'BATT_LOW_TIMER',   unit: 's',    type: 6 },
+  { name: 'BATT_FS_LOW_ACT',  unit: '',     type: 6 },
+  { name: 'BATT_CAPACITY',    unit: 'mAh',  type: 6 },
+  { name: 'FENCE_ENABLE',     unit: '',     type: 6 },
+  { name: 'FENCE_ACTION',     unit: '',     type: 6 },
+  { name: 'GPS_TYPE',         unit: '',     type: 6 },
+  { name: 'COMPASS_ENABLE',   unit: '',     type: 6 },
+];
+const ARDUCOPTER_PARAMS = [
+  { name: 'WPNAV_SPEED',     unit: 'cm/s', type: 9 },
+  { name: 'WPNAV_SPEED_UP',  unit: 'cm/s', type: 9 },
+  { name: 'WPNAV_SPEED_DN',  unit: 'cm/s', type: 9 },
+  { name: 'WPNAV_ACCEL',     unit: 'cm/s²',type: 9 },
+  { name: 'WPNAV_RADIUS',    unit: 'cm',   type: 9 },
+  { name: 'RTL_ALT',         unit: 'cm',   type: 6 },
+  { name: 'RTL_ALT_FINAL',   unit: 'cm',   type: 6 },
+  { name: 'RTL_SPEED',       unit: 'cm/s', type: 9 },
+  { name: 'LAND_SPEED',      unit: 'cm/s', type: 6 },
+  { name: 'LAND_SPEED_HIGH', unit: 'cm/s', type: 6 },
+  { name: 'ANGLE_MAX',       unit: 'cdeg', type: 6 },
+  { name: 'PILOT_SPEED_UP',  unit: 'cm/s', type: 6 },
+  { name: 'PILOT_SPEED_DN',  unit: 'cm/s', type: 6 },
+  { name: 'ARMING_CHECK',    unit: 'bits', type: 6 },
+  { name: 'BATT_LOW_VOLT',   unit: 'V',    type: 9 },
+  { name: 'BATT_LOW_TIMER',  unit: 's',    type: 6 },
+  { name: 'BATT_FS_LOW_ACT', unit: '',     type: 6 },
+  { name: 'BATT_CAPACITY',   unit: 'mAh',  type: 6 },
+  { name: 'FENCE_ENABLE',    unit: '',     type: 6 },
+  { name: 'FENCE_ACTION',    unit: '',     type: 6 },
+  { name: 'FS_GCS_ENABLE',   unit: '',     type: 6 },
+  { name: 'FS_THR_ENABLE',   unit: '',     type: 6 },
+  { name: 'FS_THR_VALUE',    unit: 'µs',   type: 6 },
+  { name: 'ATC_RAT_RLL_P',   unit: '',     type: 9 },
+  { name: 'ATC_RAT_PIT_P',   unit: '',     type: 9 },
+  { name: 'ATC_RAT_YAW_P',   unit: '',     type: 9 },
+  { name: 'PSC_POSXY_P',     unit: '',     type: 9 },
+  { name: 'PSC_VELXY_P',     unit: '',     type: 9 },
+  { name: 'MOT_BAT_VOLT_MAX',unit: 'V',    type: 9 },
+  { name: 'MOT_BAT_VOLT_MIN',unit: 'V',    type: 9 },
+  { name: 'GPS_TYPE',        unit: '',     type: 6 },
+  { name: 'COMPASS_ENABLE',  unit: '',     type: 6 },
+];
+
+// Per-slot param cache: { [slot]: { [paramName]: {value, type, index, count} } }
+const _paramCache = {};
+let _paramsRefreshTimer = null;
+
+function _gcsParamsActiveSlot() { return window._activeGCSSlot ?? 0; }
+function _gcsParamsCacheForActive() {
+  const s = _gcsParamsActiveSlot();
+  if (!_paramCache[s]) _paramCache[s] = {};
+  return _paramCache[s];
+}
+function _gcsParamsCurrentList() {
+  return _gcsMavType === 'plane' ? ARDUPLANE_PARAMS : ARDUCOPTER_PARAMS;
+}
+
+function gcsParamsSyncVehicle() {
+  const tag = document.getElementById('gcs-params-vehicle-tag');
+  const lbl = document.getElementById('gcs-params-vehicle-label');
+  if (!tag) return;
+  const isPlane = _gcsMavType === 'plane';
+  _currentMetaKind = isPlane ? 'plane' : 'copter';
+  tag.textContent = isPlane ? 'ARDUPLANE' : 'ARDUCOPTER';
+  tag.className = 'gcs-params-vehicle-tag ' + (isPlane ? 'plane' : 'copter');
+  if (lbl) lbl.textContent = isPlane
+    ? 'ArduPlane params — fixed-wing'
+    : 'ArduCopter params — multirotor';
+  gcsParamsRenderList();
+}
+
+// Build the per-row editor HTML for a param. Returns { html, kind } where kind is:
+//   'values'  — <select> dropdown driven by meta.values
+//   'bitmask' — <button> that toggles an inline checkbox panel
+//   'number'  — plain text input
+function _gcsParamEditor(name, value, type) {
+  const meta = metaFor(name);
+  if (meta && meta.values) {
+    const cur = value;
+    const known = Object.keys(meta.values).map(parseFloat);
+    const inSet = cur != null && known.some(v => Math.abs(v - cur) < 1e-7);
+    const opts = [];
+    if (cur != null && !inSet) {
+      opts.push(`<option value="${cur}" selected>${_gcsParamFormat(cur, type)} — (current)</option>`);
+    }
+    for (const [v, lbl] of Object.entries(meta.values)) {
+      const sel = (cur != null && Math.abs(parseFloat(v) - cur) < 1e-7) ? ' selected' : '';
+      const safeLbl = String(lbl).replace(/</g, '&lt;');
+      opts.push(`<option value="${v}"${sel}>${v} — ${safeLbl}</option>`);
+    }
+    if (cur == null) opts.unshift(`<option value="" selected disabled>—</option>`);
+    return {
+      kind: 'values',
+      html: `<select class="gcs-param-input" data-orig="${cur ?? ''}" data-type="${type}"
+              onchange="gcsParamMarkDirty('${name}', this)"
+              onclick="event.stopPropagation()">${opts.join('')}</select>`
+    };
+  }
+  if (meta && meta.bitmask) {
+    const intVal = value != null ? (Math.round(value) | 0) : 0;
+    const setBits = Object.keys(meta.bitmask).filter(b => intVal & (1 << parseInt(b, 10))).length;
+    return {
+      kind: 'bitmask',
+      html: `<button type="button" class="gcs-param-bits-btn" data-orig="${intVal}" data-type="${type}"
+              onclick="gcsParamToggleBits('${name}')">
+              ${value == null ? '—' : intVal}<span class="gcs-param-bits-count">${setBits} bit${setBits===1?'':'s'}</span>
+            </button>`
+    };
+  }
+  const valStr = value != null ? _gcsParamFormat(value, type) : '';
+  return {
+    kind: 'number',
+    html: `<input class="gcs-param-input" type="text" inputmode="decimal"
+            value="${valStr}" data-orig="${valStr}" data-type="${type}"
+            oninput="gcsParamMarkDirty('${name}', this)"
+            onkeydown="if(event.key==='Enter')gcsParamSetRow('${name}')">`
+  };
+}
+
+function _gcsParamBitsPanelHtml(name, value) {
+  const meta = metaFor(name);
+  if (!meta || !meta.bitmask) return '';
+  const intVal = value != null ? (Math.round(value) | 0) : 0;
+  const rows = Object.entries(meta.bitmask).map(([bit, lbl]) => {
+    const b = parseInt(bit, 10);
+    const on = (intVal & (1 << b)) ? ' checked' : '';
+    const safeLbl = String(lbl).replace(/</g, '&lt;');
+    return `<label class="gcs-param-bits-row">
+      <input type="checkbox" data-bit="${b}"${on} onclick="event.stopPropagation();gcsParamBitsUpdate('${name}')">
+      <span class="b-num">${b}</span><span>${safeLbl}</span></label>`;
+  }).join('');
+  return `<div class="gcs-param-bits-panel">${rows}
+    <div class="gcs-param-bits-footer">
+      <span>Value: <span class="gcs-param-bits-val" data-orig="${intVal}">${intVal}</span></span>
+      <span>Tap SET to apply</span>
+    </div></div>`;
+}
+
+function gcsParamToggleBits(name) {
+  const row = document.querySelector(`.gcs-param-row[data-pname="${name}"]`);
+  if (row) row.classList.toggle('bits-open');
+}
+
+// Recompute the bitmask integer from the checkbox state and update both
+// the in-row button label and the dirty indicator.
+function gcsParamBitsUpdate(name) {
+  const row = document.querySelector(`.gcs-param-row[data-pname="${name}"]`);
+  if (!row) return;
+  let v = 0;
+  row.querySelectorAll('.gcs-param-bits-panel input[type=checkbox]').forEach(cb => {
+    if (cb.checked) v |= (1 << parseInt(cb.dataset.bit, 10));
+  });
+  const valEl = row.querySelector('.gcs-param-bits-val');
+  if (valEl) valEl.textContent = v;
+  const btn = row.querySelector('.gcs-param-bits-btn');
+  if (btn) {
+    const setBits = row.querySelectorAll('.gcs-param-bits-panel input[type=checkbox]:checked').length;
+    btn.firstChild && (btn.innerHTML =
+      `${v}<span class="gcs-param-bits-count">${setBits} bit${setBits===1?'':'s'}</span>`);
+    const orig = parseInt(btn.dataset.orig || '0', 10);
+    row.classList.toggle('dirty', v !== orig);
+  }
+}
+
+function gcsParamsRenderList() {
+  const wrap = document.getElementById('gcs-params-list');
+  if (!wrap) return;
+  const filter = (document.getElementById('gcs-params-search')?.value || '').trim().toUpperCase();
+  const cache  = _gcsParamsCacheForActive();
+  const curated = _gcsParamsCurrentList();
+  const curatedSet = new Set(curated.map(p => p.name));
+
+  // Curated list first (in defined order), then any extra cached params (alphabetised).
+  const rows = [];
+  for (const p of curated) {
+    if (filter && !p.name.includes(filter)) continue;
+    const entry = cache[p.name];
+    rows.push({ name: p.name, unit: p.unit, type: entry?.type ?? p.type, value: entry?.value, known: !!entry });
+  }
+  const extras = Object.keys(cache).filter(k => !curatedSet.has(k)).sort();
+  for (const k of extras) {
+    if (filter && !k.includes(filter)) continue;
+    const entry = cache[k];
+    rows.push({ name: k, unit: '', type: entry.type, value: entry.value, known: true });
+  }
+
+  // If the existing layout already matches the rows we want to show, do an in-place
+  // value update — preserves focused selects / dirty edits / open bitmask panels.
+  const existing = Array.from(wrap.querySelectorAll('.gcs-param-row'));
+  const sameShape = existing.length === rows.length &&
+    existing.every((el, i) => el.dataset.pname === rows[i].name);
+
+  if (sameShape) {
+    rows.forEach((r, i) => {
+      const row = existing[i];
+      row.classList.toggle('unknown', !r.known);
+      const input = row.querySelector('.gcs-param-input, .gcs-param-bits-btn');
+      const isFocused = input && document.activeElement === input;
+      const isDirty   = row.classList.contains('dirty');
+      const bitsOpen  = row.classList.contains('bits-open');
+      // Don't clobber a focused control, dirty edit, or open bitmask editor.
+      if (!isFocused && !isDirty && !bitsOpen) {
+        const ed = _gcsParamEditor(r.name, r.value, r.type);
+        const bits = ed.kind === 'bitmask' ? _gcsParamBitsPanelHtml(r.name, r.value) : '';
+        // Replace just the editor + bits panel — keep the name cell and SET button intact.
+        const nameCell = row.querySelector('.gcs-param-name');
+        const setBtn   = row.querySelector('.gcs-param-set');
+        row.innerHTML = '';
+        if (nameCell) row.appendChild(nameCell);
+        const tmp = document.createElement('div');
+        tmp.innerHTML = ed.html + (setBtn ? setBtn.outerHTML : '<button class="gcs-param-set">SET</button>');
+        while (tmp.firstChild) row.appendChild(tmp.firstChild);
+        if (bits) {
+          const tmp2 = document.createElement('div');
+          tmp2.innerHTML = bits;
+          while (tmp2.firstChild) row.appendChild(tmp2.firstChild);
+        }
+        // Re-bind SET button onclick (innerHTML clone lost the closure).
+        const sb = row.querySelector('.gcs-param-set');
+        if (sb) sb.onclick = () => gcsParamSetRow(r.name);
+      }
+    });
+  } else {
+    wrap.innerHTML = rows.map(r => {
+      const ed = _gcsParamEditor(r.name, r.value, r.type);
+      const bits = ed.kind === 'bitmask' ? _gcsParamBitsPanelHtml(r.name, r.value) : '';
+      const unitTag = r.unit ? `<span class="gcs-param-unit">${r.unit}</span>` : '';
+      return `<div class="gcs-param-row${r.known ? '' : ' unknown'}" data-pname="${r.name}" data-kind="${ed.kind}">
+        <div class="gcs-param-name" title="${r.name}">${r.name}${unitTag}</div>
+        ${ed.html}
+        <button class="gcs-param-set" onclick="gcsParamSetRow('${r.name}')">SET</button>
+        ${bits}
+      </div>`;
+    }).join('');
+  }
+
+  const count = Object.keys(cache).length;
+  const cLbl = document.getElementById('gcs-params-count-label');
+  if (cLbl) cLbl.textContent = `${count} loaded`;
+}
+
+function _gcsParamFormat(v, type) {
+  // Integer-typed params: drop the float tail. Floats: trim to 4 decimals.
+  if (type >= 1 && type <= 8) return String(Math.round(v));
+  if (Math.abs(v) >= 1000) return v.toFixed(1);
+  return parseFloat(v.toFixed(4)).toString();
+}
+
+function gcsParamMarkDirty(name, inputEl) {
+  const row = inputEl.closest('.gcs-param-row');
+  if (!row) return;
+  // For text inputs and selects both — string compare against the stashed orig value.
+  const orig = inputEl.dataset.orig ?? '';
+  const cur = inputEl.value ?? '';
+  row.classList.toggle('dirty', String(cur) !== String(orig));
+}
+
+function gcsParamSetRow(name) {
+  const row = document.querySelector(`.gcs-param-row[data-pname="${name}"]`);
+  if (!row) return;
+  const kind = row.dataset.kind || 'number';
+  let val, type;
+
+  if (kind === 'bitmask') {
+    const btn = row.querySelector('.gcs-param-bits-btn');
+    if (!btn) { gcsParamsSetStatus('Editor missing.', 'err'); return; }
+    type = parseInt(btn.dataset.type ?? '6', 10);
+    // Sum every checked bit in the expanded panel — same as gcsParamBitsUpdate but
+    // reads straight from the DOM so it works whether or not the panel is open.
+    val = 0;
+    const boxes = row.querySelectorAll('.gcs-param-bits-panel input[type=checkbox]');
+    if (boxes.length === 0) {
+      // Panel was never opened — fall back to the original integer.
+      val = parseInt(btn.dataset.orig || '0', 10);
+    } else {
+      boxes.forEach(cb => {
+        if (cb.checked) val |= (1 << parseInt(cb.dataset.bit, 10));
+      });
+    }
+  } else {
+    const input = row.querySelector('.gcs-param-input');
+    if (!input) { gcsParamsSetStatus('Editor missing.', 'err'); return; }
+    type = parseInt(input.dataset.type ?? '9', 10);
+    const raw = String(input.value ?? '').trim();
+    if (!raw) { gcsParamsSetStatus('Enter a value first.', 'err'); return; }
+    val = parseFloat(raw);
+    if (!isFinite(val)) { gcsParamsSetStatus(`'${raw}' is not a number.`, 'err'); return; }
+  }
+
+  const slot = _gcsParamsActiveSlot();
+  if (!window.serialParamSet) { gcsParamsSetStatus('MAVLink layer not loaded.', 'err'); return; }
+  window.serialParamSet(name, val, type, slot);
+  gcsParamsSetStatus(`Setting ${name} = ${val}…`, 'info');
+  // Clear dirty styling immediately — PARAM_VALUE will overwrite orig with the FC-confirmed value
+  // and the next render will display whatever the FC actually accepted.
+  row.classList.remove('dirty');
+  const ctrl = row.querySelector('.gcs-param-input, .gcs-param-bits-btn');
+  if (ctrl) ctrl.dataset.orig = String(val);
+  setTimeout(() => window.serialParamRequest?.(name, -1, slot), 600);
+}
+
+function gcsParamsLoadCommon() {
+  const slot = _gcsParamsActiveSlot();
+  const list = _gcsParamsCurrentList();
+  if (!window.serialParamRequest) { gcsParamsSetStatus('MAVLink layer not loaded.', 'err'); return; }
+  gcsParamsSetStatus(`Requesting ${list.length} parameters…`, 'info');
+  // Pace requests so the FC doesn't drop them on slow links.
+  let i = 0;
+  const tick = () => {
+    if (i >= list.length) {
+      gcsParamsSetStatus(`Requested ${list.length} params — waiting for FC reply…`, 'info');
+      return;
+    }
+    window.serialParamRequest(list[i].name, -1, slot);
+    i++;
+    setTimeout(tick, 40);
+  };
+  tick();
+}
+
+function gcsParamsLoadAll() {
+  if (!window.serialParamRequestAll) { gcsParamsSetStatus('MAVLink layer not loaded.', 'err'); return; }
+  const slot = _gcsParamsActiveSlot();
+  window.serialParamRequestAll(slot);
+  gcsParamsSetStatus('Requested full parameter list (this can take 30+ s)…', 'info');
+}
+
+function gcsParamsFilter() { gcsParamsRenderList(); }
+
+let _gcsParamsStatusTimer = null;
+function gcsParamsSetStatus(msg, level) {
+  const el = document.getElementById('gcs-params-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = level === 'err' ? '#f85149'
+                 : level === 'ok'  ? '#3fb950'
+                 : level === 'info'? 'var(--blue)'
+                 : 'var(--sec)';
+  clearTimeout(_gcsParamsStatusTimer);
+  if (level === 'ok' || level === 'info') {
+    _gcsParamsStatusTimer = setTimeout(() => { el.style.color = 'var(--sec)'; }, 6000);
+  }
+}
+
+// Hook: called from the MAVLink layer whenever a PARAM_VALUE arrives for any slot.
+window._onParamValue = function (slot, name, value, type, index, count) {
+  if (!_paramCache[slot]) _paramCache[slot] = {};
+  _paramCache[slot][name] = { value, type, index, count };
+  // Only repaint when the value belongs to the currently-viewed slot.
+  if (slot !== _gcsParamsActiveSlot()) return;
+  clearTimeout(_paramsRefreshTimer);
+  _paramsRefreshTimer = setTimeout(() => {
+    gcsParamsRenderList();
+    const total = Object.keys(_paramCache[slot]).length;
+    if (count > 1) gcsParamsSetStatus(`${total} / ${count} parameters cached`, total >= count ? 'ok' : 'info');
+    else            gcsParamsSetStatus(`${total} parameters cached`, 'ok');
+  }, 50);
+};
 
 // Track pending mode to implement tap-twice confirmation without a blocking dialog
 let _gcsPendingMode = null;
@@ -6593,7 +7408,11 @@ function gcsFireAction(id) {
   gcsShowModeToast(`${a.label} → SV${a.servo} ${a.pwm}µs`, 'var(--teal)');
 }
 
-window.addEventListener('DOMContentLoaded', () => { gcsRenderActions(); });
+window.addEventListener('DOMContentLoaded', () => {
+  gcsRenderActions();
+  gcsParamsSyncVehicle();
+  _preloadAllParamMeta();
+});
 
 function gcsForceArmToggle() {
   const chk = document.getElementById('gcs-force-arm-chk');
@@ -6667,6 +7486,8 @@ window._gcsSelectSlotUI = function(slot) {
   const nameEl = document.getElementById(`slot${slot}-plane-name`);
   const activeNameEl = document.getElementById('gcs-active-name');
   if (activeNameEl) activeNameEl.textContent = nameEl?.value || `Plane ${slot + 1}`;
+  // Refresh the params panel to show this slot's cache.
+  window.gcsParamsRenderList?.();
 };
 
 // Update a plane card + (if active) the big ARM button and mode grid
@@ -6953,11 +7774,547 @@ map.on('contextmenu', e => {
     const el = document.getElementById('ctx-' + k);
     if (el) el.classList.toggle('ctx-active', k === _currentTileType);
   });
+  // Sync ADS-B toggle state
+  const adsbEl = document.getElementById('ctx-adsb-item');
+  if (adsbEl) adsbEl.classList.toggle('ctx-active', _adsbActive);
+  // Sync collision-avoidance toggle state
+  const avEl = document.getElementById('ctx-avoid-item');
+  if (avEl) avEl.classList.toggle('ctx-active', _avoidActive);
 });
 document.addEventListener('click', closeMapCtx);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMapCtx(); });
 function closeMapCtx() { document.getElementById('map-ctx').style.display = 'none'; }
 function ctxSetTile(type) { switchMapTile(type); closeMapCtx(); }
+
+// ====================== ADS-B LIVE AIRCRAFT ======================
+// Free, no-API-key live air traffic from airplanes.live (sends CORS *).
+// Toggled from the map right-click menu. Refreshes the current map view
+// every few seconds and draws altitude-coloured, heading-rotated aircraft.
+const ADSB_API      = 'https://api.airplanes.live/v2/point'; // /{lat}/{lon}/{radiusNm}
+const ADSB_INTERVAL = 8000;   // ms between refreshes (well under the 1 req/s limit)
+const ADSB_MAX_NM   = 250;    // airplanes.live caps the search radius at 250 nm
+let   _adsbActive   = false;
+let   _adsbTimer    = null;
+let   _adsbMoveDeb  = null;
+let   _adsbInflight = false;
+const _adsbMarkers  = {};      // hex → L.marker
+let   adsbLayer     = null;
+
+function toggleADSB() {
+  _adsbActive = !_adsbActive;
+  const badge = document.getElementById('adsb-status');
+  if (_adsbActive) {
+    if (!adsbLayer) adsbLayer = L.layerGroup().addTo(map);
+    if (badge) { badge.style.display = 'block'; badge.classList.remove('adsb-err'); _adsbSetStatus('loading…'); }
+    map.on('moveend', _adsbOnMove);
+    adsbRefresh();
+    _adsbTimer = setInterval(adsbRefresh, ADSB_INTERVAL);
+  } else {
+    clearInterval(_adsbTimer); _adsbTimer = null;
+    clearTimeout(_adsbMoveDeb); _adsbMoveDeb = null;
+    map.off('moveend', _adsbOnMove);
+    if (adsbLayer) adsbLayer.clearLayers();
+    Object.keys(_adsbMarkers).forEach(h => delete _adsbMarkers[h]);
+    if (badge) badge.style.display = 'none';
+  }
+}
+
+// Debounced refresh on pan/zoom so the visible area stays current.
+function _adsbOnMove() {
+  clearTimeout(_adsbMoveDeb);
+  _adsbMoveDeb = setTimeout(adsbRefresh, 600);
+}
+
+function _adsbSetStatus(txt, isErr) {
+  const t = document.getElementById('adsb-status-txt');
+  const badge = document.getElementById('adsb-status');
+  if (t) t.textContent = txt;
+  if (badge) badge.classList.toggle('adsb-err', !!isErr);
+}
+
+// Altitude → colour (feet), roughly matching tar1090 banding.
+function _adsbColor(alt) {
+  if (alt === 'ground' || alt == null) return '#8b949e';
+  const a = +alt;
+  if (a < 1000)  return '#f85149'; // red
+  if (a < 5000)  return '#db6d28'; // orange
+  if (a < 10000) return '#d29922'; // yellow
+  if (a < 20000) return '#3fb950'; // green
+  if (a < 30000) return '#58a6ff'; // blue
+  return '#a29bfe';                // purple — high altitude
+}
+
+function _adsbAltText(alt) {
+  if (alt === 'ground') return 'GND';
+  if (alt == null) return '';
+  return Math.round(+alt).toLocaleString() + 'ft';
+}
+
+function makeAircraftIcon(ac) {
+  const color = _adsbColor(ac.alt_baro);
+  const track = (ac.track != null) ? ac.track : (ac.true_heading != null ? ac.true_heading : 0);
+  const label = (ac.flight || ac.r || ac.hex || '').trim();
+  const altTxt = _adsbAltText(ac.alt_baro);
+  const lblHtml = label + (altTxt ? '<br>' + altTxt : '');
+  return L.divIcon({
+    className: 'adsb-marker',
+    html: `<div style="position:relative;width:36px;height:36px">
+      <svg width="20" height="20" viewBox="0 0 24 24" style="position:absolute;left:8px;top:0;transform:rotate(${track}deg);transform-origin:10px 11px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.85))">
+        <path d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" fill="${color}" stroke="rgba(0,0,0,.55)" stroke-width="0.9"/>
+      </svg>
+      <div class="adsb-lbl">${lblHtml}</div>
+    </div>`,
+    iconSize: [36, 36], iconAnchor: [18, 11]
+  });
+}
+
+function _adsbPopup(ac) {
+  const cs = (ac.flight || '').trim() || ac.hex || '—';
+  const desc = (ac.desc || ac.t || '').trim();
+  const row = (k, v) => (v != null && v !== '') ? `<div class="adsb-row"><span class="k">${k}</span><span class="v">${v}</span></div>` : '';
+  const spd = ac.gs != null ? Math.round(ac.gs) + ' kt' : '';
+  const vs  = (ac.baro_rate != null) ? (ac.baro_rate > 0 ? '↑ ' : ac.baro_rate < 0 ? '↓ ' : '') + Math.abs(Math.round(ac.baro_rate)) + ' fpm' : '';
+  const trk = ac.track != null ? Math.round(ac.track) + '°' : '';
+  return `<div class="adsb-card">
+    <div class="adsb-h"><span class="adsb-cs">✈ ${cs}</span></div>
+    ${desc ? `<div class="adsb-tp" style="margin:-4px 0 7px">${desc}</div>` : ''}
+    ${row('Altitude', _adsbAltText(ac.alt_baro))}
+    ${row('Ground spd', spd)}
+    ${row('Track', trk)}
+    ${row('Vert rate', vs)}
+    ${row('Squawk', ac.squawk)}
+    ${row('Registration', ac.r)}
+    ${row('Type', ac.t)}
+    ${row('ICAO hex', (ac.hex || '').toUpperCase())}
+  </div>`;
+}
+
+async function adsbRefresh() {
+  if (!_adsbActive || _adsbInflight) return;
+  _adsbInflight = true;
+  const c = map.getCenter();
+  // Radius from map centre to a corner of the visible bounds, capped at API max.
+  const distM = map.distance(c, map.getBounds().getNorthEast());
+  const nm = Math.max(5, Math.min(ADSB_MAX_NM, Math.round(distM / 1852)));
+  try {
+    const resp = await fetch(`${ADSB_API}/${c.lat.toFixed(4)}/${c.lng.toFixed(4)}/${nm}`, { cache: 'no-store' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    _adsbRender(Array.isArray(data.ac) ? data.ac : []);
+  } catch (e) {
+    console.warn('[adsb]', e.message);
+    _adsbSetStatus('unavailable', true);
+  } finally {
+    _adsbInflight = false;
+  }
+}
+
+function _adsbRender(list) {
+  if (!_adsbActive || !adsbLayer) return;
+  const seen = new Set();
+  let count = 0;
+  for (const ac of list) {
+    if (ac.lat == null || ac.lon == null || !ac.hex) continue;
+    seen.add(ac.hex);
+    count++;
+    let m = _adsbMarkers[ac.hex];
+    if (!m) {
+      m = L.marker([ac.lat, ac.lon], { icon: makeAircraftIcon(ac), zIndexOffset: 1500, riseOnHover: true });
+      m.bindPopup(_adsbPopup(ac), { className: 'adsb-popup', closeButton: true });
+      m.addTo(adsbLayer);
+      _adsbMarkers[ac.hex] = m;
+    } else {
+      m.setLatLng([ac.lat, ac.lon]);
+      m.setIcon(makeAircraftIcon(ac));
+      m.setPopupContent(_adsbPopup(ac));
+    }
+    m._adsbLast = ac;   // raw record for collision-avoidance prediction
+  }
+  // Run CPA prediction immediately on fresh data (avoids the 2 s polling gap)
+  if (_avoidActive) _avoidTick?.();
+  // Drop aircraft that left the view / went stale.
+  for (const hex of Object.keys(_adsbMarkers)) {
+    if (!seen.has(hex)) { adsbLayer.removeLayer(_adsbMarkers[hex]); delete _adsbMarkers[hex]; }
+  }
+  _adsbSetStatus(`${count} aircraft`, false);
+}
+
+// ====================== ADS-B COLLISION AVOIDANCE ================
+// Predicts closest-point-of-approach (CPA) between each connected drone and every
+// ADS-B aircraft on screen. When predicted miss-distance falls inside the
+// horizontal / vertical / time thresholds, raises a conflict. In MANUAL mode the
+// user clicks AVOID NOW; in AUTO mode the GCS dispatches MAV_CMD_DO_CHANGE_ALTITUDE
+// to descend the drone by the configured Δ (default 30 m ≈ 100 ft).
+let _avoidActive = false;
+let _avoidMode   = 'MANUAL';                 // 'MANUAL' | 'AUTO' | 'OFF'
+let _avoidSource = 'BOTH';                   // 'BOTH' | 'ADSB' | 'RC' — which threats to consider
+let _avoidLastCmdAt = new Map();              // slot → ms timestamp of last command sent
+let _avoidConflicts = [];                     // [{ hex, slot, cpaM, tCpaS, vertM, cs, isDrone }]
+let _avoidConflictRings = new Map();          // hex → L.circleMarker (on _avoidLayer)
+let _avoidLayer = null;                       // dedicated Leaflet layer for conflict rings
+const _AVOID_KT_TO_MPS = 0.514444;
+const _AVOID_FT_TO_M   = 0.3048;
+
+function toggleAvoidance () {
+  _avoidActive = !_avoidActive;
+  const p = document.getElementById('avoid-panel');
+  const item = document.getElementById('ctx-avoid-item');
+  if (item) item.classList.toggle('ctx-active', _avoidActive);
+  if (_avoidActive) {
+    p.style.display = 'block';
+    if (!_avoidLayer) _avoidLayer = L.layerGroup().addTo(map);
+    // Auto-enable ADS-B if not already (we need the traffic feed for real aircraft;
+    // drone-vs-drone testing still works without it).
+    if (!_adsbActive) toggleADSB();
+    _avoidTick();
+    if (!_avoidTimer) _avoidTimer = setInterval(_avoidTick, 2000);
+  } else {
+    p.style.display = 'none';
+    clearInterval(_avoidTimer); _avoidTimer = null;
+    _avoidClearAllRings();
+    _avoidConflicts = [];
+  }
+}
+let _avoidTimer = null;
+
+function cycleAvoidanceMode () {
+  _avoidMode = (_avoidMode === 'MANUAL') ? 'AUTO' : 'MANUAL';
+  const btn = document.getElementById('avoid-mode-btn');
+  btn.textContent = _avoidMode;
+  btn.classList.toggle('auto',   _avoidMode === 'AUTO');
+  btn.classList.toggle('active', _avoidMode === 'MANUAL');
+  _avoidRender();
+}
+
+// Cycle BOTH → ADSB → RC → BOTH. RC-only is the test mode that ignores real
+// airliners and only flags drone↔drone conflicts; ADSB-only ignores other
+// connected planes (useful if you're flying a formation intentionally).
+function cycleAvoidanceSource () {
+  _avoidSource = _avoidSource === 'BOTH' ? 'ADSB'
+              : _avoidSource === 'ADSB' ? 'RC'
+              : 'BOTH';
+  const btn = document.getElementById('avoid-src-btn');
+  btn.textContent = _avoidSource === 'ADSB' ? 'ADS-B' : _avoidSource;
+  btn.title = `Threat source: ${_avoidSource === 'BOTH' ? 'real ADS-B traffic AND other connected planes'
+                              : _avoidSource === 'ADSB' ? 'real ADS-B traffic only (other connected planes ignored)'
+                              : 'connected planes only (real ADS-B ignored — test mode)'}`;
+  _avoidTick();   // re-evaluate immediately
+}
+
+// Get every connected drone's live telemetry: {slot, lat, lon, altRel, vx, vy, vz, mavType, baseMode}
+function _avoidGetDrones () {
+  const out = [];
+  // Slot 0
+  const t0 = window._mavSlot0GetTele?.();
+  if (t0?.lat != null && t0?.lon != null) out.push({ slot: 0, ...t0 });
+  // Higher slots from registry
+  const reg = window._mavSlotRegistry || {};
+  for (const s of Object.keys(reg)) {
+    const t = reg[s].getTele?.();
+    if (t?.lat != null && t?.lon != null) out.push({ slot: +s, ...t });
+  }
+  return out;
+}
+
+// Convert connected-drone telemetry into ADS-B-shaped records so the same CPA
+// prediction engine treats other connected planes as traffic threats.
+// Used so a 2-plane test will see each plane "detect" the other.
+function _avoidGetDroneThreats (selfSlot, allDrones) {
+  const out = [];
+  for (const d of allDrones) {
+    if (d.slot === selfSlot) continue;
+    if (d.lat == null || d.lon == null) continue;
+    const speedMps = (d.vx != null && d.vy != null)
+      ? Math.hypot(d.vx, d.vy)
+      : (d.groundspeed != null ? +d.groundspeed : 0);
+    // Heading-from-velocity is more accurate than tele.hdg when GPS is locked;
+    // fall back to compass heading when nearly stationary on the ground.
+    const trackDeg = (d.vx != null && d.vy != null && speedMps > 0.5)
+      ? ((Math.atan2(d.vy, d.vx) * 180 / Math.PI) + 360) % 360
+      : (d.hdg ?? 0);
+    const altM    = d.altMSL ?? d.altRel ?? 0;
+    const altFt   = altM / _AVOID_FT_TO_M;
+    const vsFtMin = d.vz != null ? (-d.vz * 60 / _AVOID_FT_TO_M) : 0;
+    out.push({
+      hex:       `DRONE_${d.slot}`,
+      flight:    `DRONE ${d.slot}`,
+      lat:       d.lat,
+      lon:       d.lon,
+      alt_baro:  altFt,
+      track:     trackDeg,
+      gs:        speedMps / _AVOID_KT_TO_MPS,   // m/s → kt
+      baro_rate: vsFtMin,
+      _isDrone:  true,
+      _droneSlot: d.slot
+    });
+  }
+  return out;
+}
+
+// Convert a small lat/lon offset (deg) to a local ENU metres vector at lat0.
+function _avoidLatLonToM (lat, lon, lat0, lon0) {
+  const R = 6378137;
+  const x = (lon - lon0) * Math.PI/180 * R * Math.cos(lat0 * Math.PI/180);
+  const y = (lat - lat0) * Math.PI/180 * R;
+  return { x, y };
+}
+
+// Predict CPA between drone (pos d, vel v_d m/s) and aircraft (pos a, vel v_a m/s).
+// Returns { tCpaS, cpaM, vertM } where vertM is alt difference at CPA (rough).
+function _avoidPredictCPA (drone, ac) {
+  // Local ENU origin = drone
+  const aPos = _avoidLatLonToM(ac.lat, ac.lon, drone.lat, drone.lon);
+  // Drone velocity: tele provides vx (north), vy (east), vz (down) in m/s
+  const dvN = drone.vx ?? 0;        // north m/s
+  const dvE = drone.vy ?? 0;        // east  m/s
+  // Aircraft velocity from ADS-B: track (deg from N), gs (kt)
+  const gsMps = (ac.gs != null) ? +ac.gs * _AVOID_KT_TO_MPS : 0;
+  const trk   = (ac.track != null) ? +ac.track : (ac.true_heading != null ? +ac.true_heading : 0);
+  const avN = gsMps * Math.cos(trk * Math.PI/180);
+  const avE = gsMps * Math.sin(trk * Math.PI/180);
+  // Relative position & velocity (aircraft − drone), ENU axes (x=east, y=north)
+  const rx = aPos.x,            ry = aPos.y;
+  const vx = avE - dvE,         vy = avN - dvN;
+  const v2 = vx*vx + vy*vy;
+  let tCpa = 0, cpaM;
+  if (v2 < 0.01) {
+    cpaM = Math.hypot(rx, ry);
+  } else {
+    tCpa = -(rx*vx + ry*vy) / v2;
+    if (tCpa < 0) tCpa = 0;        // they're already separating — current distance is min
+    const cx = rx + vx*tCpa, cy = ry + vy*tCpa;
+    cpaM = Math.hypot(cx, cy);
+  }
+  // Vertical separation at CPA
+  const droneAltM = drone.altMSL ?? drone.altRel ?? 0;
+  const acAltM    = (ac.alt_baro === 'ground' || ac.alt_baro == null) ? 0 : (+ac.alt_baro * _AVOID_FT_TO_M);
+  const acVsMps   = (ac.baro_rate != null) ? (+ac.baro_rate * _AVOID_FT_TO_M / 60) : 0;
+  const droneVsMps = -(drone.vz ?? 0);  // vz is "down" in MAVLink, flip to up
+  const droneAltAtCpa = droneAltM + droneVsMps * tCpa;
+  const acAltAtCpa    = acAltM    + acVsMps    * tCpa;
+  const vertM = Math.abs(droneAltAtCpa - acAltAtCpa);
+  return { tCpa, cpaM, vertM };
+}
+
+function _avoidTick () {
+  if (!_avoidActive) return;
+  const horiz = +document.getElementById('av-cfg-horiz').value || 1000;
+  const vert  = +document.getElementById('av-cfg-vert').value  || 200;
+  const tMax  = +document.getElementById('av-cfg-time').value  || 30;
+  const drones = _avoidGetDrones();
+  const conflicts = [];
+  // Threat sources are filtered by _avoidSource (BOTH / ADSB / RC).
+  const adsbThreats = (_avoidSource !== 'RC' && _adsbActive)
+    ? Object.values(_adsbMarkers).map(m => m._adsbLast).filter(Boolean)
+    : [];
+  for (const d of drones) {
+    const droneThreats = (_avoidSource !== 'ADSB')
+      ? _avoidGetDroneThreats(d.slot, drones)
+      : [];
+    const allThreats   = adsbThreats.concat(droneThreats);
+    for (const ac of allThreats) {
+      if (ac.lat == null || ac.lon == null) continue;
+      const { tCpa, cpaM, vertM } = _avoidPredictCPA(d, ac);
+      if (cpaM > horiz) continue;
+      if (vertM > vert) continue;
+      if (tCpa > tMax)  continue;
+      conflicts.push({
+        hex: ac.hex, slot: d.slot, cpaM, tCpaS: tCpa, vertM,
+        cs: (ac.flight || ac.hex || '').trim(), aircraft: ac,
+        isDrone: !!ac._isDrone
+      });
+    }
+  }
+  _avoidConflicts = conflicts.sort((a, b) => a.tCpaS - b.tCpaS);
+  _avoidUpdateRings();
+  _avoidRender();
+  if (_avoidMode === 'AUTO' && conflicts.length) _avoidAutoFire();
+}
+
+// Coordinated resolution: when two of OUR planes are in conflict, the GCS picks
+// complementary actions (one climbs, one descends) instead of letting both
+// descend in parallel — that's how TCAS RAs work. Drone-vs-ADS-B still descends
+// the drone (we can't negotiate with a real airliner).
+//
+// Rule: higher plane CLIMBS, lower DESCENDS. Tiebreak (within 15 m): higher slot
+// number climbs. If a plane is already at the floor (can't descend) or ceiling
+// (can't climb), its action degrades to HOLD — the partner still acts, so the
+// two never split toward each other.
+function _avoidPlanResolutions () {
+  const desc = +document.getElementById('av-cfg-desc').value || 30;
+  const minA = +document.getElementById('av-cfg-min').value  || 30;
+  const maxA = +document.getElementById('av-cfg-max').value  || 400;
+  const drones = new Map(_avoidGetDrones().map(d => [d.slot, d]));
+  const seenPairs = new Set();
+  const actions = new Map();   // slot → { deltaM, target, action: 'climb'|'descend'|'hold', partner, threat }
+
+  // Process drone↔drone pairs first so paired resolution wins over single fallback.
+  const sorted = [..._avoidConflicts].sort((a, b) => {
+    if (a.isDrone !== b.isDrone) return a.isDrone ? -1 : 1;
+    return a.tCpaS - b.tCpaS;
+  });
+
+  for (const c of sorted) {
+    if (c.isDrone) {
+      const aSlot = c.slot;
+      const bSlot = c.aircraft._droneSlot;
+      const pairKey = [Math.min(aSlot, bSlot), Math.max(aSlot, bSlot)].join('-');
+      if (seenPairs.has(pairKey)) continue;
+      seenPairs.add(pairKey);
+      const dA = drones.get(aSlot), dB = drones.get(bSlot);
+      if (!dA || !dB) continue;
+      const altA = dA.altRel ?? 0, altB = dB.altRel ?? 0;
+
+      // Step 1: natural assignment — whoever is higher CLIMBS, the other DESCENDS.
+      // Tiebreaker on near-equal altitudes: higher slot number climbs.
+      const aIsHigher = (Math.abs(altA - altB) > 15) ? (altA > altB) : (aSlot > bSlot);
+      let aAction = aIsHigher ? 'climb' : 'descend';
+      let bAction = aIsHigher ? 'descend' : 'climb';
+
+      // Step 2: respect floor/ceiling — demote impossible moves to HOLD so the
+      // partner still gets a complementary action and we never split altitudes
+      // toward each other.
+      if (aAction === 'climb'   && altA >= maxA - 5) aAction = 'hold';
+      if (aAction === 'descend' && altA <= minA + 5) aAction = 'hold';
+      if (bAction === 'climb'   && altB >= maxA - 5) bAction = 'hold';
+      if (bAction === 'descend' && altB <= minA + 5) bAction = 'hold';
+
+      const aDelta  = aAction === 'climb' ? desc : aAction === 'descend' ? -desc : 0;
+      const bDelta  = bAction === 'climb' ? desc : bAction === 'descend' ? -desc : 0;
+      const aTarget = Math.max(minA, Math.min(maxA, altA + aDelta));
+      const bTarget = Math.max(minA, Math.min(maxA, altB + bDelta));
+
+      if (!actions.has(aSlot)) actions.set(aSlot, {
+        deltaM: aTarget - altA, target: aTarget, currentAlt: altA,
+        action: aAction, partner: bSlot, threat: `↔ slot ${bSlot}`
+      });
+      if (!actions.has(bSlot)) actions.set(bSlot, {
+        deltaM: bTarget - altB, target: bTarget, currentAlt: altB,
+        action: bAction, partner: aSlot, threat: `↔ slot ${aSlot}`
+      });
+    } else {
+      // Real ADS-B threat: just descend (no negotiation possible).
+      if (actions.has(c.slot)) continue;
+      const d = drones.get(c.slot);
+      if (!d) continue;
+      const cur = d.altRel ?? 0;
+      const target = Math.max(minA, cur - desc);
+      actions.set(c.slot, {
+        deltaM: target - cur, target, currentAlt: cur,
+        action: 'descend', threat: `↓ ${c.cs}`
+      });
+    }
+  }
+  return actions;
+}
+
+function _avoidAutoFire () {
+  const cool = (+document.getElementById('av-cfg-cool').value || 30) * 1000;
+  const minA = +document.getElementById('av-cfg-min').value  || 30;
+  const maxA = +document.getElementById('av-cfg-max').value  || 400;
+  const actions = _avoidPlanResolutions();
+  for (const [slot, act] of actions) {
+    if (Math.abs(act.deltaM) < 1) continue;        // already pinned at floor/ceiling
+    const last = _avoidLastCmdAt.get(slot) ?? 0;
+    if (Date.now() - last < cool) continue;
+    if (window.serialChangeAltitude?.(act.deltaM, minA, slot, maxA)) {
+      _avoidLastCmdAt.set(slot, Date.now());
+    }
+  }
+}
+
+function avoidNow () {
+  const minA = +document.getElementById('av-cfg-min').value  || 30;
+  const maxA = +document.getElementById('av-cfg-max').value  || 400;
+  const actions = _avoidPlanResolutions();
+  for (const [slot, act] of actions) {
+    if (Math.abs(act.deltaM) < 1) continue;
+    if (window.serialChangeAltitude?.(act.deltaM, minA, slot, maxA)) {
+      _avoidLastCmdAt.set(slot, Date.now());
+    }
+  }
+}
+
+function _avoidUpdateRings () {
+  if (!_avoidLayer) return;
+  const seen = new Set();
+  for (const c of _avoidConflicts) {
+    seen.add(c.hex);
+    // Orange ring for drone-vs-drone threats, red for real ADS-B traffic
+    const color = c.isDrone ? '#f0883e' : '#f85149';
+    let r = _avoidConflictRings.get(c.hex);
+    if (!r) {
+      r = L.circleMarker([c.aircraft.lat, c.aircraft.lon], {
+        radius: 20, color, weight: 2, fillColor: color, fillOpacity: 0.15,
+        className: 'adsb-conflict-ring', interactive: false
+      }).addTo(_avoidLayer);
+      _avoidConflictRings.set(c.hex, r);
+    } else {
+      r.setLatLng([c.aircraft.lat, c.aircraft.lon]);
+      r.setStyle({ color, fillColor: color });
+    }
+  }
+  for (const [hex, r] of _avoidConflictRings) {
+    if (!seen.has(hex)) { _avoidLayer.removeLayer(r); _avoidConflictRings.delete(hex); }
+  }
+}
+
+function _avoidClearAllRings () {
+  if (_avoidLayer) for (const r of _avoidConflictRings.values()) _avoidLayer.removeLayer(r);
+  _avoidConflictRings.clear();
+}
+
+function _avoidRender () {
+  const panel  = document.getElementById('avoid-panel');
+  const status = document.getElementById('avoid-status');
+  const list   = document.getElementById('avoid-threats');
+  const btn    = document.getElementById('avoid-now-btn');
+  if (!panel) return;
+  const n = _avoidConflicts.length;
+  panel.classList.toggle('avoid-alert', n > 0);
+  // Cooldown indicator: any slot with command < 5s ago?
+  const now = Date.now();
+  const cooling = [..._avoidLastCmdAt.values()].some(t => now - t < 5000);
+  panel.classList.toggle('avoid-cooldown', cooling && !n);
+  const droneCount = _avoidGetDrones().length;
+  const adsbCount  = _adsbActive ? Object.keys(_adsbMarkers).length : 0;
+  if (n === 0) {
+    const src = _avoidSource === 'BOTH' ? `${droneCount} drone(s) · ${adsbCount} aircraft`
+              : _avoidSource === 'ADSB' ? `${adsbCount} aircraft (RC sources off)`
+              : `${droneCount} drone(s) (ADS-B off)`;
+    status.textContent = `No conflicts • ${src}`;
+    list.innerHTML = '';
+    btn.style.display = 'none';
+    return;
+  }
+  status.textContent = `⚠ ${n} conflict${n>1?'s':''} predicted`;
+  const conflictHtml = _avoidConflicts.slice(0, 3).map(c => {
+    const icon = c.isDrone ? '🛩' : '✈';
+    const color = c.isDrone ? 'color:#f0883e' : '';
+    return `<div class="av-threat">
+      <span class="tcs" style="${color}">${icon} ${c.cs || '?'} → slot ${c.slot}</span>
+      <span class="tdt">${Math.round(c.cpaM)}m in ${Math.round(c.tCpaS)}s · Δ${Math.round(c.vertM)}m</span>
+    </div>`;
+  }).join('');
+  // Coordinated resolution plan — what each plane will do.
+  const actions = _avoidPlanResolutions();
+  let planHtml = '';
+  if (actions.size) {
+    planHtml = '<div style="margin-top:6px;padding-top:5px;border-top:1px solid var(--border);font-size:10px;color:var(--sec)">RESOLUTION PLAN</div>';
+    for (const [slot, act] of actions) {
+      const arrow = act.action === 'climb' ? '↑' : act.action === 'descend' ? '↓' : '•';
+      const col   = act.action === 'climb' ? '#3fb950' : act.action === 'descend' ? '#58a6ff' : '#8b949e';
+      const delta = (act.deltaM >= 0 ? '+' : '') + Math.round(act.deltaM) + 'm';
+      planHtml += `<div class="av-threat">
+        <span class="tcs" style="color:${col}">${arrow} slot ${slot} ${act.action.toUpperCase()}</span>
+        <span class="tdt">${Math.round(act.currentAlt)}→${Math.round(act.target)}m (${delta}) · ${act.threat || ''}</span>
+      </div>`;
+    }
+  }
+  list.innerHTML = conflictHtml + planHtml;
+  btn.style.display = (_avoidMode === 'MANUAL') ? 'block' : 'none';
+  btn.textContent = _avoidMode === 'MANUAL' ? '↕ EXECUTE RESOLUTION' : '';
+}
 
 // ====================== REVERSE MISSION ======================
 function reverseMission() {

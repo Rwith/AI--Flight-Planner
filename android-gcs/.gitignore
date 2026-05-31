@@ -1,0 +1,16 @@
+# Build outputs
+build/
+.gradle/
+.idea/
+
+# Local config (machine-specific SDK path)
+local.properties
+
+# JVM crash dumps and build logs
+hs_err_pid*.log
+replay_pid*.log
+last-build.log
+
+# Built artifacts
+*.apk
+*.aab
