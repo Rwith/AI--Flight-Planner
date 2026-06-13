@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('electronBridge', {
   initSlot:        (slot) => ipcRenderer.invoke('slot-init', safeSlot(slot)),
   wsPort:          (slot) => 5770 + (slot ?? 0),
   onBridgeAdapter: (cb)   => ipcRenderer.on('bridge-adapter', (_, slot, name, addr) => cb(slot, name, addr)),
+  // Home-network discovery — fires once the bridge auto-detects a drone's IP
+  onBridgeDiscovered: (cb) => ipcRenderer.on('bridge-discovered', (_, slot, addr, port) => cb(slot, addr, port)),
 
   // Native serial via Node.js serialport — slot-aware ──────────────────────
   serial: {
@@ -73,5 +75,15 @@ contextBridge.exposeInMainWorld('electronBridge', {
     saveRecording: (dateStr, timeStr, buf) => ipcRenderer.invoke('save-recording', dateStr, timeStr, buf),
     saveSnapshot:  (dateStr, timeStr, buf) => ipcRenderer.invoke('save-snapshot',  dateStr, timeStr, buf),
     openFolder:    ()                      => ipcRenderer.invoke('open-recordings-folder'),
+  },
+
+  // Auto-update (electron-updater) — main process drives the dialog;
+  // renderer can listen for status if it wants to show a toast/progress.
+  updater: {
+    check:    ()    => ipcRenderer.invoke('updater-check'),
+    onStatus: (cb)  => {
+      ipcRenderer.removeAllListeners('updater-status');
+      ipcRenderer.on('updater-status', (_, payload) => cb(payload));
+    },
   },
 });

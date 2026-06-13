@@ -1186,10 +1186,16 @@
     const mode = document.getElementById('conn-mode')?.value ?? 'usb';
 
     // ── WiFi / WebSocket backpack path ──────────────────────────────────────
-    if (mode === 'wifi' || mode === 'direct') {
+    if (mode === 'wifi' || mode === 'direct' || mode === 'home') {
       if (wsConn) { await disconnect(); return; }
-      const url = document.getElementById('wifi-url')?.value?.trim() || 'ws://192.168.4.1:14550';
-      if (mode === 'wifi' && window.electronBridge) {
+      const wsPort = window.electronBridge?.wsPort?.(0) ?? 5770;
+      let url = document.getElementById('wifi-url')?.value?.trim() || 'ws://192.168.4.1:14550';
+      if (mode === 'home' && window.electronBridge) {
+        // Home network: drone is on the user's router at an unknown DHCP IP.
+        // The bridge broadcasts to discover it — no backpack IP required.
+        window.electronBridge.startBridge({ mode: 'udp-home' });
+        url = `ws://localhost:${wsPort}`;
+      } else if (mode === 'wifi' && window.electronBridge) {
         const backpackIp = document.getElementById('backpack-ip')?.value?.trim() || '10.0.0.1';
         window.electronBridge.startBridge({ mode: 'udp', backpackIp });
       }

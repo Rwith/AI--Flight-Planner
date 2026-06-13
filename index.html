@@ -1837,6 +1837,7 @@
             <option value="usb">USB / Serial</option>
             <option value="direct">WiFi Direct</option>
             <option value="wifi">WiFi + Bridge</option>
+            <option value="home">Home Network</option>
           </select>
         </div>
         <div id="conn-usb-opts" class="serial-row" style="margin-bottom:8px">
@@ -6646,8 +6647,11 @@ function _displayHudRebuild() {
   const hud = document.getElementById('display-hud');
   if (!hud) return;
   hud.innerHTML = '';
-  const count = typeof _gcsSlotCount !== 'undefined' ? _gcsSlotCount : 1;
-  for (let i = 0; i < count; i++) {
+  // Iterate slots that actually have a card in the DOM. If _gcsActiveSlots
+  // isn't defined yet (early init), fall back to slot 0.
+  const slots = typeof _gcsActiveSlots === 'function' ? _gcsActiveSlots() : [0];
+  if (slots.length === 0) slots.push(0);
+  for (const i of slots) {
     const color = (typeof SLOT_COLORS !== 'undefined' ? SLOT_COLORS : ['#e63946'])[i % 8] || '#e63946';
     const nameEl = document.getElementById(`slot${i}-plane-name`);
     const name = nameEl?.value || `Plane ${i + 1}`;
@@ -6714,14 +6718,26 @@ function gcsSetSlotConnMode(slot, mode) {
   }
 }
 
-// Auto-detect connection mode from the Drone IP field and connect
+// Auto-detect connection mode from the Drone IP field and connect.
+// Typing "home" (or "auto"/"discover") uses home-network discovery: the drone
+// joins the user's WiFi router at an unknown DHCP IP and the bridge broadcasts
+// to find it. Requires the Electron desktop app (needs the native UDP bridge).
 function gcsAutoConnect(slot) {
-  const droneIp    = document.getElementById(`slot${slot}-drone-ip`)?.value?.trim();
+  const raw        = document.getElementById(`slot${slot}-drone-ip`)?.value?.trim() || '';
   const isElectron = !!window.electronBridge;
+  const isHome     = /^(home|auto|discover)$/i.test(raw);
+  const droneIp    = isHome ? '' : raw;
+
+  if (isHome && !isElectron) {
+    alert('Home-network discovery requires the AeroNav desktop app.');
+    return;
+  }
 
   if (slot === 0) {
     // Slot 0 drives the legacy FC sidebar then calls serialConnect()
-    if (droneIp) {
+    if (isHome) {
+      document.getElementById('conn-mode').value = 'home';
+    } else if (droneIp) {
       const wsPort = window.electronBridge?.wsPort?.(0) ?? 5770;
       const wsUrl  = isElectron ? `ws://localhost:${wsPort}` : `ws://${droneIp}:5760`;
       document.getElementById('conn-mode').value   = isElectron ? 'wifi' : 'direct';
@@ -6735,7 +6751,14 @@ function gcsAutoConnect(slot) {
   }
 
   // Slots 1+ — set hidden mode inputs then call serialConnectSlot(slot)
-  if (droneIp) {
+  if (isHome) {
+    const wsPort = window.electronBridge?.wsPort?.(slot) ?? (5770 + slot);
+    document.getElementById(`slot${slot}-wifi-url`).value = `ws://localhost:${wsPort}`;
+    document.getElementById(`slot${slot}-bp-ip`).dataset.bridgeMode = 'udp-home';
+    document.getElementById(`slot${slot}-ctab-usb`)?.classList.remove('active');
+    document.getElementById(`slot${slot}-ctab-direct`)?.classList.remove('active');
+    document.getElementById(`slot${slot}-ctab-wifi`)?.classList.add('active');
+  } else if (droneIp) {
     const wsPort = window.electronBridge?.wsPort?.(slot) ?? (5770 + slot);
     const wsUrl  = isElectron ? `ws://localhost:${wsPort}` : `ws://${droneIp}:5760`;
     document.getElementById(`slot${slot}-wifi-url`).value = wsUrl;
@@ -7609,7 +7632,27 @@ window.gcsUpdate = function(tele) { window.gcsUpdateSlot?.(0, tele); };
 
 // ── Dynamic plane card management ────────────────────────────────────────────
 const SLOT_COLORS = ['#e63946','#1a6eb5','#2ea043','#f0a500','#9a6dd7','#00b4d8','#fb8500','#e07a5f'];
-let _gcsSlotCount = 0;
+// Slot indices that currently have a card in the DOM. The source of truth for
+// "which planes exist" — removing a card frees the index, so the next add
+// fills the lowest gap rather than incrementing past it.
+function _gcsActiveSlots() {
+  return [...document.querySelectorAll('.gcs-plane-card')]
+    .map(el => parseInt(el.id.replace('gcs-card-', ''), 10))
+    .filter(Number.isInteger)
+    .sort((a, b) => a - b);
+}
+function _gcsNextSlot() {
+  let s = 0;
+  while (document.getElementById(`gcs-card-${s}`)) s++;
+  return s;
+}
+// Kept for backwards-compat with any external code that read this. Now derived.
+Object.defineProperty(window, '_gcsSlotCount', {
+  get() {
+    const slots = _gcsActiveSlots();
+    return slots.length ? slots[slots.length - 1] + 1 : 0;
+  }
+});
 
 function gcsRenderCard(slot, color) {
   const isFirst = slot === 0;
@@ -7639,8 +7682,8 @@ function gcsRenderCard(slot, color) {
     </div>
     <div class="gcs-plane-conn" onclick="event.stopPropagation()">
       <div style="display:flex;flex-direction:column;gap:3px">
-        <label style="font-size:10px;color:var(--sec)">Drone IP <span style="opacity:.45;font-weight:400">— leave blank for USB</span></label>
-        <input id="slot${slot}-drone-ip" type="text" placeholder="e.g. 10.0.0.1"
+        <label style="font-size:10px;color:var(--sec)">Drone IP <span style="opacity:.45;font-weight:400">— blank = USB, "home" = WiFi router</span></label>
+        <input id="slot${slot}-drone-ip" type="text" placeholder="10.0.0.1 · or 'home'"
           style="background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:5px 8px;font-size:11px;outline:none;width:100%;box-sizing:border-box">
       </div>
       <input id="slot${slot}-wifi-url"  type="hidden" value="">
@@ -7665,11 +7708,10 @@ async function _gcsCreateSlot(slot) {
   if (slot >= 1) window.mavCreateSlot?.(slot, color);
   const container = document.getElementById('gcs-planes-list');
   if (container) container.insertAdjacentHTML('beforeend', gcsRenderCard(slot, color));
-  _gcsSlotCount = Math.max(_gcsSlotCount, slot + 1);
   if (_displayModeActive) _displayHudRebuild();
 }
 
-function gcsAddPlane() { _gcsCreateSlot(_gcsSlotCount); }
+function gcsAddPlane() { _gcsCreateSlot(_gcsNextSlot()); }
 
 function gcsMinimizeCard(slot, btn) {
   const card = document.getElementById(`gcs-card-${slot}`);
@@ -7685,6 +7727,7 @@ function gcsRemoveSlot(slot) {
   document.getElementById(`gcs-card-${slot}`)?.remove();
   if (window._mavSlotRegistry) delete window._mavSlotRegistry[slot];
   if ((window._activeGCSSlot ?? 0) === slot) gcsSelectSlot(0);
+  if (_displayModeActive) _displayHudRebuild();
 }
 
 window.gcsCommLost = function(slot) {
@@ -7715,6 +7758,18 @@ document.addEventListener('DOMContentLoaded', () => {
     window.electronBridge.onBridgeAdapter((slot, name, addr) => {
       const el = document.getElementById(`slot${slot}-adapter`);
       if (el) { el.textContent = `${name}  ·  ${addr}`; el.style.display = ''; }
+    });
+  }
+  if (window.electronBridge?.onBridgeDiscovered) {
+    window.electronBridge.onBridgeDiscovered((slot, addr) => {
+      const el = document.getElementById(`slot${slot}-adapter`);
+      if (el) { el.textContent = `Discovered drone · ${addr}`; el.style.display = ''; }
+      if (slot === 0) {
+        const hint = document.getElementById('conn-hint');
+        if (hint && document.getElementById('conn-mode')?.value === 'home') {
+          hint.textContent = `Home network — drone discovered at ${addr}.`;
+        }
+      }
     });
   }
   if ('Notification' in window && Notification.permission === 'default') {
@@ -8940,7 +8995,7 @@ function toggleConnMode() {
   if (btn?.dataset.on === '1') window.serialDisconnect?.();
 
   const mode = document.getElementById('conn-mode').value;
-  const isWifi = mode === 'wifi' || mode === 'direct';
+  const isWifi = mode === 'wifi' || mode === 'direct' || mode === 'home';
   const wsPort = window.electronBridge?.wsPort?.(0) ?? 5770;
   document.getElementById('conn-usb-opts').style.display        = isWifi ? 'none' : '';
   document.getElementById('conn-wifi-opts').style.display       = isWifi ? ''     : 'none';
@@ -8948,6 +9003,11 @@ function toggleConnMode() {
   if (mode === 'direct') {
     document.getElementById('wifi-url').value = 'ws://10.0.0.1:5760';
     document.getElementById('conn-hint').textContent = 'Join the backpack WiFi AP — connects directly to ws://10.0.0.1:5760 (no bridge needed).';
+  } else if (mode === 'home') {
+    document.getElementById('wifi-url').value = `ws://localhost:${wsPort}`;
+    document.getElementById('conn-hint').textContent = window.electronBridge
+      ? 'Home network — let the drone join your WiFi router; AeroNav broadcasts to discover it (no IP needed). Detected IP shows here once it replies.'
+      : 'Home-network discovery requires the AeroNav desktop app.';
   } else if (mode === 'wifi') {
     document.getElementById('wifi-url').value = `ws://localhost:${wsPort}`;
     document.getElementById('conn-hint').textContent = window.electronBridge

@@ -1,6 +1,6 @@
 {
   "name": "aeronav",
-  "version": "2026.5.31",
+  "version": "2026.6.13",
   "description": "AeroNav — Waypoint Mission & Flight Planner",
   "main": "main.js",
   "scripts": {
@@ -11,9 +11,14 @@
     "prebuild:win": "python scripts/generate-installer-assets.py",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
-    "build:linux": "electron-builder --linux"
+    "build:linux": "electron-builder --linux",
+    "publish:win": "electron-builder --win --publish always",
+    "publish:mac": "electron-builder --mac --publish always",
+    "publish:linux": "electron-builder --linux --publish always"
   },
   "dependencies": {
+    "electron-log": "^5.4.4",
+    "electron-updater": "^6.8.3",
     "serialport": "^12.0.0",
     "ws": "^8.18.0"
   },
@@ -26,6 +31,14 @@
     "appId": "com.aeronav.ai",
     "productName": "AeroNav",
     "npmRebuild": true,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Rwith",
+        "repo": "AeroNav",
+        "releaseType": "release"
+      }
+    ],
     "files": [
       "main.js",
       "preload.js",

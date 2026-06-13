@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Menu, screen, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, screen, shell, dialog } = require('electron');
 const path   = require('path');
 const fs     = require('fs');
 const os     = require('os');
@@ -8,6 +8,8 @@ const dgram  = require('dgram');
 const net    = require('net');
 const http   = require('http');
 const { WebSocketServer, WebSocket } = require('ws');
+const { autoUpdater } = require('electron-updater');
+const log = require('electron-log');
 
 // ── Bridge config — N-slot array ─────────────────────────────────────────────
 const SLOT_DEFAULTS = { backpackIp: '10.0.0.1', udpRecv: 14550, udpSend: 14555, tcpPort: 5760, wsDronePort: 5760 };
@@ -66,6 +68,25 @@ function findBindAddr (droneIp, slot) {
   return pick.address;
 }
 
+// ── Directed subnet broadcast addresses for every active LAN adapter ──────────
+// Home/office routers frequently drop the global 255.255.255.255 broadcast, so
+// we also emit each adapter's directed broadcast (e.g. 192.168.1.255), which
+// routers forward far more reliably. Mirrors the Android GCS home-network path.
+function subnetBroadcasts () {
+  const out = [];
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const i of ifaces[name]) {
+      if (i.family !== 'IPv4' || i.internal || !i.netmask) continue;
+      const ip   = i.address.split('.').map(Number);
+      const mask = i.netmask.split('.').map(Number);
+      if (ip.length !== 4 || mask.length !== 4 || mask.some(Number.isNaN)) continue;
+      out.push(ip.map((o, k) => (o & mask[k]) | (~mask[k] & 0xFF)).join('.'));
+    }
+  }
+  return out;
+}
+
 // ── UDP bridge ────────────────────────────────────────────────────────────────
 function startUDP (slot) {
   slot = slot ?? 0;
@@ -91,6 +112,60 @@ function startUDP (slot) {
   const bindAddr = findBindAddr(ip, slot);
   udp.bind(recvPort, bindAddr, () => console.log(`[udp${slot}] Listening on ${bindAddr}:${recvPort}`));
   fcSends[slot] = (buf) => udp.send(buf, sendPort, ip, (e) => { if (e) console.error(`[udp${slot}↑]`, e.message); });
+  bridges[slot] = udp;
+}
+
+// ── UDP "home network" bridge ─────────────────────────────────────────────────
+// For drones that join a shared WiFi router (DHCP) instead of running their own
+// SoftAP — so their address is unknown up front. We bind on all interfaces,
+// learn every module that answers, auto-detect the drone IP, and send each
+// outbound frame to the directed subnet broadcast(s) + 255.255.255.255 + unicast
+// to every learned peer. This mirrors the Android GCS: home APs often drop the
+// global broadcast for the 2nd drone, so per-peer unicast keeps every module
+// trained on the GCS. Unlike startUDP, packets are accepted from any source.
+function startUDPHome (slot) {
+  slot = slot ?? 0;
+  stopBridge(slot);
+  const cfg = getSlotCfg(slot);
+  const { udpRecv: recvPort, udpSend: sendPort } = cfg;
+  const udp   = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+  const peers = new Map();             // "ip:port" → { address, port }
+  let   bcasts   = subnetBroadcasts(); // recomputed once bound
+  let   detected = false;
+  udp.on('message', (msg, rinfo) => {
+    const key = rinfo.address + ':' + rinfo.port;
+    if (!peers.has(key)) {
+      peers.set(key, { address: rinfo.address, port: rinfo.port });
+      console.log(`[udp-home${slot}] Learned drone ${key} (${peers.size} total)`);
+    }
+    if (!detected) {
+      detected = true;
+      cfg.backpackIp = rinfo.address;
+      console.log(`[udp-home${slot}] Discovered drone at ${rinfo.address}`);
+      mainWin?.webContents.send('bridge-discovered', slot, rinfo.address, rinfo.port);
+    }
+    broadcastSlot(slot, msg);
+  });
+  udp.on('error', (e) => {
+    console.error(e.code === 'EADDRINUSE'
+      ? `[udp-home${slot}] Port ${recvPort} in use — close Mission Planner / QGC first`
+      : `[udp-home${slot}] ` + e.message);
+    fcSends[slot] = null;
+    udp.close();
+  });
+  // Bind on 0.0.0.0 so any drone on the LAN reaches us, regardless of its IP.
+  udp.bind(recvPort, () => {
+    try { udp.setBroadcast(true); } catch {}
+    bcasts = subnetBroadcasts();
+    console.log(`[udp-home${slot}] Listening on 0.0.0.0:${recvPort} — discovery via ` +
+      (bcasts.length ? bcasts.join(', ') : '255.255.255.255'));
+  });
+  fcSends[slot] = (buf) => {
+    const err = (e) => { if (e && e.code !== 'EACCES') console.error(`[udp-home${slot}↑]`, e.message); };
+    for (const b of bcasts) udp.send(buf, sendPort, b, err);   // directed broadcast(s)
+    udp.send(buf, sendPort, '255.255.255.255', err);           // global fallback
+    for (const p of peers.values()) udp.send(buf, p.port, p.address, err); // learned peers
+  };
   bridges[slot] = udp;
 }
 
@@ -213,6 +288,7 @@ ipcMain.on('bridge-start', (_, opts) => {
   if (!wsHttpServers[slot]) startWSServer(slot);
   if (opts.mode === 'tcp') startTCP(slot);
   else if (opts.mode === 'ws') startWSClientBridge(slot);
+  else if (opts.mode === 'udp-home') startUDPHome(slot);
   else startUDP(slot);
 });
 
@@ -465,6 +541,68 @@ function createWindow () {
   mainWin.on('closed', () => { mainWin = null; });
 }
 
+// ── Auto-update (electron-updater) ────────────────────────────────────────────
+// Checks GitHub releases (Rwith/AeroNav) on launch. If a newer version is
+// published, prompts the user, downloads in the background, then prompts to
+// restart and install. Only meaningful in packaged builds — skipped in dev.
+log.transports.file.level = 'info';
+autoUpdater.logger = log;
+autoUpdater.autoDownload = false;          // we ask the user first
+autoUpdater.autoInstallOnAppQuit = false;  // we restart explicitly after confirmation
+
+function _broadcastUpdate (channel, payload) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send(channel, payload);
+  }
+}
+
+autoUpdater.on('checking-for-update', () => _broadcastUpdate('updater-status', { state: 'checking' }));
+autoUpdater.on('update-not-available', (info) => _broadcastUpdate('updater-status', { state: 'up-to-date', info }));
+autoUpdater.on('error', (err) => {
+  log.error('[updater]', err);
+  _broadcastUpdate('updater-status', { state: 'error', message: err?.message || String(err) });
+});
+autoUpdater.on('download-progress', (p) => _broadcastUpdate('updater-status', {
+  state: 'downloading', percent: p.percent, transferred: p.transferred, total: p.total
+}));
+
+autoUpdater.on('update-available', async (info) => {
+  _broadcastUpdate('updater-status', { state: 'available', version: info.version });
+  const { response } = await dialog.showMessageBox(mainWin || undefined, {
+    type: 'info',
+    buttons: ['Update now', 'Later'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'AeroNav update available',
+    message: `Version ${info.version} is available.`,
+    detail: 'Download and install now?'
+  });
+  if (response === 0) {
+    autoUpdater.downloadUpdate().catch((e) => log.error('[updater] downloadUpdate', e));
+  }
+});
+
+autoUpdater.on('update-downloaded', async (info) => {
+  _broadcastUpdate('updater-status', { state: 'downloaded', version: info.version });
+  const { response } = await dialog.showMessageBox(mainWin || undefined, {
+    type: 'info',
+    buttons: ['Restart now', 'Later'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'Update ready',
+    message: `Version ${info.version} downloaded.`,
+    detail: 'Restart AeroNav to apply the update?'
+  });
+  if (response === 0) {
+    setImmediate(() => autoUpdater.quitAndInstall());
+  }
+});
+
+ipcMain.handle('updater-check', async () => {
+  try { return await autoUpdater.checkForUpdates(); }
+  catch (e) { return { error: e?.message || String(e) }; }
+});
+
 app.whenReady().then(() => {
   settingsPath       = path.join(app.getPath('userData'), 'settings.json');
   tilesBasePath      = path.join(app.getPath('userData'), 'tiles');
@@ -476,6 +614,14 @@ app.whenReady().then(() => {
   startUDP(0);
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+
+  // Check for updates 4 s after launch so the window is up and the bridge is
+  // running. Silently no-op in dev (autoUpdater detects unpackaged app).
+  if (app.isPackaged) {
+    setTimeout(() => {
+      autoUpdater.checkForUpdates().catch((e) => log.warn('[updater] check failed:', e?.message || e));
+    }, 4000);
+  }
 });
 
 app.on('window-all-closed', () => {
